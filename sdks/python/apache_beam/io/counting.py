@@ -1,11 +1,28 @@
-import apache_beam as beam
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 from apache_beam.io import iobase
 from apache_beam.io.range_trackers import OffsetRangeTracker
-from apache_beam.transforms.core import PTransform
-from apache_beam.utils.pipeline_options import PipelineOptions
+from apache_beam.pvalue import PBegin
+from apache_beam.transforms import PTransform
+
+__all__ = ['CountingSource', 'BoundedCountingInput']
 
 class CountingSource(iobase.BoundedSource):
-
     def __init__(self, count):
         self._count = count
 
@@ -41,3 +58,32 @@ class CountingSource(iobase.BoundedSource):
                                       start_position=bundle_start,
                                       stop_position=bundle_stop)
             bundle_start = bundle_stop
+
+
+class BoundedCountingInput(PTransform):
+    def __init__(self, *args):
+        if len(args) == 1:
+            self.startIndex = 0
+            self.endIndex = args[0]
+        elif len(args) == 2:
+            self.startIndex = args[0]
+            self.endIndex = args[1]
+
+    def expand(self, pbegin):
+        assert isinstance(pbegin, PBegin)
+        self.pipeline = pbegin.pipeline
+        pbegin.apply(iobase.Read(CountingSource.get_range_tracker(start_position=self.startIndex,
+                                                                stop_position=self.endIndex)))
+        return pbegin
+
+
+class CountingInput:
+    def __init__(self):
+        pass
+
+    def up_to(self, numElements):
+        return BoundedCountingInput(numElements)
+
+    def for_subrange(self, start, end):
+        return BoundedCountingInput(start, end)
+
