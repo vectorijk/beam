@@ -17,7 +17,9 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl.transform;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Date;
 import java.util.Iterator;
 import org.apache.beam.sdk.coders.BigDecimalCoder;
@@ -26,6 +28,7 @@ import org.apache.beam.sdk.coders.CannotProvideCoderException;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderRegistry;
 import org.apache.beam.sdk.coders.KvCoder;
+import org.apache.beam.sdk.coders.SerializableCoder;
 import org.apache.beam.sdk.transforms.Combine;
 import org.apache.beam.sdk.transforms.Combine.CombineFn;
 import org.apache.beam.sdk.transforms.Max;
@@ -43,26 +46,26 @@ class BeamBuiltinAggregations {
    */
   public static CombineFn createMax(SqlTypeName fieldType) {
     switch (fieldType) {
-    case INTEGER:
-      return Max.ofIntegers();
-    case SMALLINT:
-      return new CustMax<Short>();
-    case TINYINT:
-      return new CustMax<Byte>();
-    case BIGINT:
-      return Max.ofLongs();
-    case FLOAT:
-      return new CustMax<Float>();
-    case DOUBLE:
-      return Max.ofDoubles();
-    case TIMESTAMP:
-      return new CustMax<Date>();
-    case DECIMAL:
-      return new CustMax<BigDecimal>();
-    default:
-      throw new UnsupportedOperationException(
-          String.format("[%s] is not support in MAX", fieldType));
-  }
+      case INTEGER:
+        return Max.ofIntegers();
+      case SMALLINT:
+        return new CustMax<Short>();
+      case TINYINT:
+        return new CustMax<Byte>();
+      case BIGINT:
+        return Max.ofLongs();
+      case FLOAT:
+        return new CustMax<Float>();
+      case DOUBLE:
+        return Max.ofDoubles();
+      case TIMESTAMP:
+        return new CustMax<Date>();
+      case DECIMAL:
+        return new CustMax<BigDecimal>();
+      default:
+        throw new UnsupportedOperationException(
+            String.format("[%s] is not support in MAX", fieldType));
+    }
   }
 
   /**
@@ -70,26 +73,26 @@ class BeamBuiltinAggregations {
    */
   public static CombineFn createMin(SqlTypeName fieldType) {
     switch (fieldType) {
-    case INTEGER:
-      return Min.ofIntegers();
-    case SMALLINT:
-      return new CustMin<Short>();
-    case TINYINT:
-      return new CustMin<Byte>();
-    case BIGINT:
-      return Min.ofLongs();
-    case FLOAT:
-      return new CustMin<Float>();
-    case DOUBLE:
-      return Min.ofDoubles();
-    case TIMESTAMP:
-      return new CustMin<Date>();
-    case DECIMAL:
-      return new CustMin<BigDecimal>();
-    default:
-      throw new UnsupportedOperationException(
-          String.format("[%s] is not support in MIN", fieldType));
-  }
+      case INTEGER:
+        return Min.ofIntegers();
+      case SMALLINT:
+        return new CustMin<Short>();
+      case TINYINT:
+        return new CustMin<Byte>();
+      case BIGINT:
+        return Min.ofLongs();
+      case FLOAT:
+        return new CustMin<Float>();
+      case DOUBLE:
+        return Min.ofDoubles();
+      case TIMESTAMP:
+        return new CustMin<Date>();
+      case DECIMAL:
+        return new CustMin<BigDecimal>();
+      default:
+        throw new UnsupportedOperationException(
+            String.format("[%s] is not support in MIN", fieldType));
+    }
   }
 
   /**
@@ -97,24 +100,24 @@ class BeamBuiltinAggregations {
    */
   public static CombineFn createSum(SqlTypeName fieldType) {
     switch (fieldType) {
-    case INTEGER:
-      return Sum.ofIntegers();
-    case SMALLINT:
-      return new ShortSum();
-    case TINYINT:
-      return new ByteSum();
-    case BIGINT:
-      return Sum.ofLongs();
-    case FLOAT:
-      return new FloatSum();
-    case DOUBLE:
-      return Sum.ofDoubles();
-    case DECIMAL:
-      return new BigDecimalSum();
-    default:
-      throw new UnsupportedOperationException(
-          String.format("[%s] is not support in SUM", fieldType));
-  }
+      case INTEGER:
+        return Sum.ofIntegers();
+      case SMALLINT:
+        return new ShortSum();
+      case TINYINT:
+        return new ByteSum();
+      case BIGINT:
+        return Sum.ofLongs();
+      case FLOAT:
+        return new FloatSum();
+      case DOUBLE:
+        return Sum.ofDoubles();
+      case DECIMAL:
+        return new BigDecimalSum();
+      default:
+        throw new UnsupportedOperationException(
+            String.format("[%s] is not support in SUM", fieldType));
+    }
   }
 
   /**
@@ -122,24 +125,49 @@ class BeamBuiltinAggregations {
    */
   public static CombineFn createAvg(SqlTypeName fieldType) {
     switch (fieldType) {
-    case INTEGER:
-      return new IntegerAvg();
-    case SMALLINT:
-      return new ShortAvg();
-    case TINYINT:
-      return new ByteAvg();
-    case BIGINT:
-      return new LongAvg();
-    case FLOAT:
-      return new FloatAvg();
-    case DOUBLE:
-      return new DoubleAvg();
-    case DECIMAL:
-      return new BigDecimalAvg();
-    default:
-      throw new UnsupportedOperationException(
-          String.format("[%s] is not support in AVG", fieldType));
+      case INTEGER:
+        return new IntegerAvg();
+      case SMALLINT:
+        return new ShortAvg();
+      case TINYINT:
+        return new ByteAvg();
+      case BIGINT:
+        return new LongAvg();
+      case FLOAT:
+        return new FloatAvg();
+      case DOUBLE:
+        return new DoubleAvg();
+      case DECIMAL:
+        return new BigDecimalAvg();
+      default:
+        throw new UnsupportedOperationException(
+            String.format("[%s] is not support in AVG", fieldType));
+    }
   }
+
+  /**
+   * {@link CombineFn} for VAR_POP and VAR_SAMP
+   */
+  public static CombineFn createVar(SqlTypeName fieldType, boolean isSamp) {
+    switch (fieldType) {
+      case INTEGER:
+        return new IntegerVar(isSamp);
+      case SMALLINT:
+        return new ShortVar(isSamp);
+      case TINYINT:
+        return new ByteVar(isSamp);
+      case BIGINT:
+        return new LongVar(isSamp);
+      case FLOAT:
+        return new FloatVar(isSamp);
+      case DOUBLE:
+        return new DoubleVar(isSamp);
+      case DECIMAL:
+        return new BigDecimalVar(isSamp);
+      default:
+        throw new UnsupportedOperationException(
+            String.format("[%s] is not support in AVG", fieldType));
+    }
   }
 
   static class CustMax<T extends Comparable<T>> extends Combine.BinaryCombineFn<T> {
@@ -289,6 +317,264 @@ class BeamBuiltinAggregations {
           : accumulator.getValue().divide(new BigDecimal(accumulator.getKey()));
     }
 
+    public BigDecimal toBigDecimal(BigDecimal record) {
+      return record;
+    }
+  }
+
+  static class VarAgg implements Serializable {
+    long count; // number of elements
+    double sum; // sum of elements
+
+    public VarAgg(long count, double sum) {
+      this.count = count;
+      this.sum = sum;
+   }
+  }
+
+  /**
+   * {@link CombineFn} for <em>VarPop</em> on {@link Number} types.
+   */
+  abstract static class VarPop<T extends Number>
+          extends CombineFn<T, KV<BigDecimal, VarAgg>, T> {
+    @Override
+    public KV<BigDecimal, VarAgg> createAccumulator() {
+      VarAgg varagg = new VarAgg(0L, 0);
+      return KV.of(new BigDecimal(0), varagg);
+    }
+
+    @Override
+    public KV<BigDecimal, VarAgg> addInput(KV<BigDecimal, VarAgg> accumulator, T input) {
+      double v;
+      if (input == null) {
+        return accumulator;
+      } else {
+        v = new BigDecimal(input.toString()).doubleValue();
+        accumulator.getValue().count++;
+        accumulator.getValue().sum += v;
+        double variance;
+        if (accumulator.getValue().count > 1) {
+          double t = accumulator.getValue().count * v - accumulator.getValue().sum;
+          variance = (t * t) / (accumulator.getValue().count * (accumulator.getValue().count - 1));
+        } else {
+          variance = 0;
+        }
+       return KV.of(accumulator.getKey().add(new BigDecimal(variance)), accumulator.getValue());
+      }
+    }
+
+    @Override
+    public KV<BigDecimal, VarAgg> mergeAccumulators(
+            Iterable<KV<BigDecimal, VarAgg>> accumulators) {
+      BigDecimal variance = new BigDecimal(0);
+      long count = 0;
+      double sum = 0;
+
+      Iterator<KV<BigDecimal, VarAgg>> ite = accumulators.iterator();
+      while (ite.hasNext()) {
+        KV<BigDecimal, VarAgg> r = ite.next();
+
+        double b = r.getValue().sum;
+
+        count += r.getValue().count;
+        sum += b;
+
+        double t = (r.getValue().count / (double) count) * sum - b;
+        double d = t * t
+                * ((count / (double) r.getValue().count) / ((double) count + r.getValue().count));
+        variance = variance.add(r.getKey().add(new BigDecimal(d)));
+      }
+
+      return KV.of(variance, new VarAgg(count, sum));
+    }
+
+    @Override
+    public Coder<KV<BigDecimal, VarAgg>> getAccumulatorCoder(CoderRegistry registry,
+        Coder<T> inputCoder) throws CannotProvideCoderException {
+      return KvCoder.of(BigDecimalCoder.of(), SerializableCoder.of(VarAgg.class));
+    }
+
+    public abstract T extractOutput(KV<BigDecimal, VarAgg> accumulator);
+    public abstract BigDecimal toBigDecimal(T record);
+  }
+
+  static class IntegerVar extends VarPop<Integer> {
+    boolean isSamp;
+
+    public IntegerVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public Integer extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar.intValue();
+    }
+
+    @Override
+    public BigDecimal toBigDecimal(Integer record) {
+      return new BigDecimal(record);
+    }
+  }
+
+  static class ShortVar extends VarPop<Short> {
+    boolean isSamp;
+
+    public ShortVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public Short extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar.shortValue();
+    }
+
+    @Override
+    public BigDecimal toBigDecimal(Short record) {
+      return new BigDecimal(record);
+    }
+  }
+
+  static class ByteVar extends VarPop<Byte> {
+    boolean isSamp;
+
+    public ByteVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public Byte extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar.byteValue();
+    }
+
+    @Override
+    public BigDecimal toBigDecimal(Byte record) {
+      return new BigDecimal(record);
+    }
+  }
+
+  static class LongVar extends VarPop<Long> {
+    boolean isSamp;
+
+    public LongVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public Long extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar.longValue();
+    }
+
+    @Override
+    public BigDecimal toBigDecimal(Long record) {
+      return new BigDecimal(record);
+    }
+  }
+
+  static class FloatVar extends VarPop<Float> {
+    boolean isSamp;
+
+    public FloatVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public Float extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar.floatValue();
+    }
+
+    @Override
+    public BigDecimal toBigDecimal(Float record) {
+      return new BigDecimal(record);
+    }
+  }
+
+  static class DoubleVar extends VarPop<Double> {
+    boolean isSamp;
+
+    public DoubleVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public Double extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                5, RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar.doubleValue();
+    }
+
+    @Override
+    public BigDecimal toBigDecimal(Double record) {
+      return new BigDecimal(record);
+    }
+  }
+
+  static class BigDecimalVar extends VarPop<BigDecimal> {
+    boolean isSamp;
+
+    public BigDecimalVar(boolean isSamp) {
+      this.isSamp = isSamp;
+    }
+
+    public BigDecimal extractOutput(KV<BigDecimal, VarAgg> accumulator) {
+      BigDecimal decimalVar = null;
+      if (accumulator.getValue().count > 1) {
+        decimalVar = accumulator.getKey().divide(
+                new BigDecimal(accumulator.getValue().count - (this.isSamp ? 1 : 0)),
+                RoundingMode.HALF_UP);
+      } else {
+        decimalVar = new BigDecimal(0);
+      }
+
+      return decimalVar;
+    }
+
+    @Override
     public BigDecimal toBigDecimal(BigDecimal record) {
       return record;
     }
