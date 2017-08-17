@@ -146,7 +146,7 @@ class BeamBuiltinAggregations {
   }
 
   /**
-   * {@link CombineFn} for VAR_POP and VAR_SAMP
+   * {@link CombineFn} for VAR_POP and VAR_SAMP.
    */
   public static CombineFn createVar(SqlTypeName fieldType, boolean isSamp) {
     switch (fieldType) {
