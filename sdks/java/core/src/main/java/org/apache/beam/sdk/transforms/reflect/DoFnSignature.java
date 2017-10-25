@@ -27,9 +27,12 @@ import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.coders.Coder;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.state.State;
+import org.apache.beam.sdk.state.StateSpec;
+import org.apache.beam.sdk.state.Timer;
+import org.apache.beam.sdk.state.TimerSpec;
 import org.apache.beam.sdk.transforms.DoFn;
-import org.apache.beam.sdk.transforms.DoFn.InputProvider;
-import org.apache.beam.sdk.transforms.DoFn.OutputReceiver;
 import org.apache.beam.sdk.transforms.DoFn.ProcessContinuation;
 import org.apache.beam.sdk.transforms.DoFn.StateId;
 import org.apache.beam.sdk.transforms.DoFn.TimerId;
@@ -39,10 +42,6 @@ import org.apache.beam.sdk.transforms.reflect.DoFnSignature.Parameter.TimerParam
 import org.apache.beam.sdk.transforms.reflect.DoFnSignature.Parameter.WindowParameter;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
-import org.apache.beam.sdk.util.Timer;
-import org.apache.beam.sdk.util.TimerSpec;
-import org.apache.beam.sdk.util.state.State;
-import org.apache.beam.sdk.util.state.StateSpec;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TypeDescriptor;
 
@@ -105,11 +104,20 @@ public abstract class DoFnSignature {
   @Nullable
   public abstract Map<String, OnTimerMethod> onTimerMethods();
 
-  /**
-   * Whether the {@link DoFn} described by this signature uses state.
-   */
+  /** @deprecated use {@link #usesState()}, it's cleaner */
+  @Deprecated
   public boolean isStateful() {
     return stateDeclarations().size() > 0;
+  }
+
+  /** Whether the {@link DoFn} described by this signature uses state. */
+  public boolean usesState() {
+    return stateDeclarations().size() > 0;
+  }
+
+  /** Whether the {@link DoFn} described by this signature uses timers. */
+  public boolean usesTimers() {
+    return timerDeclarations().size() > 0;
   }
 
   static Builder builder() {
@@ -171,8 +179,10 @@ public abstract class DoFnSignature {
     public <ResultT> ResultT match(Cases<ResultT> cases) {
       // This could be done with reflection, but since the number of cases is small and known,
       // they are simply inlined.
-      if (this instanceof ContextParameter) {
-        return cases.dispatch((ContextParameter) this);
+      if (this instanceof StartBundleContextParameter) {
+        return cases.dispatch((StartBundleContextParameter) this);
+      } else if (this instanceof FinishBundleContextParameter) {
+        return cases.dispatch((FinishBundleContextParameter) this);
       } else if (this instanceof ProcessContextParameter) {
         return cases.dispatch((ProcessContextParameter) this);
       } else if (this instanceof OnTimerContextParameter) {
@@ -181,14 +191,12 @@ public abstract class DoFnSignature {
         return cases.dispatch((WindowParameter) this);
       } else if (this instanceof RestrictionTrackerParameter) {
         return cases.dispatch((RestrictionTrackerParameter) this);
-      } else if (this instanceof InputProviderParameter) {
-        return cases.dispatch((InputProviderParameter) this);
-      } else if (this instanceof OutputReceiverParameter) {
-        return cases.dispatch((OutputReceiverParameter) this);
       } else if (this instanceof StateParameter) {
         return cases.dispatch((StateParameter) this);
       } else if (this instanceof TimerParameter) {
         return cases.dispatch((TimerParameter) this);
+      } else if (this instanceof PipelineOptionsParameter) {
+        return cases.dispatch((PipelineOptionsParameter) this);
       } else {
         throw new IllegalStateException(
             String.format("Attempt to case match on unknown %s subclass %s",
@@ -200,15 +208,15 @@ public abstract class DoFnSignature {
      * An interface for destructuring a {@link Parameter}.
      */
     public interface Cases<ResultT> {
-      ResultT dispatch(ContextParameter p);
+      ResultT dispatch(StartBundleContextParameter p);
+      ResultT dispatch(FinishBundleContextParameter p);
       ResultT dispatch(ProcessContextParameter p);
       ResultT dispatch(OnTimerContextParameter p);
       ResultT dispatch(WindowParameter p);
-      ResultT dispatch(InputProviderParameter p);
-      ResultT dispatch(OutputReceiverParameter p);
       ResultT dispatch(RestrictionTrackerParameter p);
       ResultT dispatch(StateParameter p);
       ResultT dispatch(TimerParameter p);
+      ResultT dispatch(PipelineOptionsParameter p);
 
       /**
        * A base class for a visitor with a default method for cases it is not interested in.
@@ -218,7 +226,12 @@ public abstract class DoFnSignature {
         protected abstract ResultT dispatchDefault(Parameter p);
 
         @Override
-        public ResultT dispatch(ContextParameter p) {
+        public ResultT dispatch(StartBundleContextParameter p) {
+          return dispatchDefault(p);
+        }
+
+        @Override
+        public ResultT dispatch(FinishBundleContextParameter p) {
           return dispatchDefault(p);
         }
 
@@ -238,16 +251,6 @@ public abstract class DoFnSignature {
         }
 
         @Override
-        public ResultT dispatch(InputProviderParameter p) {
-          return dispatchDefault(p);
-        }
-
-        @Override
-        public ResultT dispatch(OutputReceiverParameter p) {
-          return dispatchDefault(p);
-        }
-
-        @Override
         public ResultT dispatch(RestrictionTrackerParameter p) {
           return dispatchDefault(p);
         }
@@ -261,25 +264,23 @@ public abstract class DoFnSignature {
         public ResultT dispatch(TimerParameter p) {
           return dispatchDefault(p);
         }
+
+        @Override
+        public ResultT dispatch(PipelineOptionsParameter p) {
+          return dispatchDefault(p);
+        }
       }
     }
 
     // These parameter descriptors are constant
-    private static final ContextParameter CONTEXT_PARAMETER =
-        new AutoValue_DoFnSignature_Parameter_ContextParameter();
+    private static final StartBundleContextParameter START_BUNDLE_CONTEXT_PARAMETER =
+        new AutoValue_DoFnSignature_Parameter_StartBundleContextParameter();
+    private static final FinishBundleContextParameter FINISH_BUNDLE_CONTEXT_PARAMETER =
+        new AutoValue_DoFnSignature_Parameter_FinishBundleContextParameter();
     private static final ProcessContextParameter PROCESS_CONTEXT_PARAMETER =
           new AutoValue_DoFnSignature_Parameter_ProcessContextParameter();
     private static final OnTimerContextParameter ON_TIMER_CONTEXT_PARAMETER =
         new AutoValue_DoFnSignature_Parameter_OnTimerContextParameter();
-    private static final InputProviderParameter INPUT_PROVIDER_PARAMETER =
-        new AutoValue_DoFnSignature_Parameter_InputProviderParameter();
-    private static final OutputReceiverParameter OUTPUT_RECEIVER_PARAMETER =
-        new AutoValue_DoFnSignature_Parameter_OutputReceiverParameter();
-
-    /** Returns a {@link ContextParameter}. */
-    public static ContextParameter context() {
-      return CONTEXT_PARAMETER;
-    }
 
     /** Returns a {@link ProcessContextParameter}. */
     public static ProcessContextParameter processContext() {
@@ -296,18 +297,9 @@ public abstract class DoFnSignature {
       return new AutoValue_DoFnSignature_Parameter_WindowParameter(windowT);
     }
 
-    /**
-     * Returns an {@link InputProviderParameter}.
-     */
-    public static InputProviderParameter inputProvider() {
-      return INPUT_PROVIDER_PARAMETER;
-    }
-
-    /**
-     * Returns an {@link OutputReceiverParameter}.
-     */
-    public static OutputReceiverParameter outputReceiver() {
-      return OUTPUT_RECEIVER_PARAMETER;
+    /** Returns a {@link PipelineOptionsParameter}. */
+    public static PipelineOptionsParameter pipelineOptions() {
+      return new AutoValue_DoFnSignature_Parameter_PipelineOptionsParameter();
     }
 
     /**
@@ -329,13 +321,31 @@ public abstract class DoFnSignature {
     }
 
     /**
-     * Descriptor for a {@link Parameter} of type {@link DoFn.Context}.
+     * Descriptor for a {@link Parameter} of a subtype of {@link PipelineOptions}.
+     */
+    @AutoValue
+    public abstract static class PipelineOptionsParameter extends Parameter {
+      PipelineOptionsParameter() {}
+    }
+
+    /**
+     * Descriptor for a {@link Parameter} of type {@link DoFn.StartBundleContext}.
      *
      * <p>All such descriptors are equal.
      */
     @AutoValue
-    public abstract static class ContextParameter extends Parameter {
-      ContextParameter() {}
+    public abstract static class StartBundleContextParameter extends Parameter {
+      StartBundleContextParameter() {}
+    }
+
+    /**
+     * Descriptor for a {@link Parameter} of type {@link DoFn.FinishBundleContext}.
+     *
+     * <p>All such descriptors are equal.
+     */
+    @AutoValue
+    public abstract static class FinishBundleContextParameter extends Parameter {
+      FinishBundleContextParameter() {}
     }
 
     /**
@@ -366,26 +376,6 @@ public abstract class DoFnSignature {
     public abstract static class WindowParameter extends Parameter {
       WindowParameter() {}
       public abstract TypeDescriptor<? extends BoundedWindow> windowT();
-    }
-
-    /**
-     * Descriptor for a {@link Parameter} of type {@link InputProvider}.
-     *
-     * <p>All such descriptors are equal.
-     */
-    @AutoValue
-    public abstract static class InputProviderParameter extends Parameter {
-      InputProviderParameter() {}
-    }
-
-    /**
-     * Descriptor for a {@link Parameter} of type {@link OutputReceiver}.
-     *
-     * <p>All such descriptors are equal.
-     */
-    @AutoValue
-    public abstract static class OutputReceiverParameter extends Parameter {
-      OutputReceiverParameter() {}
     }
 
     /**

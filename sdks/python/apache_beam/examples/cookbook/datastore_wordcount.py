@@ -23,7 +23,7 @@ Cloud Datastore operations.
 
 See https://developers.google.com/datastore/ for more details on Google Cloud
 Datastore.
-See http://beam.incubator.apache.org/get-started/quickstart on
+See https://beam.apache.org/get-started/quickstart on
 how to run a Beam pipeline.
 
 Read-only Mode: In this mode, this example reads Cloud Datastore entities using
@@ -35,7 +35,7 @@ The following options must be provided to run this pipeline in read-only mode:
 --project YOUR_PROJECT_ID
 --kind YOUR_DATASTORE_KIND
 --output [YOUR_LOCAL_FILE *or* gs://YOUR_OUTPUT_PATH]
---read-only
+--read_only
 ``
 
 Read-write Mode: In this mode, this example reads words from an input file,
@@ -66,45 +66,51 @@ import logging
 import re
 import uuid
 
-from google.datastore.v1 import entity_pb2
-from google.datastore.v1 import query_pb2
-from googledatastore import helper as datastore_helper, PropertyFilter
+from google.cloud.proto.datastore.v1 import entity_pb2
+from google.cloud.proto.datastore.v1 import query_pb2
+from googledatastore import helper as datastore_helper
+from googledatastore import PropertyFilter
 
 import apache_beam as beam
 from apache_beam.io import ReadFromText
-from apache_beam.io.datastore.v1.datastoreio import ReadFromDatastore
-from apache_beam.io.datastore.v1.datastoreio import WriteToDatastore
-from apache_beam.utils.pipeline_options import GoogleCloudOptions
-from apache_beam.utils.pipeline_options import PipelineOptions
-from apache_beam.utils.pipeline_options import SetupOptions
-
-empty_line_aggregator = beam.Aggregator('emptyLines')
-average_word_size_aggregator = beam.Aggregator('averageWordLength',
-                                               beam.combiners.MeanCombineFn(),
-                                               float)
+from apache_beam.io.gcp.datastore.v1.datastoreio import ReadFromDatastore
+from apache_beam.io.gcp.datastore.v1.datastoreio import WriteToDatastore
+from apache_beam.metrics import Metrics
+from apache_beam.metrics.metric import MetricsFilter
+from apache_beam.options.pipeline_options import GoogleCloudOptions
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import SetupOptions
 
 
 class WordExtractingDoFn(beam.DoFn):
   """Parse each line of input text into words."""
 
-  def process(self, context):
+  def __init__(self):
+    self.empty_line_counter = Metrics.counter('main', 'empty_lines')
+    self.word_length_counter = Metrics.counter('main', 'word_lengths')
+    self.word_counter = Metrics.counter('main', 'total_words')
+    self.word_lengths_dist = Metrics.distribution('main', 'word_len_dist')
+
+  def process(self, element):
     """Returns an iterator over words in contents of Cloud Datastore entity.
     The element is a line of text.  If the line is blank, note that, too.
     Args:
-      context: the call-specific context: data and aggregator.
+      element: the input element to be processed
     Returns:
       The processed element.
     """
-    content_value = context.element.properties.get('content', None)
+    content_value = element.properties.get('content', None)
     text_line = ''
     if content_value:
       text_line = content_value.string_value
 
     if not text_line:
-      context.aggregate_to(empty_line_aggregator, 1)
+      self.empty_line_counter.inc()
     words = re.findall(r'[A-Za-z\']+', text_line)
     for w in words:
-      context.aggregate_to(average_word_size_aggregator, len(w))
+      self.word_length_counter.inc(len(w))
+      self.word_lengths_dist.update(len(w))
+      self.word_counter.inc()
     return words
 
 
@@ -130,18 +136,15 @@ class EntityWrapper(object):
 
 def write_to_datastore(project, user_options, pipeline_options):
   """Creates a pipeline that writes entities to Cloud Datastore."""
-  p = beam.Pipeline(options=pipeline_options)
+  with beam.Pipeline(options=pipeline_options) as p:
 
-  # pylint: disable=expression-not-assigned
-  (p
-   | 'read' >> ReadFromText(user_options.input)
-   | 'create entity' >> beam.Map(
-       EntityWrapper(user_options.namespace, user_options.kind,
-                     user_options.ancestor).make_entity)
-   | 'write to datastore' >> WriteToDatastore(project))
-
-  # Actually run the pipeline (all operations above are deferred).
-  p.run().wait_until_finish()
+    # pylint: disable=expression-not-assigned
+    (p
+     | 'read' >> ReadFromText(user_options.input)
+     | 'create entity' >> beam.Map(
+         EntityWrapper(user_options.namespace, user_options.kind,
+                       user_options.ancestor).make_entity)
+     | 'write to datastore' >> WriteToDatastore(project))
 
 
 def make_ancestor_query(kind, namespace, ancestor):
@@ -191,7 +194,6 @@ def read_from_datastore(project, user_options, pipeline_options):
   output | 'write' >> beam.io.WriteToText(file_path_prefix=user_options.output,
                                           num_shards=user_options.num_shards)
 
-  # Actually run the pipeline (all operations above are deferred).
   result = p.run()
   # Wait until completion, main thread would access post-completion job results.
   result.wait_until_finish()
@@ -246,10 +248,22 @@ def run(argv=None):
   result = read_from_datastore(gcloud_options.project, known_args,
                                pipeline_options)
 
-  empty_line_values = result.aggregated_values(empty_line_aggregator)
-  logging.info('number of empty lines: %d', sum(empty_line_values.values()))
-  word_length_values = result.aggregated_values(average_word_size_aggregator)
-  logging.info('average word lengths: %s', word_length_values.values())
+  empty_lines_filter = MetricsFilter().with_name('empty_lines')
+  query_result = result.metrics().query(empty_lines_filter)
+  if query_result['counters']:
+    empty_lines_counter = query_result['counters'][0]
+    logging.info('number of empty lines: %d', empty_lines_counter.committed)
+  else:
+    logging.warn('unable to retrieve counter metrics from runner')
+
+  word_lengths_filter = MetricsFilter().with_name('word_len_dist')
+  query_result = result.metrics().query(word_lengths_filter)
+  if query_result['distributions']:
+    word_lengths_dist = query_result['distributions'][0]
+    logging.info('average word length: %d', word_lengths_dist.committed.mean)
+  else:
+    logging.warn('unable to retrieve distribution metrics from runner')
+
 
 if __name__ == '__main__':
   logging.getLogger().setLevel(logging.INFO)

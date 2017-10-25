@@ -23,7 +23,6 @@ import static org.junit.Assert.assertEquals;
 
 import java.io.Serializable;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import org.apache.beam.sdk.Pipeline;
@@ -36,7 +35,6 @@ import org.apache.beam.sdk.testing.TestPipeline;
 import org.apache.beam.sdk.transforms.display.DisplayData;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
 import org.apache.beam.sdk.transforms.windowing.Window;
-import org.apache.beam.sdk.transforms.windowing.Window.Bound;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.hamcrest.Matchers;
@@ -154,10 +152,8 @@ public class TopTest {
   public void testTopEmptyWithIncompatibleWindows() {
     p.enableAbandonedNodeEnforcement(false);
 
-    Bound<String> windowingFn = Window.<String>into(FixedWindows.of(Duration.standardDays(10L)));
-    PCollection<String> input =
-        p.apply(Create.timestamped(Collections.<String>emptyList(), Collections.<Long>emptyList()))
-         .apply(windowingFn);
+    Window<String> windowingFn = Window.<String>into(FixedWindows.of(Duration.standardDays(10L)));
+    PCollection<String> input = p.apply(Create.empty(StringUtf8Coder.of())).apply(windowingFn);
 
     expectedEx.expect(IllegalStateException.class);
     expectedEx.expectMessage("Top");
@@ -234,17 +230,18 @@ public class TopTest {
 
   @Test
   public void testTopGetNames() {
-    assertEquals("Top.Globally", Top.of(1, new OrderByLength()).getName());
-    assertEquals("Smallest.Globally", Top.smallest(1).getName());
-    assertEquals("Largest.Globally", Top.largest(2).getName());
-    assertEquals("Top.PerKey", Top.perKey(1, new IntegerComparator()).getName());
-    assertEquals("Smallest.PerKey", Top.<String, Integer>smallestPerKey(1).getName());
-    assertEquals("Largest.PerKey", Top.<String, Integer>largestPerKey(2).getName());
+    assertEquals("Combine.globally(Top(OrderByLength))", Top.of(1, new OrderByLength()).getName());
+    assertEquals("Combine.globally(Top(Reversed))", Top.smallest(1).getName());
+    assertEquals("Combine.globally(Top(Natural))", Top.largest(2).getName());
+    assertEquals("Combine.perKey(Top(IntegerComparator))",
+        Top.perKey(1, new IntegerComparator()).getName());
+    assertEquals("Combine.perKey(Top(Reversed))", Top.<String, Integer>smallestPerKey(1).getName());
+    assertEquals("Combine.perKey(Top(Natural))", Top.<String, Integer>largestPerKey(2).getName());
   }
 
   @Test
   public void testDisplayData() {
-    Top.Largest<Integer> comparer = new Top.Largest<Integer>();
+    Top.Natural<Integer> comparer = new Top.Natural<Integer>();
     Combine.Globally<Integer, List<Integer>> top = Top.of(1234, comparer);
     DisplayData displayData = DisplayData.from(top);
 

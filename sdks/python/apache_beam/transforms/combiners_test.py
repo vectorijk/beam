@@ -22,15 +22,16 @@ import unittest
 import hamcrest as hc
 
 import apache_beam as beam
-from apache_beam.test_pipeline import TestPipeline
 import apache_beam.transforms.combiners as combine
+from apache_beam.testing.test_pipeline import TestPipeline
+from apache_beam.testing.util import assert_that
+from apache_beam.testing.util import equal_to
 from apache_beam.transforms.core import CombineGlobally
 from apache_beam.transforms.core import Create
 from apache_beam.transforms.core import Map
 from apache_beam.transforms.display import DisplayData
 from apache_beam.transforms.display_test import DisplayDataItemMatcher
 from apache_beam.transforms.ptransform import PTransform
-from apache_beam.transforms.util import assert_that, equal_to
 
 
 class CombineTest(unittest.TestCase):
@@ -78,12 +79,10 @@ class CombineTest(unittest.TestCase):
     result_top = pcoll | 'top' >> combine.Top.Largest(5)
     result_bot = pcoll | 'bot' >> combine.Top.Smallest(4)
     result_cmp = pcoll | 'cmp' >> combine.Top.Of(
-        'cmp',
         6,
         lambda a, b, names: len(names[a]) < len(names[b]),
         names)  # Note parameter passed to comparator.
     result_cmp_rev = pcoll | 'cmp_rev' >> combine.Top.Of(
-        'cmp',
         3,
         lambda a, b, names: len(names[a]) < len(names[b]),
         names,  # Note parameter passed to comparator.
@@ -158,18 +157,15 @@ class CombineTest(unittest.TestCase):
 
   def test_combine_sample_display_data(self):
     def individual_test_per_key_dd(sampleFn, args, kwargs):
-      trs = [beam.CombinePerKey(sampleFn(*args, **kwargs)),
-             beam.CombineGlobally(sampleFn(*args, **kwargs))]
+      trs = [sampleFn(*args, **kwargs)]
       for transform in trs:
         dd = DisplayData.create_from(transform)
         expected_items = [
-            DisplayDataItemMatcher('fn', sampleFn.fn.__name__),
-            DisplayDataItemMatcher('combine_fn',
-                                   transform.fn.__class__)]
-        if len(args) > 0:
+            DisplayDataItemMatcher('fn', transform._fn.__name__)]
+        if args:
           expected_items.append(
               DisplayDataItemMatcher('args', str(args)))
-        if len(kwargs) > 0:
+        if kwargs:
           expected_items.append(
               DisplayDataItemMatcher('kwargs', str(kwargs)))
         hc.assert_that(dd.items, hc.contains_inanyorder(*expected_items))
@@ -218,32 +214,23 @@ class CombineTest(unittest.TestCase):
     assert_that(result_kbot, equal_to([('a', [0, 1, 1, 1])]), label='k:bot')
     pipeline.run()
 
-  def test_sample(self):
+  def test_global_sample(self):
+    def is_good_sample(actual):
+      assert len(actual) == 1
+      assert sorted(actual[0]) in [[1, 1, 2], [1, 2, 2]], actual
 
-    # First test global samples (lots of them).
-    for ix in xrange(300):
-      pipeline = TestPipeline()
+    with TestPipeline() as pipeline:
       pcoll = pipeline | 'start' >> Create([1, 1, 2, 2])
-      result = pcoll | combine.Sample.FixedSizeGlobally('sample-%d' % ix, 3)
+      for ix in xrange(9):
+        assert_that(
+            pcoll | 'sample-%d' % ix >> combine.Sample.FixedSizeGlobally(3),
+            is_good_sample,
+            label='check-%d' % ix)
 
-      def matcher():
-        def match(actual):
-          # There is always exactly one result.
-          equal_to([1])([len(actual)])
-          # There are always exactly three samples in the result.
-          equal_to([3])([len(actual[0])])
-          # Sampling is without replacement.
-          num_ones = sum(1 for x in actual[0] if x == 1)
-          num_twos = sum(1 for x in actual[0] if x == 2)
-          equal_to([1, 2])([num_ones, num_twos])
-        return match
-      assert_that(result, matcher())
-      pipeline.run()
-
-    # Now test per-key samples.
+  def test_per_key_sample(self):
     pipeline = TestPipeline()
     pcoll = pipeline | 'start-perkey' >> Create(
-        sum(([(i, 1), (i, 1), (i, 2), (i, 2)] for i in xrange(300)), []))
+        sum(([(i, 1), (i, 1), (i, 2), (i, 2)] for i in xrange(9)), []))
     result = pcoll | 'sample' >> combine.Sample.FixedSizePerKey(3)
 
     def matcher():
@@ -258,26 +245,23 @@ class CombineTest(unittest.TestCase):
     pipeline.run()
 
   def test_tuple_combine_fn(self):
-    p = TestPipeline()
-    result = (
-        p
-        | Create([('a', 100, 0.0), ('b', 10, -1), ('c', 1, 100)])
-        | beam.CombineGlobally(combine.TupleCombineFn(max,
-                                                      combine.MeanCombineFn(),
-                                                      sum)).without_defaults())
-    assert_that(result, equal_to([('c', 111.0 / 3, 99.0)]))
-    p.run()
+    with TestPipeline() as p:
+      result = (
+          p
+          | Create([('a', 100, 0.0), ('b', 10, -1), ('c', 1, 100)])
+          | beam.CombineGlobally(combine.TupleCombineFn(
+              max, combine.MeanCombineFn(), sum)).without_defaults())
+      assert_that(result, equal_to([('c', 111.0 / 3, 99.0)]))
 
   def test_tuple_combine_fn_without_defaults(self):
-    p = TestPipeline()
-    result = (
-        p
-        | Create([1, 1, 2, 3])
-        | beam.CombineGlobally(
-            combine.TupleCombineFn(min, combine.MeanCombineFn(), max)
-            .with_common_input()).without_defaults())
-    assert_that(result, equal_to([(1, 7.0 / 4, 3)]))
-    p.run()
+    with TestPipeline() as p:
+      result = (
+          p
+          | Create([1, 1, 2, 3])
+          | beam.CombineGlobally(
+              combine.TupleCombineFn(min, combine.MeanCombineFn(), max)
+              .with_common_input()).without_defaults())
+      assert_that(result, equal_to([(1, 7.0 / 4, 3)]))
 
   def test_to_list_and_to_dict(self):
     pipeline = TestPipeline()
@@ -306,29 +290,26 @@ class CombineTest(unittest.TestCase):
     pipeline.run()
 
   def test_combine_globally_with_default(self):
-    p = TestPipeline()
-    assert_that(p | Create([]) | CombineGlobally(sum), equal_to([0]))
-    p.run()
+    with TestPipeline() as p:
+      assert_that(p | Create([]) | CombineGlobally(sum), equal_to([0]))
 
   def test_combine_globally_without_default(self):
-    p = TestPipeline()
-    result = p | Create([]) | CombineGlobally(sum).without_defaults()
-    assert_that(result, equal_to([]))
-    p.run()
+    with TestPipeline() as p:
+      result = p | Create([]) | CombineGlobally(sum).without_defaults()
+      assert_that(result, equal_to([]))
 
   def test_combine_globally_with_default_side_input(self):
-    class CombineWithSideInput(PTransform):
+    class SideInputCombine(PTransform):
       def expand(self, pcoll):
         side = pcoll | CombineGlobally(sum).as_singleton_view()
         main = pcoll.pipeline | Create([None])
         return main | Map(lambda _, s: s, side)
 
-    p = TestPipeline()
-    result1 = p | 'i1' >> Create([]) | 'c1' >> CombineWithSideInput()
-    result2 = p | 'i2' >> Create([1, 2, 3, 4]) | 'c2' >> CombineWithSideInput()
-    assert_that(result1, equal_to([0]), label='r1')
-    assert_that(result2, equal_to([10]), label='r2')
-    p.run()
+    with TestPipeline() as p:
+      result1 = p | 'i1' >> Create([]) | 'c1' >> SideInputCombine()
+      result2 = p | 'i2' >> Create([1, 2, 3, 4]) | 'c2' >> SideInputCombine()
+      assert_that(result1, equal_to([0]), label='r1')
+      assert_that(result2, equal_to([10]), label='r2')
 
 
 if __name__ == '__main__':

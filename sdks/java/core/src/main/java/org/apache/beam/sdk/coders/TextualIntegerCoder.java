@@ -17,10 +17,10 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link Coder} that encodes {@code Integer Integers} as the ASCII bytes of
@@ -28,14 +28,21 @@ import java.io.OutputStream;
  */
 public class TextualIntegerCoder extends AtomicCoder<Integer> {
 
-  @JsonCreator
   public static TextualIntegerCoder of() {
     return new TextualIntegerCoder();
   }
 
   /////////////////////////////////////////////////////////////////////////////
 
+  private static final TypeDescriptor<Integer> TYPE_DESCRIPTOR = new TypeDescriptor<Integer>() {};
+
   protected TextualIntegerCoder() {}
+
+  @Override
+  public void encode(Integer value, OutputStream outStream)
+      throws IOException, CoderException {
+    encode(value, outStream, Context.NESTED);
+  }
 
   @Override
   public void encode(Integer value, OutputStream outStream, Context context)
@@ -45,6 +52,11 @@ public class TextualIntegerCoder extends AtomicCoder<Integer> {
     }
     String textualValue = value.toString();
     StringUtf8Coder.of().encode(textualValue, outStream, context);
+  }
+
+  @Override
+  public Integer decode(InputStream inStream) throws IOException, CoderException {
+    return decode(inStream, Context.NESTED);
   }
 
   @Override
@@ -59,11 +71,21 @@ public class TextualIntegerCoder extends AtomicCoder<Integer> {
   }
 
   @Override
-  protected long getEncodedElementByteSize(Integer value, Context context) throws Exception {
+  public void verifyDeterministic() {
+    StringUtf8Coder.of().verifyDeterministic();
+  }
+
+  @Override
+  public TypeDescriptor<Integer> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
+  }
+
+  @Override
+  protected long getEncodedElementByteSize(Integer value) throws Exception {
     if (value == null) {
       throw new CoderException("cannot encode a null Integer");
     }
     String textualValue = value.toString();
-    return StringUtf8Coder.of().getEncodedElementByteSize(textualValue, context);
+    return StringUtf8Coder.of().getEncodedElementByteSize(textualValue);
   }
 }

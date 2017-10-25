@@ -26,18 +26,18 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.BigEndianIntegerCoder;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
+import org.apache.beam.sdk.coders.VarIntCoder;
+import org.apache.beam.sdk.extensions.gcp.storage.NoopPathValidator;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.windowing.Sessions;
 import org.apache.beam.sdk.transforms.windowing.Window;
-import org.apache.beam.sdk.util.NoopPathValidator;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.sdk.values.WindowingStrategy;
 import org.joda.time.Duration;
 import org.junit.Before;
 import org.junit.Rule;
@@ -105,11 +105,11 @@ public class DataflowGroupByKeyTest {
             new PTransform<PBegin, PCollection<KV<String, Integer>>>() {
               @Override
               public PCollection<KV<String, Integer>> expand(PBegin input) {
-                return PCollection.<KV<String, Integer>>createPrimitiveOutputInternal(
-                        input.getPipeline(),
-                        WindowingStrategy.globalDefault(),
-                        PCollection.IsBounded.UNBOUNDED)
-                    .setTypeDescriptor(new TypeDescriptor<KV<String, Integer>>() {});
+                return PCollection.createPrimitiveOutputInternal(
+                    input.getPipeline(),
+                    WindowingStrategy.globalDefault(),
+                    PCollection.IsBounded.UNBOUNDED,
+                    KvCoder.of(StringUtf8Coder.of(), VarIntCoder.of()));
               }
             });
 

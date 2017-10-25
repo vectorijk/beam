@@ -17,7 +17,6 @@
  */
 package org.apache.beam.sdk.transforms;
 
-import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.transforms.display.DisplayData;
 import org.apache.beam.sdk.values.PCollection;
 
@@ -67,7 +66,7 @@ public class Filter<T> extends PTransform<PCollection<T>, PCollection<T>> {
    *     listOfNumbers.apply(Filter.lessThan(10));
    * } </pre>
    *
-   * <p>See also {@link #lessThanEq}, {@link #greaterThanEq},
+   * <p>See also {@link #lessThanEq}, {@link #greaterThanEq}, {@link #equal}
    * and {@link #greaterThan}, which return elements satisfying various
    * inequalities with the specified value based on the elements'
    * natural ordering.
@@ -98,7 +97,7 @@ public class Filter<T> extends PTransform<PCollection<T>, PCollection<T>> {
    *     listOfNumbers.apply(Filter.greaterThan(1000));
    * } </pre>
    *
-   * <p>See also {@link #greaterThanEq}, {@link #lessThan},
+   * <p>See also {@link #greaterThanEq}, {@link #lessThan}, {@link #equal}
    * and {@link #lessThanEq}, which return elements satisfying various
    * inequalities with the specified value based on the elements'
    * natural ordering.
@@ -128,7 +127,7 @@ public class Filter<T> extends PTransform<PCollection<T>, PCollection<T>> {
    *     listOfNumbers.apply(Filter.lessThanEq(10));
    * } </pre>
    *
-   * <p>See also {@link #lessThan}, {@link #greaterThanEq},
+   * <p>See also {@link #lessThan}, {@link #greaterThanEq}, {@link #equal}
    * and {@link #greaterThan}, which return elements satisfying various
    * inequalities with the specified value based on the elements'
    * natural ordering.
@@ -158,7 +157,7 @@ public class Filter<T> extends PTransform<PCollection<T>, PCollection<T>> {
    *     listOfNumbers.apply(Filter.greaterThanEq(1000));
    * } </pre>
    *
-   * <p>See also {@link #greaterThan}, {@link #lessThan},
+   * <p>See also {@link #greaterThan}, {@link #lessThan}, {@link #equal}
    * and {@link #lessThanEq}, which return elements satisfying various
    * inequalities with the specified value based on the elements'
    * natural ordering.
@@ -173,6 +172,33 @@ public class Filter<T> extends PTransform<PCollection<T>, PCollection<T>> {
         return input.compareTo(value) >= 0;
       }
     }).described(String.format("x ≥ %s", value));
+  }
+
+  /**
+   * Returns a {@code PTransform} that takes an input
+   * {@code PCollection<T>} and returns a {@code PCollection<T>} with
+   * elements that equals to a given value. Elements must be {@code Comparable}.
+   *
+   * <p>Example of use:
+   * <pre> {@code
+   * PCollection<Integer> listOfNumbers = ...;
+   * PCollection<Integer> equalNumbers = listOfNumbers.apply(Filter.equal(1000));
+   * } </pre>
+   *
+   * <p>See also {@link #greaterThan}, {@link #lessThan}, {@link #lessThanEq}
+   * and {@link #greaterThanEq}, which return elements satisfying various
+   * inequalities with the specified value based on the elements'
+   * natural ordering.
+   *
+   * <p>See also {@link #by}, which returns elements that satisfy the given predicate.
+   */
+  public static <T extends Comparable<T>> Filter<T> equal(final T value) {
+    return by(new SerializableFunction<T, Boolean>() {
+      @Override
+      public Boolean apply(T input) {
+        return input.compareTo(value) == 0;
+      }
+    }).described(String.format("x == %s", value));
   }
 
   ///////////////////////////////////////////////////////////////////////////////
@@ -202,19 +228,18 @@ public class Filter<T> extends PTransform<PCollection<T>, PCollection<T>> {
 
   @Override
   public PCollection<T> expand(PCollection<T> input) {
-    return input.apply(ParDo.of(new DoFn<T, T>() {
-      @ProcessElement
-      public void processElement(ProcessContext c) {
-        if (predicate.apply(c.element())) {
-          c.output(c.element());
-        }
-      }
-    }));
-  }
-
-  @Override
-  protected Coder<T> getDefaultOutputCoder(PCollection<T> input) {
-    return input.getCoder();
+    return input
+        .apply(
+            ParDo.of(
+                new DoFn<T, T>() {
+                  @ProcessElement
+                  public void processElement(ProcessContext c) {
+                    if (predicate.apply(c.element())) {
+                      c.output(c.element());
+                    }
+                  }
+                }))
+        .setCoder(input.getCoder());
   }
 
   @Override

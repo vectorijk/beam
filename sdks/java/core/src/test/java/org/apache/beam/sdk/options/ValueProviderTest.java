@@ -19,17 +19,20 @@ package org.apache.beam.sdk.options;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.beam.sdk.options.ValueProvider.NestedValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.RuntimeValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
 import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.util.SerializableUtils;
+import org.apache.beam.sdk.util.common.ReflectHelpers;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -39,6 +42,8 @@ import org.junit.runners.JUnit4;
 /** Tests for {@link ValueProvider}. */
 @RunWith(JUnit4.class)
 public class ValueProviderTest {
+  private static final ObjectMapper MAPPER = new ObjectMapper().registerModules(
+      ObjectMapper.findModules(ReflectHelpers.findClassLoader()));
   @Rule public ExpectedException expectedException = ExpectedException.none();
 
   /** A test interface. */
@@ -56,8 +61,7 @@ public class ValueProviderTest {
 
   @Test
   public void testCommandLineNoDefault() {
-    TestOptions options = PipelineOptionsFactory.fromArgs(
-      new String[]{"--foo=baz"}).as(TestOptions.class);
+    TestOptions options = PipelineOptionsFactory.fromArgs("--foo=baz").as(TestOptions.class);
     ValueProvider<String> provider = options.getFoo();
     assertEquals("baz", provider.get());
     assertTrue(provider.isAccessible());
@@ -65,8 +69,7 @@ public class ValueProviderTest {
 
   @Test
   public void testListValueProvider() {
-    TestOptions options = PipelineOptionsFactory.fromArgs(
-      new String[]{"--list=1,2,3"}).as(TestOptions.class);
+    TestOptions options = PipelineOptionsFactory.fromArgs("--list=1,2,3").as(TestOptions.class);
     ValueProvider<List<Integer>> provider = options.getList();
     assertEquals(ImmutableList.of(1, 2, 3), provider.get());
     assertTrue(provider.isAccessible());
@@ -74,8 +77,7 @@ public class ValueProviderTest {
 
   @Test
   public void testCommandLineWithDefault() {
-    TestOptions options = PipelineOptionsFactory.fromArgs(
-      new String[]{"--bar=baz"}).as(TestOptions.class);
+    TestOptions options = PipelineOptionsFactory.fromArgs("--bar=baz").as(TestOptions.class);
     ValueProvider<String> provider = options.getBar();
     assertEquals("baz", provider.get());
     assertTrue(provider.isAccessible());
@@ -86,7 +88,7 @@ public class ValueProviderTest {
     ValueProvider<String> provider = StaticValueProvider.of("foo");
     assertEquals("foo", provider.get());
     assertTrue(provider.isAccessible());
-    assertEquals("StaticValueProvider{value=foo}", provider.toString());
+    assertEquals("foo", provider.toString());
   }
 
   @Test
@@ -95,8 +97,9 @@ public class ValueProviderTest {
     ValueProvider<String> provider = options.getFoo();
     assertFalse(provider.isAccessible());
 
-    expectedException.expect(RuntimeException.class);
-    expectedException.expectMessage("Not called from a runtime context");
+    expectedException.expect(IllegalStateException.class);
+    expectedException.expectMessage("Value only available at runtime");
+    expectedException.expectMessage("foo");
     provider.get();
   }
 
@@ -106,7 +109,7 @@ public class ValueProviderTest {
     ValueProvider<String> provider = options.getFoo();
     assertEquals("foo", ((RuntimeValueProvider) provider).propertyName());
     assertEquals(
-        "RuntimeValueProvider{propertyName=foo, default=null, value=null}",
+        "RuntimeValueProvider{propertyName=foo, default=null}",
         provider.toString());
   }
 
@@ -119,8 +122,7 @@ public class ValueProviderTest {
 
   @Test
   public void testNoDefaultRuntimeProviderWithOverride() throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
-    TestOptions runtime = mapper.readValue(
+    TestOptions runtime = MAPPER.readValue(
       "{ \"options\": { \"foo\": \"quux\" }}", PipelineOptions.class)
       .as(TestOptions.class);
 
@@ -135,8 +137,7 @@ public class ValueProviderTest {
 
   @Test
   public void testDefaultRuntimeProviderWithOverride() throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
-    TestOptions runtime = mapper.readValue(
+    TestOptions runtime = MAPPER.readValue(
       "{ \"options\": { \"bar\": \"quux\" }}", PipelineOptions.class)
       .as(TestOptions.class);
 
@@ -193,17 +194,16 @@ public class ValueProviderTest {
     StaticValueProvider<String> provider = options.getBar();
   }
 
+
   @Test
   public void testSerializeDeserializeNoArg() throws Exception {
     TestOptions submitOptions = PipelineOptionsFactory.as(TestOptions.class);
     assertFalse(submitOptions.getFoo().isAccessible());
-    ObjectMapper mapper = new ObjectMapper();
-    String serializedOptions = mapper.writeValueAsString(submitOptions);
 
-    String runnerString = ValueProviderUtils.updateSerializedOptions(
-      serializedOptions, ImmutableMap.of("foo", "quux"));
-    TestOptions runtime = mapper.readValue(runnerString, PipelineOptions.class)
-      .as(TestOptions.class);
+    ObjectNode root = MAPPER.valueToTree(submitOptions);
+    ((ObjectNode) root.get("options")).put("foo", "quux");
+    TestOptions runtime =
+        MAPPER.convertValue(root, PipelineOptions.class).as(TestOptions.class);
 
     ValueProvider<String> vp = runtime.getFoo();
     assertTrue(vp.isAccessible());
@@ -213,17 +213,14 @@ public class ValueProviderTest {
 
   @Test
   public void testSerializeDeserializeWithArg() throws Exception {
-    TestOptions submitOptions = PipelineOptionsFactory.fromArgs(
-      new String[]{"--foo=baz"}).as(TestOptions.class);
-    assertEquals("baz", submitOptions.getFoo().get());
+    TestOptions submitOptions = PipelineOptionsFactory.fromArgs("--foo=baz").as(TestOptions.class);
     assertTrue(submitOptions.getFoo().isAccessible());
-    ObjectMapper mapper = new ObjectMapper();
-    String serializedOptions = mapper.writeValueAsString(submitOptions);
+    assertEquals("baz", submitOptions.getFoo().get());
 
-    String runnerString = ValueProviderUtils.updateSerializedOptions(
-      serializedOptions, ImmutableMap.of("foo", "quux"));
-    TestOptions runtime = mapper.readValue(runnerString, PipelineOptions.class)
-      .as(TestOptions.class);
+    ObjectNode root = MAPPER.valueToTree(submitOptions);
+    ((ObjectNode) root.get("options")).put("foo", "quux");
+    TestOptions runtime =
+        MAPPER.convertValue(root, PipelineOptions.class).as(TestOptions.class);
 
     ValueProvider<String> vp = runtime.getFoo();
     assertTrue(vp.isAccessible());
@@ -242,9 +239,7 @@ public class ValueProviderTest {
       });
     assertTrue(nvp.isAccessible());
     assertEquals("foobar", nvp.get());
-    assertEquals(
-        "NestedValueProvider{value=StaticValueProvider{value=foo}}",
-        nvp.toString());
+    assertEquals("foobar", nvp.toString());
   }
 
   @Test
@@ -269,7 +264,7 @@ public class ValueProviderTest {
     assertEquals("bar", ((NestedValueProvider) doubleNvp).propertyName());
     assertFalse(nvp.isAccessible());
     expectedException.expect(RuntimeException.class);
-    expectedException.expectMessage("Not called from a runtime context");
+    expectedException.expectMessage("Value only available at runtime");
     nvp.get();
   }
 
@@ -288,5 +283,27 @@ public class ValueProviderTest {
     ValueProvider<NonSerializable> nvp = NestedValueProvider.of(
         StaticValueProvider.of("foo"), new NonSerializableTranslator());
     SerializableUtils.ensureSerializable(nvp);
+  }
+
+  private static class IncrementAtomicIntegerTranslator
+      implements SerializableFunction<AtomicInteger, Integer> {
+    @Override
+    public Integer apply(AtomicInteger from) {
+      return from.incrementAndGet();
+    }
+  }
+
+  @Test
+  public void testNestedValueProviderCached() throws Exception {
+    AtomicInteger increment = new AtomicInteger();
+    ValueProvider<Integer> nvp = NestedValueProvider.of(
+        StaticValueProvider.of(increment), new IncrementAtomicIntegerTranslator());
+    Integer originalValue = nvp.get();
+    Integer cachedValue = nvp.get();
+    Integer incrementValue = increment.incrementAndGet();
+    Integer secondCachedValue = nvp.get();
+    assertEquals(originalValue, cachedValue);
+    assertEquals(secondCachedValue, cachedValue);
+    assertNotEquals(originalValue, incrementValue);
   }
 }

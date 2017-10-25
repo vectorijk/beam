@@ -17,10 +17,7 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.google.common.base.Utf8;
-import com.google.common.io.ByteStreams;
-import com.google.common.io.CountingOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
@@ -32,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import org.apache.beam.sdk.util.ExposedByteArrayOutputStream;
 import org.apache.beam.sdk.util.StreamUtils;
 import org.apache.beam.sdk.util.VarInt;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link Coder} that encodes {@link String Strings} in UTF-8 encoding.
@@ -40,7 +38,6 @@ import org.apache.beam.sdk.util.VarInt;
  */
 public class StringUtf8Coder extends AtomicCoder<String> {
 
-  @JsonCreator
   public static StringUtf8Coder of() {
     return INSTANCE;
   }
@@ -48,6 +45,7 @@ public class StringUtf8Coder extends AtomicCoder<String> {
   /////////////////////////////////////////////////////////////////////////////
 
   private static final StringUtf8Coder INSTANCE = new StringUtf8Coder();
+  private static final TypeDescriptor<String> TYPE_DESCRIPTOR = new TypeDescriptor<String>() {};
 
   private static void writeString(String value, DataOutputStream dos)
       throws IOException {
@@ -69,6 +67,12 @@ public class StringUtf8Coder extends AtomicCoder<String> {
   private StringUtf8Coder() {}
 
   @Override
+  public void encode(String value, OutputStream outStream)
+      throws IOException {
+    encode(value, outStream, Context.NESTED);
+  }
+
+  @Override
   public void encode(String value, OutputStream outStream, Context context)
       throws IOException {
     if (value == null) {
@@ -84,6 +88,11 @@ public class StringUtf8Coder extends AtomicCoder<String> {
     } else {
       writeString(value, new DataOutputStream(outStream));
     }
+  }
+
+  @Override
+  public String decode(InputStream inStream) throws IOException {
+    return decode(inStream, Context.NESTED);
   }
 
   @Override
@@ -103,6 +112,9 @@ public class StringUtf8Coder extends AtomicCoder<String> {
     }
   }
 
+  @Override
+  public void verifyDeterministic() {}
+
   /**
    * {@inheritDoc}
    *
@@ -113,6 +125,11 @@ public class StringUtf8Coder extends AtomicCoder<String> {
     return true;
   }
 
+  @Override
+  public TypeDescriptor<String> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
+  }
+
   /**
    * {@inheritDoc}
    *
@@ -120,19 +137,12 @@ public class StringUtf8Coder extends AtomicCoder<String> {
    * the byte size of the encoding plus the encoded length prefix.
    */
   @Override
-  protected long getEncodedElementByteSize(String value, Context context)
+  public long getEncodedElementByteSize(String value)
       throws Exception {
     if (value == null) {
       throw new CoderException("cannot encode a null String");
     }
-    if (context.isWholeStream) {
-      return Utf8.encodedLength(value);
-    } else {
-      CountingOutputStream countingStream =
-          new CountingOutputStream(ByteStreams.nullOutputStream());
-      DataOutputStream stream = new DataOutputStream(countingStream);
-      writeString(value, stream);
-      return countingStream.getCount();
-    }
+    int size = Utf8.encodedLength(value);
+    return VarInt.getLength(size) + size;
   }
 }

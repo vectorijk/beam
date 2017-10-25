@@ -17,35 +17,50 @@
  */
 package org.apache.beam.sdk.runners;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import javax.annotation.Nullable;
+import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.Pipeline.PipelineVisitor;
 import org.apache.beam.sdk.Pipeline.PipelineVisitor.CompositeBehavior;
-import org.apache.beam.sdk.transforms.AppliedPTransform;
+import org.apache.beam.sdk.annotations.Internal;
+import org.apache.beam.sdk.runners.PTransformOverrideFactory.ReplacementOutput;
 import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PInput;
 import org.apache.beam.sdk.values.POutput;
 import org.apache.beam.sdk.values.PValue;
-import org.apache.beam.sdk.values.TaggedPValue;
+import org.apache.beam.sdk.values.TupleTag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * Captures information about a collection of transformations and their
+ * <b><i>For internal use only; no backwards-compatibility guarantees.</i></b>
+ *
+ * <p>Captures information about a collection of transformations and their
  * associated {@link PValue}s.
  */
+@Internal
 public class TransformHierarchy {
+  private static final Logger LOG = LoggerFactory.getLogger(TransformHierarchy.class);
+
   private final Node root;
+  private final Map<Node, PInput> unexpandedInputs;
   private final Map<POutput, Node> producers;
   // A map of PValue to the PInput the producing PTransform is applied to
   private final Map<PValue, PInput> producerInput;
@@ -53,10 +68,11 @@ public class TransformHierarchy {
   private Node current;
 
   public TransformHierarchy() {
-    root = new Node(null, null, "", null);
-    current = root;
     producers = new HashMap<>();
     producerInput = new HashMap<>();
+    unexpandedInputs = new HashMap<>();
+    root = new Node();
+    current = root;
   }
 
   /**
@@ -77,9 +93,88 @@ public class TransformHierarchy {
     checkNotNull(
         input, "An input must be provided for all %s Nodes", PTransform.class.getSimpleName());
     Node node = new Node(current, transform, name, input);
+    unexpandedInputs.put(node, input);
     current.addComposite(node);
     current = node;
     return current;
+  }
+
+  @Internal
+  public Node pushFinalizedNode(
+      String name,
+      Map<TupleTag<?>, PValue> inputs,
+      PTransform<?, ?> transform,
+      Map<TupleTag<?>, PValue> outputs) {
+    checkNotNull(
+        transform, "A %s must be provided for all Nodes", PTransform.class.getSimpleName());
+    checkNotNull(
+        name, "A name must be provided for all %s Nodes", PTransform.class.getSimpleName());
+    checkNotNull(
+        inputs, "An input must be provided for all %s Nodes", PTransform.class.getSimpleName());
+    Node node = new Node(current, transform, name, inputs, outputs);
+    node.finishedSpecifying = true;
+    current.addComposite(node);
+    current = node;
+    return current;
+  }
+
+  @Internal
+  public Node addFinalizedPrimitiveNode(
+      String name,
+      Map<TupleTag<?>, PValue> inputs,
+      PTransform<?, ?> transform,
+      Map<TupleTag<?>, PValue> outputs) {
+    checkNotNull(
+        transform, "A %s must be provided for all Nodes", PTransform.class.getSimpleName());
+    checkNotNull(
+        name, "A name must be provided for all %s Nodes", PTransform.class.getSimpleName());
+    checkNotNull(
+        inputs, "Inputs must be provided for all %s Nodes", PTransform.class.getSimpleName());
+    checkNotNull(
+        outputs, "Outputs must be provided for all %s Nodes", PTransform.class.getSimpleName());
+    Node node = new Node(current, transform, name, inputs, outputs);
+    node.finishedSpecifying = true;
+    for (PValue output : outputs.values()) {
+      producers.put(output, node);
+    }
+    current.addComposite(node);
+    return node;
+  }
+
+  public Node replaceNode(Node existing, PInput input, PTransform<?, ?> transform) {
+    checkNotNull(existing);
+    checkNotNull(input);
+    checkNotNull(transform);
+    checkState(
+        unexpandedInputs.isEmpty(),
+        "Replacing a node when the graph has an unexpanded input. This is an SDK bug.");
+    Node replacement =
+        new Node(existing.getEnclosingNode(), transform, existing.getFullName(), input);
+    for (PValue output : existing.getOutputs().values()) {
+      Node producer = producers.get(output);
+      boolean producedInExisting = false;
+      do {
+        if (producer.equals(existing)) {
+          producedInExisting = true;
+        } else {
+          producer = producer.getEnclosingNode();
+        }
+      } while (!producedInExisting && !producer.isRootNode());
+      if (producedInExisting) {
+        producers.remove(output);
+        LOG.debug("Removed producer for value {} as it is part of a replaced composite {}",
+            output,
+            existing.getFullName());
+      } else {
+        LOG.debug(
+            "Value {} not produced in existing node {}", output, existing.getFullName());
+      }
+    }
+    existing.getEnclosingNode().replaceChild(existing, replacement);
+    unexpandedInputs.remove(existing);
+    unexpandedInputs.put(replacement, input);
+    current = replacement;
+    return replacement;
   }
 
   /**
@@ -89,18 +184,10 @@ public class TransformHierarchy {
    */
   public void finishSpecifyingInput() {
     // Inputs must be completely specified before they are consumed by a transform.
-    for (TaggedPValue inputValue : current.getInputs()) {
-      Node producerNode = getProducer(inputValue.getValue());
-      PInput input = producerInput.remove(inputValue.getValue());
-      inputValue.getValue().finishSpecifying(input, producerNode.getTransform());
-      checkState(
-          producers.get(inputValue.getValue()) != null,
-          "Producer unknown for input %s",
-          inputValue);
-      checkState(
-          producers.get(inputValue.getValue()) != null,
-          "Producer unknown for input %s",
-          inputValue.getValue());
+    for (PValue inputValue : current.getInputs().values()) {
+      Node producerNode = getProducer(inputValue);
+      PInput input = producerInput.remove(inputValue);
+      inputValue.finishSpecifying(input, producerNode.getTransform());
     }
   }
 
@@ -115,17 +202,26 @@ public class TransformHierarchy {
    * nodes.
    */
   public void setOutput(POutput output) {
-    for (TaggedPValue value : output.expand()) {
-      if (!producers.containsKey(value.getValue())) {
-        producers.put(value.getValue(), current);
+    for (PCollection<?> value : fullyExpand(output).values()) {
+      if (!producers.containsKey(value)) {
+        producers.put(value, current);
+        value.finishSpecifyingOutput(
+            current.getFullName(), unexpandedInputs.get(current), current.transform);
       }
-      value.getValue().finishSpecifyingOutput(current.input, current.transform);
-      producerInput.put(value.getValue(), current.input);
+      producerInput.put(value, unexpandedInputs.get(current));
     }
-    output.finishSpecifyingOutput(current.input, current.transform);
+    output.finishSpecifyingOutput(
+        current.getFullName(), unexpandedInputs.get(current), current.transform);
     current.setOutput(output);
-    // TODO: Replace with a "generateDefaultNames" method.
-    output.recordAsOutput(current.toAppliedPTransform());
+  }
+
+  /**
+   * Recursively replace the outputs of the current {@link Node} with the original outputs of the
+   * node it is replacing. No value that is a key in {@code originalToReplacement} may be present
+   * within the {@link TransformHierarchy} after this method completes.
+   */
+  public void replaceOutputs(Map<PValue, ReplacementOutput> originalToReplacement) {
+    current.replaceOutputs(originalToReplacement);
   }
 
   /**
@@ -134,18 +230,19 @@ public class TransformHierarchy {
    */
   public void popNode() {
     current.finishSpecifying();
+    unexpandedInputs.remove(current);
     current = current.getEnclosingNode();
     checkState(current != null, "Can't pop the root node of a TransformHierarchy");
   }
 
   Node getProducer(PValue produced) {
-    return producers.get(produced);
+    return checkNotNull(producers.get(produced), "No producer found for %s", produced);
   }
 
   public Set<PValue> visit(PipelineVisitor visitor) {
     finishSpecifying();
     Set<PValue> visitedValues = new HashSet<>();
-    root.visit(visitor, visitedValues);
+    root.visit(visitor, visitedValues, new HashSet<Node>(), new HashSet<Node>());
     return visitedValues;
   }
 
@@ -166,6 +263,47 @@ public class TransformHierarchy {
     return current;
   }
 
+  private Map<TupleTag<?>, PCollection<?>> fullyExpand(POutput output) {
+    Map<TupleTag<?>, PCollection<?>> result = new LinkedHashMap<>();
+    for (Map.Entry<TupleTag<?>, PValue> value : output.expand().entrySet()) {
+      if (value.getValue() instanceof PCollection) {
+        PCollection<?> previous = result.put(value.getKey(), (PCollection<?>) value.getValue());
+        checkArgument(
+            previous == null,
+            "Found conflicting %ss in flattened expansion of %s: %s maps to %s and %s",
+            output,
+            TupleTag.class.getSimpleName(),
+            value.getKey(),
+            previous,
+            value.getValue());
+      } else {
+        if (value.getValue().expand().size() == 1
+            && Iterables.getOnlyElement(value.getValue().expand().values())
+                .equals(value.getValue())) {
+          throw new IllegalStateException(
+              String.format(
+                  "Non %s %s that expands into itself %s",
+                  PCollection.class.getSimpleName(),
+                  PValue.class.getSimpleName(),
+                  value.getValue()));
+        }
+        for (Map.Entry<TupleTag<?>, PCollection<?>> valueComponent :
+            fullyExpand(value.getValue()).entrySet()) {
+          PCollection<?> previous = result.put(valueComponent.getKey(), valueComponent.getValue());
+          checkArgument(
+              previous == null,
+              "Found conflicting %ss in flattened expansion of %s: %s maps to %s and %s",
+              output,
+              TupleTag.class.getSimpleName(),
+              valueComponent.getKey(),
+              previous,
+              valueComponent.getValue());
+        }
+      }
+    }
+    return result;
+  }
+
   /**
    * Provides internal tracking of transform relationships with helper methods
    * for initialization and ordered visitation.
@@ -180,23 +318,31 @@ public class TransformHierarchy {
     private final String fullName;
 
     // Nodes for sub-transforms of a composite transform.
-    private final Collection<Node> parts = new ArrayList<>();
+    private final List<Node> parts = new ArrayList<>();
 
-    // Input to the transform, in unexpanded form.
-    private final PInput input;
+    // Input to the transform, in expanded form.
+    private final Map<TupleTag<?>, PValue> inputs;
 
     // TODO: track which outputs need to be exported to parent.
-    // Output of the transform, in unexpanded form.
-    private POutput output;
+    // Output of the transform, in expanded form.
+    private Map<TupleTag<?>, PValue> outputs;
 
     @VisibleForTesting
     boolean finishedSpecifying = false;
 
     /**
+     * Creates the root-level node. The root level node has a null enclosing node, a null transform,
+     * an empty map of inputs, and a name equal to the empty string.
+     */
+    private Node() {
+      this.enclosingNode = null;
+      this.transform = null;
+      this.fullName = "";
+      this.inputs = Collections.emptyMap();
+    }
+
+    /**
      * Creates a new Node with the given parent and transform.
-     *
-     * <p>EnclosingNode and transform may both be null for a root-level node, which holds all other
-     * nodes.
      *
      * @param enclosingNode the composite node containing this node
      * @param transform the PTransform tracked by this node
@@ -204,14 +350,43 @@ public class TransformHierarchy {
      * @param input the unexpanded input to the transform
      */
     private Node(
-        @Nullable Node enclosingNode,
-        @Nullable PTransform<?, ?> transform,
+        Node enclosingNode,
+        PTransform<?, ?> transform,
         String fullName,
-        @Nullable PInput input) {
+        PInput input) {
       this.enclosingNode = enclosingNode;
       this.transform = transform;
       this.fullName = fullName;
-      this.input = input;
+      ImmutableMap.Builder<TupleTag<?>, PValue> inputs = ImmutableMap.builder();
+      inputs.putAll(input.expand());
+      inputs.putAll(transform.getAdditionalInputs());
+      this.inputs = inputs.build();
+    }
+
+    /**
+     * Creates a new {@link Node} with the given parent and transform, where inputs and outputs
+     * are already known.
+     *
+     * <p>EnclosingNode and transform may both be null for a root-level node, which holds all other
+     * nodes.
+     *
+     * @param enclosingNode the composite node containing this node
+     * @param transform the PTransform tracked by this node
+     * @param fullName the fully qualified name of the transform
+     * @param inputs the expanded inputs to the transform
+     * @param outputs the expanded outputs of the transform
+     */
+    private Node(
+        @Nullable Node enclosingNode,
+        @Nullable PTransform<?, ?> transform,
+        String fullName,
+        @Nullable Map<TupleTag<?>, PValue> inputs,
+        @Nullable Map<TupleTag<?>, PValue> outputs) {
+      this.enclosingNode = enclosingNode;
+      this.transform = transform;
+      this.fullName = fullName;
+      this.inputs = inputs == null ? Collections.<TupleTag<?>, PValue>emptyMap() : inputs;
+      this.outputs = outputs == null ? Collections.<TupleTag<?>, PValue>emptyMap() : outputs;
     }
 
     /**
@@ -239,6 +414,29 @@ public class TransformHierarchy {
     }
 
     /**
+     * Replace a sub-node of this transform node.
+     *
+     * <p>The existing {@link Node} must be a direct child of this {@link Node}. The replacement
+     * node need not be fully specified.
+     */
+    public void replaceChild(Node existing, Node replacement) {
+      checkNotNull(existing);
+      checkNotNull(replacement);
+      int existingIndex = parts.indexOf(existing);
+      checkArgument(
+          existingIndex >= 0,
+          "Tried to replace a node %s that doesn't exist as a component of node %s",
+          existing.getFullName(),
+          getFullName());
+      LOG.debug(
+          "Replaced original node {} with replacement {} at index {}",
+          existing,
+          replacement,
+          existingIndex);
+      parts.set(existingIndex, replacement);
+    }
+
+    /**
      * Returns true if this node represents a composite transform that does not perform processing
      * of its own, but merely encapsulates a sub-pipeline (which may be empty).
      *
@@ -251,9 +449,9 @@ public class TransformHierarchy {
 
     private boolean returnsOthersOutput() {
       PTransform<?, ?> transform = getTransform();
-      if (output != null) {
-        for (TaggedPValue outputValue : output.expand()) {
-          if (!getProducer(outputValue.getValue()).getTransform().equals(transform)) {
+      if (outputs != null) {
+        for (PValue outputValue : outputs.values()) {
+          if (!getProducer(outputValue).getTransform().equals(transform)) {
             return true;
           }
         }
@@ -269,9 +467,9 @@ public class TransformHierarchy {
       return fullName;
     }
 
-    /** Returns the transform input, in unexpanded form. */
-    public List<TaggedPValue> getInputs() {
-      return input == null ? Collections.<TaggedPValue>emptyList() : input.expand();
+    /** Returns the transform input, in fully expanded form. */
+    public Map<TupleTag<?>, PValue> getInputs() {
+      return inputs == null ? Collections.<TupleTag<?>, PValue>emptyMap() : inputs;
     }
 
     /**
@@ -280,88 +478,212 @@ public class TransformHierarchy {
     private void setOutput(POutput output) {
       checkState(!finishedSpecifying);
       checkState(
-          this.output == null, "Tried to specify more than one output for %s", getFullName());
+          this.outputs == null, "Tried to specify more than one output for %s", getFullName());
       checkNotNull(output, "Tried to set the output of %s to null", getFullName());
-      this.output = output;
+      this.outputs = output.expand();
 
       // Validate that a primitive transform produces only primitive output, and a composite
       // transform does not produce primitive output.
       Set<Node> outputProducers = new HashSet<>();
-      for (TaggedPValue outputValue : output.expand()) {
-        outputProducers.add(getProducer(outputValue.getValue()));
+      for (PValue outputValue : output.expand().values()) {
+        outputProducers.add(getProducer(outputValue));
       }
-      if (outputProducers.contains(this) && outputProducers.size() != 1) {
-        Set<String> otherProducerNames = new HashSet<>();
-        for (Node outputProducer : outputProducers) {
-          if (outputProducer != this) {
-            otherProducerNames.add(outputProducer.getFullName());
+      if (outputProducers.contains(this)) {
+        if (!parts.isEmpty() || outputProducers.size() > 1) {
+          Set<String> otherProducerNames = new HashSet<>();
+          for (Node outputProducer : outputProducers) {
+            if (outputProducer != this) {
+              otherProducerNames.add(outputProducer.getFullName());
+            }
           }
+          throw new IllegalArgumentException(
+              String.format(
+                  "Output of composite transform [%s] contains a primitive %s produced by it. "
+                      + "Only primitive transforms are permitted to produce primitive outputs."
+                      + "%n    Outputs: %s"
+                      + "%n    Other Producers: %s"
+                      + "%n    Components: %s",
+                  getFullName(),
+                  POutput.class.getSimpleName(),
+                  output.expand(),
+                  otherProducerNames,
+                  parts));
         }
-        throw new IllegalArgumentException(
-            String.format(
-                "Output of transform [%s] contains a %s produced by it as well as other "
-                    + "Transforms. A primitive transform must produce all of its outputs, and "
-                    + "outputs of a composite transform must be produced by a component transform "
-                    + "or be part of the input."
-                    + "%n    Other Outputs: %s"
-                    + "%n    Other Producers: %s",
-                getFullName(), POutput.class.getSimpleName(), output.expand(), otherProducerNames));
       }
     }
 
-    /** Returns the transform output, in unexpanded form. */
-    public List<TaggedPValue> getOutputs() {
-      return output == null ? Collections.<TaggedPValue>emptyList() : output.expand();
+    /**
+     * Replaces each value in {@code originalToReplacement} present in this {@link Node Node's}
+     * outputs with the key that maps to that value.
+     *
+     * <p>Outputs produced by this node that do not have an associated key in this map remain
+     * as-is. Generally, these are nodes which are internal to a composite replacement; they should
+     * not appear as outputs of the replacement composite.
+     *
+     * @param originalToReplacement A map from the outputs of the replacement {@link Node} to the
+     *                              original output.
+     */
+    void replaceOutputs(Map<PValue, ReplacementOutput> originalToReplacement) {
+      checkNotNull(this.outputs, "Outputs haven't been specified for node %s yet", getFullName());
+      for (Node component : this.parts) {
+        // Replace the outputs of the component nodes
+        component.replaceOutputs(originalToReplacement);
+      }
+      ImmutableMap.Builder<TupleTag<?>, PValue> newOutputsBuilder = ImmutableMap.builder();
+      for (Map.Entry<TupleTag<?>, PValue> output : outputs.entrySet()) {
+        ReplacementOutput mapping = originalToReplacement.get(output.getValue());
+        if (mapping != null) {
+          if (this.equals(producers.get(mapping.getReplacement().getValue()))) {
+            // This Node produced the replacement PCollection. The structure of this if statement
+            // requires the replacement transform to produce only new outputs; otherwise the
+            // producers map will not be appropriately updated. TODO: investigate alternatives
+            producerInput.remove(mapping.getReplacement().getValue());
+            // original and replacement might be identical
+            producers.remove(mapping.getReplacement().getValue());
+            producers.put(mapping.getOriginal().getValue(), this);
+          }
+          LOG.debug(
+              "Replacing output {} with original {}",
+              mapping.getReplacement(),
+              mapping.getOriginal());
+          newOutputsBuilder.put(output.getKey(), mapping.getOriginal().getValue());
+        } else {
+          newOutputsBuilder.put(output);
+        }
+      }
+      ImmutableMap<TupleTag<?>, PValue> newOutputs = newOutputsBuilder.build();
+      checkState(
+          outputs.size() == newOutputs.size(),
+          "Number of outputs must be stable across replacement");
+      this.outputs = newOutputs;
+    }
+
+    /** Returns the transform output, in expanded form. */
+    public Map<TupleTag<?>, PValue> getOutputs() {
+      return outputs == null ? Collections.<TupleTag<?>, PValue>emptyMap() : outputs;
     }
 
     /**
      * Returns the {@link AppliedPTransform} representing this {@link Node}.
      */
-    public AppliedPTransform<?, ?, ?> toAppliedPTransform() {
-      return AppliedPTransform.of(getFullName(), input, output, (PTransform) getTransform());
+    public AppliedPTransform<?, ?, ?> toAppliedPTransform(Pipeline pipeline) {
+      return AppliedPTransform.of(
+          getFullName(), inputs, outputs, (PTransform) getTransform(), pipeline);
     }
 
     /**
      * Visit the transform node.
      *
+     * <p>The visit proceeds in the following order:
+     *
+     * <ul>
+     *   <li>Visit all input {@link PValue PValues} returned by the flattened expansion of {@link
+     *       Node#getInputs()}.
+     *   <li>If the node is a composite:
+     *       <ul>
+     *         <li>Enter the node via {@link PipelineVisitor#enterCompositeTransform(Node)}.
+     *         <li>If the result of {@link PipelineVisitor#enterCompositeTransform(Node)} was {@link
+     *             CompositeBehavior#ENTER_TRANSFORM}, visit each child node of this {@link Node}.
+     *         <li>Leave the node via {@link PipelineVisitor#leaveCompositeTransform(Node)}.
+     *       </ul>
+     *   <li>If the node is a primitive, visit it via {@link
+     *       PipelineVisitor#visitPrimitiveTransform(Node)}.
+     *   <li>Visit each {@link PValue} that was output by this node.
+     * </ul>
+     *
+     * <p>Additionally, the following ordering restrictions are observed:
+     *
+     * <ul>
+     *   <li>A {@link Node} will be visited after its enclosing node has been entered and before its
+     *       enclosing node has been left
+     *   <li>A {@link Node} will not be visited if any enclosing {@link Node} has returned {@link
+     *       CompositeBehavior#DO_NOT_ENTER_TRANSFORM} from the call to {@link
+     *       PipelineVisitor#enterCompositeTransform(Node)}.
+     *   <li>A {@link PValue} will only be visited after the {@link Node} that originally produced
+     *       it has been visited.
+     * </ul>
+     *
      * <p>Provides an ordered visit of the input values, the primitive transform (or child nodes for
      * composite transforms), then the output values.
      */
-    private void visit(PipelineVisitor visitor, Set<PValue> visitedValues) {
+    private void visit(
+        PipelineVisitor visitor,
+        Set<PValue> visitedValues,
+        Set<Node> visitedNodes,
+        Set<Node> skippedComposites) {
+      if (getEnclosingNode() != null && !visitedNodes.contains(getEnclosingNode())) {
+        // Recursively enter all enclosing nodes, as appropriate.
+        getEnclosingNode().visit(visitor, visitedValues, visitedNodes, skippedComposites);
+      }
+      // These checks occur after visiting the enclosing node to ensure that if this node has been
+      // visited while visiting the enclosing node the node is not revisited, or, if an enclosing
+      // Node is skipped, this node is also skipped.
+      if (!visitedNodes.add(this)) {
+        LOG.debug("Not revisiting previously visited node {}", this);
+        return;
+      } else if (childNodeOf(skippedComposites)) {
+        // This node is a child of a node that has been passed over via CompositeBehavior, and
+        // should also be skipped. All child nodes of a skipped composite should always be skipped.
+        LOG.debug("Not revisiting Node {} which is a child of a previously passed composite", this);
+        return;
+      }
+
       if (!finishedSpecifying) {
         finishSpecifying();
       }
 
       if (!isRootNode()) {
         // Visit inputs.
-        for (TaggedPValue inputValue : input.expand()) {
-          if (visitedValues.add(inputValue.getValue())) {
-            visitor.visitValue(inputValue.getValue(), getProducer(inputValue.getValue()));
+        for (PValue inputValue : inputs.values()) {
+          Node valueProducer = getProducer(inputValue);
+          if (!visitedNodes.contains(valueProducer)) {
+            valueProducer.visit(visitor, visitedValues, visitedNodes, skippedComposites);
+          }
+          if (visitedValues.add(inputValue)) {
+            LOG.debug("Visiting input value {}", inputValue);
+            visitor.visitValue(inputValue, valueProducer);
           }
         }
       }
 
       if (isCompositeNode()) {
+        LOG.debug("Visiting composite node {}", this);
         PipelineVisitor.CompositeBehavior recurse = visitor.enterCompositeTransform(this);
 
         if (recurse.equals(CompositeBehavior.ENTER_TRANSFORM)) {
           for (Node child : parts) {
-            child.visit(visitor, visitedValues);
+            child.visit(visitor, visitedValues, visitedNodes, skippedComposites);
           }
+        } else {
+          skippedComposites.add(this);
         }
         visitor.leaveCompositeTransform(this);
       } else {
+        LOG.debug("Visiting primitive node {}", this);
         visitor.visitPrimitiveTransform(this);
       }
 
       if (!isRootNode()) {
+        checkNotNull(outputs, "Outputs for non-root node %s are null", getFullName());
         // Visit outputs.
-        for (TaggedPValue pValue : output.expand()) {
-          if (visitedValues.add(pValue.getValue())) {
-            visitor.visitValue(pValue.getValue(), this);
+        for (PValue pValue : outputs.values()) {
+          if (visitedValues.add(pValue)) {
+            LOG.debug("Visiting output value {}", pValue);
+            visitor.visitValue(pValue, this);
           }
         }
       }
+    }
+
+    private boolean childNodeOf(Set<Node> nodes) {
+      if (isRootNode()) {
+        return false;
+      }
+      Node parent = this.getEnclosingNode();
+      while (!parent.isRootNode() && !nodes.contains(parent)) {
+        parent = parent.getEnclosingNode();
+      }
+      return nodes.contains(parent);
     }
 
     /**
@@ -374,6 +696,14 @@ public class TransformHierarchy {
         return;
       }
       finishedSpecifying = true;
+    }
+
+    @Override
+    public String toString() {
+      if (isRootNode()) {
+        return "RootNode";
+      }
+      return MoreObjects.toStringHelper(getClass()).add("fullName", fullName).toString();
     }
   }
 }

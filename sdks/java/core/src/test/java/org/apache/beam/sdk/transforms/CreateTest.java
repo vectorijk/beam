@@ -19,11 +19,9 @@ package org.apache.beam.sdk.transforms;
 
 import static org.apache.beam.sdk.TestUtils.LINES;
 import static org.apache.beam.sdk.TestUtils.LINES_ARRAY;
-import static org.apache.beam.sdk.TestUtils.NO_LINES;
 import static org.apache.beam.sdk.TestUtils.NO_LINES_ARRAY;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 
@@ -49,16 +47,20 @@ import org.apache.beam.sdk.coders.VoidCoder;
 import org.apache.beam.sdk.io.BoundedSource;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.options.ValueProvider;
+import org.apache.beam.sdk.options.ValueProvider.NestedValueProvider;
+import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
 import org.apache.beam.sdk.testing.NeedsRunner;
 import org.apache.beam.sdk.testing.PAssert;
-import org.apache.beam.sdk.testing.RunnableOnService;
 import org.apache.beam.sdk.testing.SourceTestUtils;
 import org.apache.beam.sdk.testing.TestPipeline;
+import org.apache.beam.sdk.testing.ValidatesRunner;
 import org.apache.beam.sdk.transforms.Create.Values.CreateSource;
 import org.apache.beam.sdk.util.SerializableUtils;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TimestampedValue;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.hamcrest.Matchers;
 import org.joda.time.Instant;
 import org.junit.Rule;
@@ -79,7 +81,7 @@ public class CreateTest {
 
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreate() {
     PCollection<String> output =
         p.apply(Create.of(LINES));
@@ -90,31 +92,57 @@ public class CreateTest {
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreateEmpty() {
     PCollection<String> output =
-        p.apply(Create.of(NO_LINES)
-            .withCoder(StringUtf8Coder.of()));
+        p.apply(Create.empty(StringUtf8Coder.of()));
 
     PAssert.that(output)
         .containsInAnyOrder(NO_LINES_ARRAY);
+
+    assertEquals(StringUtf8Coder.of(), output.getCoder());
     p.run();
   }
 
   @Test
-  public void testCreateEmptyInfersCoder() {
+  public void testCreateEmptyIterableRequiresCoder() {
     p.enableAbandonedNodeEnforcement(false);
 
-    PCollection<Object> output =
-        p.apply(Create.of());
+    thrown.expect(IllegalArgumentException.class);
+    thrown.expectMessage("determine a default Coder");
+    thrown.expectMessage("Create.empty(Coder)");
+    thrown.expectMessage("Create.empty(TypeDescriptor)");
+    thrown.expectMessage("withCoder(Coder)");
+    thrown.expectMessage("withType(TypeDescriptor)");
+    p.apply(Create.of(Collections.emptyList()));
+  }
+
+  @Test
+  @Category(NeedsRunner.class)
+  public void testCreateEmptyIterableWithCoder() {
+    PCollection<Void> output =
+        p.apply(Create.of(Collections.<Void>emptyList()).withCoder(VoidCoder.of()));
 
     assertEquals(VoidCoder.of(), output.getCoder());
+    PAssert.that(output).empty();
+    p.run();
   }
 
   static class Record implements Serializable {
   }
 
   static class Record2 extends Record {
+  }
+
+  private static class RecordCoder extends AtomicCoder<Record> {
+    @Override
+    public void encode(Record value, OutputStream outStream)
+        throws CoderException, IOException {}
+
+    @Override
+    public Record decode(InputStream inStream) throws CoderException, IOException {
+      return null;
+    }
   }
 
   @Test
@@ -130,7 +158,7 @@ public class CreateTest {
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreateWithNullsAndValues() throws Exception {
     PCollection<String> output =
         p.apply(Create.of(null, "test1", null, "test2", null)
@@ -181,23 +209,22 @@ public class CreateTest {
       @Override
       public void encode(
           UnserializableRecord value,
-          OutputStream outStream,
-          org.apache.beam.sdk.coders.Coder.Context context)
+          OutputStream outStream)
           throws CoderException, IOException {
-        stringCoder.encode(value.myString, outStream, context.nested());
+        stringCoder.encode(value.myString, outStream);
       }
 
       @Override
       public UnserializableRecord decode(
-          InputStream inStream, org.apache.beam.sdk.coders.Coder.Context context)
+          InputStream inStream)
           throws CoderException, IOException {
-        return new UnserializableRecord(stringCoder.decode(inStream, context.nested()));
+        return new UnserializableRecord(stringCoder.decode(inStream));
       }
     }
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreateWithUnserializableElements() throws Exception {
     List<UnserializableRecord> elements =
         ImmutableList.of(
@@ -223,7 +250,7 @@ public class CreateTest {
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreateTimestamped() {
     List<TimestampedValue<String>> data = Arrays.asList(
         TimestampedValue.of("a", new Instant(1L)),
@@ -240,7 +267,7 @@ public class CreateTest {
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreateTimestampedEmpty() {
     PCollection<String> output = p
         .apply(Create.timestamped(new ArrayList<TimestampedValue<String>>())
@@ -251,13 +278,16 @@ public class CreateTest {
   }
 
   @Test
-  public void testCreateTimestampedEmptyInfersCoder() {
+  public void testCreateTimestampedEmptyUnspecifiedCoder() {
     p.enableAbandonedNodeEnforcement(false);
 
-    PCollection<Object> output = p
-        .apply(Create.timestamped());
-
-    assertEquals(VoidCoder.of(), output.getCoder());
+    thrown.expect(IllegalArgumentException.class);
+    thrown.expectMessage("determine a default Coder");
+    thrown.expectMessage("Create.empty(Coder)");
+    thrown.expectMessage("Create.empty(TypeDescriptor)");
+    thrown.expectMessage("withCoder(Coder)");
+    thrown.expectMessage("withType(TypeDescriptor)");
+    p.apply(Create.timestamped(new ArrayList<TimestampedValue<Object>>()));
   }
 
   @Test
@@ -277,7 +307,30 @@ public class CreateTest {
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  public void testCreateTimestampedDefaultOutputCoderUsingCoder() throws Exception {
+    Coder<Record> coder = new RecordCoder();
+    Create.TimestampedValues<Record> values =
+        Create.timestamped(
+            TimestampedValue.of(new Record(), new Instant(0)),
+            TimestampedValue.<Record>of(new Record2(), new Instant(0)))
+            .withCoder(coder);
+    assertThat(p.apply(values).getCoder(), equalTo(coder));
+  }
+
+  @Test
+  public void testCreateTimestampedDefaultOutputCoderUsingTypeDescriptor() throws Exception {
+    Coder<Record> coder = new RecordCoder();
+    p.getCoderRegistry().registerCoderForClass(Record.class, coder);
+    Create.TimestampedValues<Record> values =
+        Create.timestamped(
+            TimestampedValue.of(new Record(), new Instant(0)),
+            TimestampedValue.<Record>of(new Record2(), new Instant(0)))
+            .withType(new TypeDescriptor<Record>() {});
+    assertThat(p.apply(values).getCoder(), equalTo(coder));
+  }
+
+  @Test
+  @Category(ValidatesRunner.class)
   public void testCreateWithVoidType() throws Exception {
     PCollection<Void> output = p.apply(Create.of((Void) null, (Void) null));
     PAssert.that(output).containsInAnyOrder((Void) null, (Void) null);
@@ -285,7 +338,7 @@ public class CreateTest {
   }
 
   @Test
-  @Category(RunnableOnService.class)
+  @Category(ValidatesRunner.class)
   public void testCreateWithKVVoidType() throws Exception {
     PCollection<KV<Void, Void>> output = p.apply(Create.of(
         KV.of((Void) null, (Void) null),
@@ -298,10 +351,72 @@ public class CreateTest {
     p.run();
   }
 
+  /** Testing options for {@link #testCreateOfProvider()}. */
+  public interface CreateOfProviderOptions extends PipelineOptions {
+    ValueProvider<String> getFoo();
+    void setFoo(ValueProvider<String> value);
+  }
+
+  @Test
+  @Category(ValidatesRunner.class)
+  public void testCreateOfProvider() throws Exception {
+    PAssert.that(
+            p.apply(
+                "Static", Create.ofProvider(StaticValueProvider.of("foo"), StringUtf8Coder.of())))
+        .containsInAnyOrder("foo");
+    PAssert.that(
+            p.apply(
+                "Static nested",
+                Create.ofProvider(
+                    NestedValueProvider.of(
+                        StaticValueProvider.of("foo"),
+                        new SerializableFunction<String, String>() {
+                          @Override
+                          public String apply(String input) {
+                            return input + "bar";
+                          }
+                        }),
+                    StringUtf8Coder.of())))
+        .containsInAnyOrder("foobar");
+    PAssert.that(
+            p.apply(
+                "Runtime", Create.ofProvider(p.newProvider("runtimeFoo"), StringUtf8Coder.of())))
+        .containsInAnyOrder("runtimeFoo");
+
+    p.run();
+  }
+
+
   @Test
   public void testCreateGetName() {
     assertEquals("Create.Values", Create.of(1, 2, 3).getName());
     assertEquals("Create.TimestampedValues", Create.timestamped(Collections.EMPTY_LIST).getName());
+  }
+
+
+  @Test
+  public void testCreateDefaultOutputCoderUsingInference() throws Exception {
+    Coder<Record> coder = new RecordCoder();
+    p.getCoderRegistry().registerCoderForClass(Record.class, coder);
+    assertThat(
+        p.apply(Create.of(new Record(), new Record(), new Record())).getCoder(), equalTo(coder));
+  }
+
+  @Test
+  public void testCreateDefaultOutputCoderUsingCoder() throws Exception {
+    Coder<Record> coder = new RecordCoder();
+    assertThat(
+        p.apply(Create.of(new Record(), new Record2()).withCoder(coder)).getCoder(),
+        equalTo(coder));
+  }
+
+  @Test
+  public void testCreateDefaultOutputCoderUsingTypeDescriptor() throws Exception {
+    Coder<Record> coder = new RecordCoder();
+    p.getCoderRegistry().registerCoderForClass(Record.class, coder);
+    Create.Values<Record> values =
+        Create.of(new Record(), new Record2()).withType(new TypeDescriptor<Record>() {});
+    assertThat(p.apply(values).getCoder(), equalTo(coder));
   }
 
   @Test
@@ -317,49 +432,42 @@ public class CreateTest {
   }
 
   @Test
-  public void testSourceSplitIntoBundles() throws Exception {
+  public void testSourceSplit() throws Exception {
     CreateSource<Integer> source =
         CreateSource.fromIterable(
             ImmutableList.of(1, 2, 3, 4, 5, 6, 7, 8), BigEndianIntegerCoder.of());
     PipelineOptions options = PipelineOptionsFactory.create();
-    List<? extends BoundedSource<Integer>> splitSources = source.splitIntoBundles(12, options);
+    List<? extends BoundedSource<Integer>> splitSources = source.split(12, options);
     assertThat(splitSources, hasSize(3));
     SourceTestUtils.assertSourcesEqualReferenceSource(source, splitSources, options);
   }
 
   @Test
-  public void testSourceSplitIntoBundlesVoid() throws Exception {
+  public void testSourceSplitVoid() throws Exception {
     CreateSource<Void> source =
         CreateSource.fromIterable(
             Lists.<Void>newArrayList(null, null, null, null, null), VoidCoder.of());
     PipelineOptions options = PipelineOptionsFactory.create();
-    List<? extends BoundedSource<Void>> splitSources = source.splitIntoBundles(3, options);
+    List<? extends BoundedSource<Void>> splitSources = source.split(3, options);
     SourceTestUtils.assertSourcesEqualReferenceSource(source, splitSources, options);
   }
 
   @Test
-  public void testSourceSplitIntoBundlesEmpty() throws Exception {
+  public void testSourceSplitEmpty() throws Exception {
     CreateSource<Integer> source =
         CreateSource.fromIterable(ImmutableList.<Integer>of(), BigEndianIntegerCoder.of());
     PipelineOptions options = PipelineOptionsFactory.create();
-    List<? extends BoundedSource<Integer>> splitSources = source.splitIntoBundles(12, options);
+    List<? extends BoundedSource<Integer>> splitSources = source.split(12, options);
     SourceTestUtils.assertSourcesEqualReferenceSource(source, splitSources, options);
   }
 
   @Test
-  public void testSourceDoesNotProduceSortedKeys() throws Exception {
-    CreateSource<String> source =
-        CreateSource.fromIterable(ImmutableList.of("spam", "ham", "eggs"), StringUtf8Coder.of());
-    assertThat(source.producesSortedKeys(PipelineOptionsFactory.create()), is(false));
-  }
-
-  @Test
-  public void testSourceGetDefaultOutputCoderReturnsConstructorCoder() throws Exception {
+  public void testSourceGetOutputCoderReturnsConstructorCoder() throws Exception {
     Coder<Integer> coder = VarIntCoder.of();
     CreateSource<Integer> source =
         CreateSource.fromIterable(ImmutableList.of(1, 2, 3, 4, 5, 6, 7, 8), coder);
 
-    Coder<Integer> defaultCoder = source.getDefaultOutputCoder();
+    Coder<Integer> defaultCoder = source.getOutputCoder();
     assertThat(defaultCoder, equalTo(coder));
   }
 

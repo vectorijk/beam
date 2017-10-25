@@ -17,19 +17,18 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UTFDataFormatException;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link ByteCoder} encodes {@link Byte} values in 1 byte using Java serialization.
  */
 public class ByteCoder extends AtomicCoder<Byte> {
 
-  @JsonCreator
   public static ByteCoder of() {
     return INSTANCE;
   }
@@ -37,11 +36,12 @@ public class ByteCoder extends AtomicCoder<Byte> {
   /////////////////////////////////////////////////////////////////////////////
 
   private static final ByteCoder INSTANCE = new ByteCoder();
+  private static final TypeDescriptor<Byte> TYPE_DESCRIPTOR = new TypeDescriptor<Byte>() {};
 
   private ByteCoder() {}
 
   @Override
-  public void encode(Byte value, OutputStream outStream, Context context)
+  public void encode(Byte value, OutputStream outStream)
       throws IOException, CoderException {
     if (value == null) {
       throw new CoderException("cannot encode a null Byte");
@@ -50,7 +50,7 @@ public class ByteCoder extends AtomicCoder<Byte> {
   }
 
   @Override
-  public Byte decode(InputStream inStream, Context context)
+  public Byte decode(InputStream inStream)
       throws IOException, CoderException {
     try {
       // value will be between 0-255, -1 for EOF
@@ -91,8 +91,13 @@ public class ByteCoder extends AtomicCoder<Byte> {
    * @return {@code true}. {@link ByteCoder#getEncodedElementByteSize} returns a constant.
    */
   @Override
-  public boolean isRegisterByteSizeObserverCheap(Byte value, Context context) {
+  public boolean isRegisterByteSizeObserverCheap(Byte value) {
     return true;
+  }
+
+  @Override
+  public TypeDescriptor<Byte> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
   }
 
   /**
@@ -101,7 +106,7 @@ public class ByteCoder extends AtomicCoder<Byte> {
    * @return {@code 1}, the byte size of a {@link Byte} encoded using Java serialization.
    */
   @Override
-  protected long getEncodedElementByteSize(Byte value, Context context)
+  protected long getEncodedElementByteSize(Byte value)
       throws Exception {
     if (value == null) {
       throw new CoderException("cannot estimate size for unsupported null value");

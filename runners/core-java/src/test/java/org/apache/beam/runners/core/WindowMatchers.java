@@ -116,6 +116,21 @@ public class WindowMatchers {
   }
 
   public static <T> Matcher<WindowedValue<? extends T>> isSingleWindowedValue(
+      Matcher<T> valueMatcher,
+      long timestamp,
+      long windowStart,
+      long windowEnd,
+      PaneInfo paneInfo) {
+    IntervalWindow intervalWindow =
+        new IntervalWindow(new Instant(windowStart), new Instant(windowEnd));
+    return WindowMatchers.<T>isSingleWindowedValue(
+        valueMatcher,
+        Matchers.describedAs("%0", Matchers.equalTo(new Instant(timestamp)), timestamp),
+        Matchers.<BoundedWindow>equalTo(intervalWindow),
+        Matchers.equalTo(paneInfo));
+  }
+
+  public static <T> Matcher<WindowedValue<? extends T>> isSingleWindowedValue(
       Matcher<? super T> valueMatcher,
       Matcher<? super Instant> timestampMatcher,
       Matcher<? super BoundedWindow> windowMatcher) {
@@ -198,7 +213,8 @@ public class WindowMatchers {
     protected boolean matchesSafely(WindowedValue<? extends T> windowedValue) {
       return valueMatcher.matches(windowedValue.getValue())
           && timestampMatcher.matches(windowedValue.getTimestamp())
-          && windowsMatcher.matches(windowedValue.getWindows());
+          && windowsMatcher.matches(windowedValue.getWindows())
+          && paneInfoMatcher.matches(windowedValue.getPane());
     }
   }
 }

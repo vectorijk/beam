@@ -17,14 +17,13 @@
  */
 package org.apache.beam.sdk.transforms;
 
-import org.apache.beam.sdk.coders.CannotProvideCoderException;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.IterableLikeCoder;
 import org.apache.beam.sdk.transforms.windowing.WindowFn;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollection.IsBounded;
 import org.apache.beam.sdk.values.PCollectionList;
+import org.apache.beam.sdk.values.WindowingStrategy;
 
 /**
  * {@code Flatten<T>} takes multiple {@code PCollection<T>}s bundled
@@ -64,8 +63,8 @@ public class Flatten {
    * @param <T> the type of the elements in the input and output
    * {@code PCollection}s.
    */
-  public static <T> FlattenPCollectionList<T> pCollections() {
-    return new FlattenPCollectionList<>();
+  public static <T> PCollections<T> pCollections() {
+    return new PCollections<>();
   }
 
   /**
@@ -86,8 +85,8 @@ public class Flatten {
    * @param <T> the type of the elements of the input {@code Iterable} and
    * the output {@code PCollection}
    */
-  public static <T> FlattenIterables<T> iterables() {
-    return new FlattenIterables<>();
+  public static <T> Iterables<T> iterables() {
+    return new Iterables<>();
   }
 
   /**
@@ -99,10 +98,10 @@ public class Flatten {
    * @param <T> the type of the elements in the input and output
    * {@code PCollection}s.
    */
-  public static class FlattenPCollectionList<T>
+  public static class PCollections<T>
       extends PTransform<PCollectionList<T>, PCollection<T>> {
 
-    private FlattenPCollectionList() { }
+    private PCollections() { }
 
     @Override
     public PCollection<T> expand(PCollectionList<T> inputs) {
@@ -129,25 +128,12 @@ public class Flatten {
         windowingStrategy = WindowingStrategy.globalDefault();
       }
 
-      return PCollection.<T>createPrimitiveOutputInternal(
+      return PCollection.createPrimitiveOutputInternal(
           inputs.getPipeline(),
           windowingStrategy,
-          isBounded);
-    }
-
-    @Override
-    protected Coder<?> getDefaultOutputCoder(PCollectionList<T> input)
-        throws CannotProvideCoderException {
-
-      // Take coder from first collection
-      for (PCollection<T> pCollection : input.getAll()) {
-        return pCollection.getCoder();
-      }
-
-      // No inputs
-      throw new CannotProvideCoderException(
-          this.getClass().getSimpleName() + " cannot provide a Coder for"
-          + " empty " + PCollectionList.class.getSimpleName());
+          isBounded,
+          // Take coder from first collection. If there are none, will be left unspecified.
+          inputs.getAll().isEmpty() ? null : inputs.get(0).getCoder());
     }
   }
 
@@ -159,8 +145,9 @@ public class Flatten {
    * @param <T> the type of the elements of the input {@code Iterable}s and
    * the output {@code PCollection}
    */
-  public static class FlattenIterables<T>
+  public static class Iterables<T>
       extends PTransform<PCollection<? extends Iterable<T>>, PCollection<T>> {
+    private Iterables() {}
 
     @Override
     public PCollection<T> expand(PCollection<? extends Iterable<T>> in) {

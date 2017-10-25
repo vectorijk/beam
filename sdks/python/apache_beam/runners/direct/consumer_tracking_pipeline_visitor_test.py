@@ -21,8 +21,8 @@ import logging
 import unittest
 
 from apache_beam import pvalue
-from apache_beam.io import iobase
 from apache_beam.io import Read
+from apache_beam.io import iobase
 from apache_beam.pipeline import Pipeline
 from apache_beam.pvalue import AsList
 from apache_beam.runners.direct import DirectRunner
@@ -46,51 +46,52 @@ class ConsumerTrackingPipelineVisitorTest(unittest.TestCase):
     self.visitor = ConsumerTrackingPipelineVisitor()
 
   def test_root_transforms(self):
-    root_create = Create('create', [[1, 2, 3]])
-
     class DummySource(iobase.BoundedSource):
       pass
 
-    root_read = Read('read', DummySource())
-    root_flatten = Flatten('flatten', pipeline=self.pipeline)
+    root_read = Read(DummySource())
+    root_flatten = Flatten(pipeline=self.pipeline)
 
     pbegin = pvalue.PBegin(self.pipeline)
-    pcoll_create = pbegin | root_create
-    pbegin | root_read
-    pcoll_create | FlatMap(lambda x: x)
-    [] | root_flatten
+    pcoll_read = pbegin | 'read' >> root_read
+    pcoll_read | FlatMap(lambda x: x)
+    [] | 'flatten' >> root_flatten
 
     self.pipeline.visit(self.visitor)
 
     root_transforms = sorted(
         [t.transform for t in self.visitor.root_transforms])
+
     self.assertEqual(root_transforms, sorted(
-        [root_read, root_create, root_flatten]))
+        [root_read, root_flatten]))
 
     pbegin_consumers = sorted(
         [c.transform for c in self.visitor.value_to_consumers[pbegin]])
-    self.assertEqual(pbegin_consumers, sorted([root_read, root_create]))
-    self.assertEqual(len(self.visitor.step_names), 4)
+    self.assertEqual(pbegin_consumers, sorted([root_read]))
+    self.assertEqual(len(self.visitor.step_names), 3)
 
   def test_side_inputs(self):
 
     class SplitNumbersFn(DoFn):
 
-      def process(self, context):
-        if context.element < 0:
-          yield pvalue.SideOutputValue('tag_negative', context.element)
+      def process(self, element):
+        if element < 0:
+          yield pvalue.TaggedOutput('tag_negative', element)
         else:
-          yield context.element
+          yield element
 
     class ProcessNumbersFn(DoFn):
 
-      def process(self, context, negatives):
-        yield context.element
+      def process(self, element, negatives):
+        yield element
 
-    root_create = Create('create', [[-1, 2, 3]])
+    class DummySource(iobase.BoundedSource):
+      pass
+
+    root_read = Read(DummySource())
 
     result = (self.pipeline
-              | root_create
+              | 'read' >> root_read
               | ParDo(SplitNumbersFn()).with_outputs('tag_negative',
                                                      main='positive'))
     positive, negative = result
@@ -100,11 +101,11 @@ class ConsumerTrackingPipelineVisitorTest(unittest.TestCase):
 
     root_transforms = sorted(
         [t.transform for t in self.visitor.root_transforms])
-    self.assertEqual(root_transforms, sorted([root_create]))
-    self.assertEqual(len(self.visitor.step_names), 4)
+    self.assertEqual(root_transforms, sorted([root_read]))
+    self.assertEqual(len(self.visitor.step_names), 3)
     self.assertEqual(len(self.visitor.views), 1)
     self.assertTrue(isinstance(self.visitor.views[0],
-                               pvalue.ListPCollectionView))
+                               pvalue.AsList))
 
   def test_co_group_by_key(self):
     emails = self.pipeline | 'email' >> Create([('joe', 'joe@example.com')])

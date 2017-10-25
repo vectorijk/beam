@@ -31,14 +31,13 @@ import json
 import logging
 import random
 
-
 import apache_beam as beam
 from apache_beam.io import WriteToText
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.typehints import Any
 from apache_beam.typehints import Iterable
 from apache_beam.typehints import Tuple
-from apache_beam.utils.pipeline_options import PipelineOptions
-from apache_beam.utils.pipeline_options import SetupOptions
 
 
 @beam.typehints.with_output_types(Tuple[int, int, int])
@@ -90,11 +89,14 @@ class JsonCoder(object):
 
 class EstimatePiTransform(beam.PTransform):
   """Runs 10M trials, and combine the results to estimate pi."""
+  def __init__(self, tries_per_work_item=100000):
+    self.tries_per_work_item = tries_per_work_item
 
   def expand(self, pcoll):
     # A hundred work items of a hundred thousand tries each.
     return (pcoll
-            | 'Initialize' >> beam.Create([100000] * 100).with_output_types(int)
+            | 'Initialize' >> beam.Create(
+                [self.tries_per_work_item] * 100).with_output_types(int)
             | 'Run trials' >> beam.Map(run_trials)
             | 'Sum' >> beam.CombineGlobally(combine_results).without_defaults())
 
@@ -110,14 +112,11 @@ def run(argv=None):
   # workflow rely on global context (e.g., a module imported at module level).
   pipeline_options = PipelineOptions(pipeline_args)
   pipeline_options.view_as(SetupOptions).save_main_session = True
-  p = beam.Pipeline(options=pipeline_options)
+  with beam.Pipeline(options=pipeline_options) as p:
 
-  (p  # pylint: disable=expression-not-assigned
-   | EstimatePiTransform()
-   | WriteToText(known_args.output, coder=JsonCoder()))
-
-  # Actually run the pipeline (all operations above are deferred).
-  p.run()
+    (p  # pylint: disable=expression-not-assigned
+     | EstimatePiTransform()
+     | WriteToText(known_args.output, coder=JsonCoder()))
 
 
 if __name__ == '__main__':

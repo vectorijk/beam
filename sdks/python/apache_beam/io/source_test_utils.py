@@ -44,13 +44,21 @@ For example usages, see the unit tests of modules such as
  * apache_beam.io.avroio_test.py
 """
 
-from collections import namedtuple
 import logging
 import threading
 import weakref
-
+from collections import namedtuple
 from multiprocessing.pool import ThreadPool
+
 from apache_beam.io import iobase
+
+__all__ = ['read_from_source', 'assert_sources_equal_reference_source',
+           'assert_reentrant_reads_succeed',
+           'assert_split_at_fraction_behavior',
+           'assert_split_at_fraction_binary',
+           'assert_split_at_fraction_exhaustive',
+           'assert_split_at_fraction_fails',
+           'assert_split_at_fraction_succeeds_and_consistent']
 
 
 class ExpectedSplitOutcome(object):
@@ -67,17 +75,18 @@ SplitFractionStatistics = namedtuple(
     'successful_fractions non_trivial_fractions')
 
 
-def readFromSource(source, start_position=None, stop_position=None):
+def read_from_source(source, start_position=None, stop_position=None):
   """Reads elements from the given ```BoundedSource```.
 
   Only reads elements within the given position range.
   Args:
-    source: ``iobase.BoundedSource`` implementation.
-    start_position: start position for reading.
-    stop_position: stop position for reading.
+    source (~apache_beam.io.iobase.BoundedSource):
+      :class:`~apache_beam.io.iobase.BoundedSource` implementation.
+    start_position (int): start position for reading.
+    stop_position (int): stop position for reading.
 
   Returns:
-    the set of values read from the sources.
+    List[str]: the set of values read from the sources.
   """
   values = []
   range_tracker = source.get_range_tracker(start_position, stop_position)
@@ -97,24 +106,28 @@ def _ThreadPool(threads):
   return ThreadPool(threads)
 
 
-def assertSourcesEqualReferenceSource(reference_source_info, sources_info):
+def assert_sources_equal_reference_source(reference_source_info, sources_info):
   """Tests if a reference source is equal to a given set of sources.
 
-  Given a reference source (a ``BoundedSource`` and a position range) and a
-  list of sources, assert that the union of the records
-  read from the list of sources is equal to the records read from the
+  Given a reference source (a :class:`~apache_beam.io.iobase.BoundedSource`
+  and a position range) and a list of sources, assert that the union of the
+  records read from the list of sources is equal to the records read from the
   reference source.
 
   Args:
-    reference_source_info: a three-tuple that gives the reference
-                           ``iobase.BoundedSource``, position to start reading
-                           at, and position to stop reading at.
-    sources_info: a set of sources. Each source is a three-tuple that is of
-                  the same format described above.
+    reference_source_info\
+        (Tuple[~apache_beam.io.iobase.BoundedSource, int, int]):
+      a three-tuple that gives the reference
+      :class:`~apache_beam.io.iobase.BoundedSource`, position to start
+      reading at, and position to stop reading at.
+    sources_info\
+        (Iterable[Tuple[~apache_beam.io.iobase.BoundedSource, int, int]]):
+      a set of sources. Each source is a three-tuple that is of the same
+      format described above.
 
   Raises:
-    ValueError: if the set of data produced by the reference source and the
-                given set of sources are not equivalent.
+    ~exceptions.ValueError: if the set of data produced by the reference source
+      and the given set of sources are not equivalent.
 
   """
 
@@ -125,7 +138,7 @@ def assertSourcesEqualReferenceSource(reference_source_info, sources_info):
                      'item of the tuple gives a '
                      'iobase.BoundedSource. Received: %r'
                      , reference_source_info)
-  reference_records = readFromSource(
+  reference_records = read_from_source(
       *reference_source_info)
 
   source_records = []
@@ -147,7 +160,7 @@ def assertSourcesEqualReferenceSource(reference_source_info, sources_info):
           reference_source_info[0], source_info[0],
           type(reference_source_info[0].default_output_coder()),
           type(source_info[0].default_output_coder()))
-    source_records.extend(readFromSource(*source_info))
+    source_records.extend(read_from_source(*source_info))
 
   if len(reference_records) != len(source_records):
     raise ValueError(
@@ -161,21 +174,23 @@ def assertSourcesEqualReferenceSource(reference_source_info, sources_info):
         'same set of records.')
 
 
-def assertReentrantReadsSucceed(source_info):
+def assert_reentrant_reads_succeed(source_info):
   """Tests if a given source can be read in a reentrant manner.
 
-  Assume that given source produces the set of values {v1, v2, v3, ... vn}. For
-  i in range [1, n-1] this method performs a reentrant read after reading i
-  elements and verifies that both the original and reentrant read produce the
-  expected set of values.
+  Assume that given source produces the set of values ``{v1, v2, v3, ... vn}``.
+  For ``i`` in range ``[1, n-1]`` this method performs a reentrant read after
+  reading ``i`` elements and verifies that both the original and reentrant read
+  produce the expected set of values.
 
   Args:
-    source_info: a three-tuple that gives the reference
-                 ``iobase.BoundedSource``, position to start reading at, and a
-                 position to stop reading at.
+    source_info (Tuple[~apache_beam.io.iobase.BoundedSource, int, int]):
+      a three-tuple that gives the reference
+      :class:`~apache_beam.io.iobase.BoundedSource`, position to start reading
+      at, and a position to stop reading at.
+
   Raises:
-    ValueError: if source is too trivial or reentrant read result in an
-                incorrect read.
+    ~exceptions.ValueError: if source is too trivial or reentrant read result
+      in an incorrect read.
   """
 
   source, start_position, stop_position = source_info
@@ -216,34 +231,38 @@ def assertReentrantReadsSucceed(source_info):
                        i, expected_values, reentrant_read)
 
 
-def assertSplitAtFractionBehavior(source, num_items_to_read_before_split,
-                                  split_fraction, expected_outcome):
+def assert_split_at_fraction_behavior(source, num_items_to_read_before_split,
+                                      split_fraction, expected_outcome):
   """Verifies the behaviour of splitting a source at a given fraction.
 
-  Asserts that splitting a ``BoundedSource`` either fails after reading
-  ``num_items_to_read_before_split`` items, or succeeds in a way that is
-  consistent according to ``assertSplitAtFractionSucceedsAndConsistent()``.
+  Asserts that splitting a :class:`~apache_beam.io.iobase.BoundedSource` either
+  fails after reading **num_items_to_read_before_split** items, or succeeds in
+  a way that is consistent according to
+  :func:`assert_split_at_fraction_succeeds_and_consistent()`.
 
   Args:
-    source: the source to perform dynamic splitting on.
-    num_items_to_read_before_split: number of items to read before splitting.
-    split_fraction: fraction to split at.
-    expected_outcome: a value from 'ExpectedSplitOutcome'.
+    source (~apache_beam.io.iobase.BoundedSource): the source to perform
+      dynamic splitting on.
+    num_items_to_read_before_split (int): number of items to read before
+      splitting.
+    split_fraction (float): fraction to split at.
+    expected_outcome (int): a value from
+      :class:`~apache_beam.io.source_test_utils.ExpectedSplitOutcome`.
 
   Returns:
-    a tuple that gives the number of items produced by reading the two ranges
-    produced after dynamic splitting. If splitting did not occur, the first
-    value of the tuple will represent the full set of records read by the
-    source while the second value of the tuple will be '-1'.
+    Tuple[int, int]: a tuple that gives the number of items produced by reading
+    the two ranges produced after dynamic splitting. If splitting did not
+    occur, the first value of the tuple will represent the full set of records
+    read by the source while the second value of the tuple will be ``-1``.
   """
   assert isinstance(source, iobase.BoundedSource)
-  expected_items = readFromSource(source, None, None)
-  return _assertSplitAtFractionBehavior(
+  expected_items = read_from_source(source, None, None)
+  return _assert_split_at_fraction_behavior(
       source, expected_items, num_items_to_read_before_split, split_fraction,
       expected_outcome)
 
 
-def _assertSplitAtFractionBehavior(
+def _assert_split_at_fraction_behavior(
     source, expected_items, num_items_to_read_before_split,
     split_fraction, expected_outcome, start_position=None, stop_position=None):
 
@@ -307,7 +326,7 @@ def _assertSplitAtFractionBehavior(
   residual_range = (
       split_result[0], stop_position_before_split) if split_result else None
 
-  return _verifySingleSplitFractionResult(
+  return _verify_single_split_fraction_result(
       source, expected_items, current_items,
       split_result,
       (range_tracker.start_position(), range_tracker.stop_position()),
@@ -318,19 +337,19 @@ def _range_to_str(start, stop):
   return '[' + (str(start) + ',' + str(stop) + ')')
 
 
-def _verifySingleSplitFractionResult(
+def _verify_single_split_fraction_result(
     source, expected_items, current_items, split_successful, primary_range,
     residual_range, split_fraction):
 
   assert primary_range
-  primary_items = readFromSource(source, *primary_range)
+  primary_items = read_from_source(source, *primary_range)
 
   if not split_successful:
     # For unsuccessful splits, residual_range should be None.
     assert not residual_range
 
   residual_items = (
-      readFromSource(source, *residual_range)
+      read_from_source(source, *residual_range)
       if split_successful else [])
 
   total_items = primary_items + residual_items
@@ -359,45 +378,45 @@ def _verifySingleSplitFractionResult(
   return result
 
 
-def assertSplitAtFractionSucceedsAndConsistent(source,
-                                               num_items_to_read_before_split,
-                                               split_fraction):
+def assert_split_at_fraction_succeeds_and_consistent(
+    source, num_items_to_read_before_split, split_fraction):
   """Verifies some consistency properties of dynamic work rebalancing.
 
-  Equivalent to the following pseudocode:
+  Equivalent to the following pseudocode:::
 
-  original_range_tracker = source.getRangeTracker(None, None)
-  original_reader = source.read(original_range_tracker)
-  items_before_split = read N items from original_reader
-  suggested_split_position = original_range_tracker.position_for_fraction(
-    split_fraction)
-  original_stop_position - original_range_tracker.stop_position()
-  split_result = range_tracker.try_split()
-  split_position, split_fraction = split_result
-  primary_range_tracker = source.get_range_tracker(
-    original_range_tracker.start_position(), split_position)
-  residual_range_tracker = source.get_range_tracker(split_position,
-    original_stop_position)
+    original_range_tracker = source.getRangeTracker(None, None)
+    original_reader = source.read(original_range_tracker)
+    items_before_split = read N items from original_reader
+    suggested_split_position = original_range_tracker.position_for_fraction(
+      split_fraction)
+    original_stop_position - original_range_tracker.stop_position()
+    split_result = range_tracker.try_split()
+    split_position, split_fraction = split_result
+    primary_range_tracker = source.get_range_tracker(
+      original_range_tracker.start_position(), split_position)
+    residual_range_tracker = source.get_range_tracker(split_position,
+      original_stop_position)
 
-  assert that: items when reading source.read(primary_range_tracker) ==
-    items_before_split + items from continuing to read 'original_reader'
-  assert that: items when reading source.read(original_range_tracker) =
-    items when reading source.read(primary_range_tracker) + items when reading
+    assert that: items when reading source.read(primary_range_tracker) ==
+      items_before_split + items from continuing to read 'original_reader'
+    assert that: items when reading source.read(original_range_tracker) =
+      items when reading source.read(primary_range_tracker) + items when reading
     source.read(residual_range_tracker)
 
   Args:
+
     source: source to perform dynamic work rebalancing on.
     num_items_to_read_before_split: number of items to read before splitting.
     split_fraction: fraction to split at.
   """
 
-  assertSplitAtFractionBehavior(
+  assert_split_at_fraction_behavior(
       source, num_items_to_read_before_split, split_fraction,
       ExpectedSplitOutcome.MUST_SUCCEED_AND_BE_CONSISTENT)
 
 
-def assertSplitAtFractionFails(source, num_items_to_read_before_split,
-                               split_fraction):
+def assert_split_at_fraction_fails(source, num_items_to_read_before_split,
+                                   split_fraction):
   """Asserts that dynamic work rebalancing at a given fraction fails.
 
   Asserts that trying to perform dynamic splitting after reading
@@ -409,16 +428,15 @@ def assertSplitAtFractionFails(source, num_items_to_read_before_split,
     split_fraction: fraction to split at.
   """
 
-  assertSplitAtFractionBehavior(
+  assert_split_at_fraction_behavior(
       source, num_items_to_read_before_split, split_fraction,
       ExpectedSplitOutcome.MUST_FAIL)
 
 
-def assertSplitAtFractionBinary(source, expected_items,
-                                num_items_to_read_before_split, left_fraction,
-                                left_result,
-                                right_fraction, right_result, stats,
-                                start_position=None, stop_position=None):
+def assert_split_at_fraction_binary(
+    source, expected_items, num_items_to_read_before_split, left_fraction,
+    left_result, right_fraction, right_result, stats, start_position=None,
+    stop_position=None):
   """Performs dynamic work rebalancing for fractions within a given range.
 
   Asserts that given a start position, a source can be split at every
@@ -444,16 +462,16 @@ def assertSplitAtFractionBinary(source, expected_items,
   middle_fraction = (left_fraction + right_fraction) / 2
 
   if left_result is None:
-    left_result = _assertSplitAtFractionBehavior(
+    left_result = _assert_split_at_fraction_behavior(
         source, expected_items, num_items_to_read_before_split, left_fraction,
         ExpectedSplitOutcome.MUST_BE_CONSISTENT_IF_SUCCEEDS)
 
   if right_result is None:
-    right_result = _assertSplitAtFractionBehavior(
+    right_result = _assert_split_at_fraction_behavior(
         source, expected_items, num_items_to_read_before_split,
         right_fraction, ExpectedSplitOutcome.MUST_BE_CONSISTENT_IF_SUCCEEDS)
 
-  middle_result = _assertSplitAtFractionBehavior(
+  middle_result = _assert_split_at_fraction_behavior(
       source, expected_items, num_items_to_read_before_split, middle_fraction,
       ExpectedSplitOutcome.MUST_BE_CONSISTENT_IF_SUCCEEDS)
 
@@ -467,7 +485,7 @@ def assertSplitAtFractionBinary(source, expected_items,
   # enough since the total number of records is constant).
 
   if left_result[0] != middle_result[0]:
-    assertSplitAtFractionBinary(
+    assert_split_at_fraction_binary(
         source, expected_items, num_items_to_read_before_split, left_fraction,
         left_result, middle_fraction, middle_result, stats)
 
@@ -476,15 +494,16 @@ def assertSplitAtFractionBinary(source, expected_items,
   # fraction 1.0, there might be fractions in range ('middle_fraction', 1.0)
   # where dynamic splitting succeeds).
   if right_fraction == 1.0 or middle_result[0] != right_result[0]:
-    assertSplitAtFractionBinary(
+    assert_split_at_fraction_binary(
         source, expected_items, num_items_to_read_before_split,
         middle_fraction, middle_result, right_fraction, right_result, stats)
+
 
 MAX_CONCURRENT_SPLITTING_TRIALS_PER_ITEM = 100
 MAX_CONCURRENT_SPLITTING_TRIALS_TOTAL = 1000
 
 
-def assertSplitAtFractionExhaustive(
+def assert_split_at_fraction_exhaustive(
     source, start_position=None, stop_position=None,
     perform_multi_threaded_test=True):
   """Performs and tests dynamic work rebalancing exhaustively.
@@ -495,15 +514,16 @@ def assertSplitAtFractionExhaustive(
   Verifies multi threaded splitting as well.
 
   Args:
-    source: the source to perform dynamic splitting on.
-    perform_multi_threaded_test: if true performs a multi-threaded test
-                                 otherwise this test is skipped.
+    source (~apache_beam.io.iobase.BoundedSource): the source to perform
+      dynamic splitting on.
+    perform_multi_threaded_test (bool): if :data:`True` performs a
+      multi-threaded test, otherwise this test is skipped.
 
   Raises:
-    ValueError: if the exhaustive splitting test fails.
+    ~exceptions.ValueError: if the exhaustive splitting test fails.
   """
 
-  expected_items = readFromSource(source, start_position, stop_position)
+  expected_items = read_from_source(source, start_position, stop_position)
   if not expected_items:
     raise ValueError('Source %r is empty.', source)
 
@@ -518,7 +538,7 @@ def assertSplitAtFractionExhaustive(
   for i in range(len(expected_items)):
     stats = SplitFractionStatistics([], [])
 
-    assertSplitAtFractionBinary(
+    assert_split_at_fraction_binary(
         source, expected_items, i, 0.0, None, 1.0, None, stats)
 
     if stats.successful_fractions:
@@ -570,7 +590,7 @@ def assertSplitAtFractionExhaustive(
           )
           break
 
-        if _assertSplitAtFractionConcurrent(
+        if _assert_split_at_fraction_concurrent(
             source, expected_items, i, min_non_trivial_fraction, thread_pool):
           have_success = True
         else:
@@ -594,7 +614,7 @@ def assertSplitAtFractionExhaustive(
                num_total_trials, len(expected_items))
 
 
-def _assertSplitAtFractionConcurrent(
+def _assert_split_at_fraction_concurrent(
     source, expected_items, num_items_to_read_before_splitting,
     split_fraction, thread_pool=None):
 
@@ -634,7 +654,7 @@ def _assertSplitAtFractionConcurrent(
   residual_range = (
       split_result[0], stop_position_before_split) if split_result else None
 
-  res = _verifySingleSplitFractionResult(
+  res = _verify_single_split_fraction_result(
       source, expected_items, current_items, split_result,
       primary_range, residual_range, split_fraction)
 

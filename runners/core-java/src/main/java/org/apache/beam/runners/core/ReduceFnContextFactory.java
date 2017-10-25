@@ -24,27 +24,19 @@ import com.google.common.collect.ImmutableMap;
 import java.util.Collection;
 import java.util.Map;
 import javax.annotation.Nullable;
+import org.apache.beam.runners.core.StateNamespaces.WindowNamespace;
+import org.apache.beam.runners.core.TimerInternals.TimerData;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.state.State;
+import org.apache.beam.sdk.state.StateContext;
+import org.apache.beam.sdk.state.StateContexts;
+import org.apache.beam.sdk.state.TimeDomain;
+import org.apache.beam.sdk.state.Timers;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
-import org.apache.beam.sdk.util.SideInputReader;
-import org.apache.beam.sdk.util.TimeDomain;
-import org.apache.beam.sdk.util.TimerInternals;
-import org.apache.beam.sdk.util.TimerInternals.TimerData;
-import org.apache.beam.sdk.util.Timers;
-import org.apache.beam.sdk.util.WindowingStrategy;
-import org.apache.beam.sdk.util.state.MergingStateAccessor;
-import org.apache.beam.sdk.util.state.State;
-import org.apache.beam.sdk.util.state.StateAccessor;
-import org.apache.beam.sdk.util.state.StateContext;
-import org.apache.beam.sdk.util.state.StateContexts;
-import org.apache.beam.sdk.util.state.StateInternals;
-import org.apache.beam.sdk.util.state.StateNamespace;
-import org.apache.beam.sdk.util.state.StateNamespaces;
-import org.apache.beam.sdk.util.state.StateNamespaces.WindowNamespace;
-import org.apache.beam.sdk.util.state.StateTag;
 import org.apache.beam.sdk.values.PCollectionView;
+import org.apache.beam.sdk.values.WindowingStrategy;
 import org.joda.time.Instant;
 
 /**
@@ -58,7 +50,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
   private final K key;
   private final ReduceFn<K, InputT, OutputT, W> reduceFn;
   private final WindowingStrategy<?, W> windowingStrategy;
-  private final StateInternals<K> stateInternals;
+  private final StateInternals stateInternals;
   private final ActiveWindowSet<W> activeWindows;
   private final TimerInternals timerInternals;
   private final SideInputReader sideInputReader;
@@ -68,7 +60,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
       K key,
       ReduceFn<K, InputT, OutputT, W> reduceFn,
       WindowingStrategy<?, W> windowingStrategy,
-      StateInternals<K> stateInternals,
+      StateInternals stateInternals,
       ActiveWindowSet<W> activeWindows,
       TimerInternals timerInternals,
       SideInputReader sideInputReader,
@@ -172,11 +164,15 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
     protected final StateContext<W> context;
     protected final StateNamespace windowNamespace;
     protected final Coder<W> windowCoder;
-    protected final StateInternals<K> stateInternals;
+    protected final StateInternals stateInternals;
     protected final StateStyle style;
 
-    public StateAccessorImpl(ActiveWindowSet<W> activeWindows, Coder<W> windowCoder,
-        StateInternals<K> stateInternals, StateContext<W> context, StateStyle style) {
+    public StateAccessorImpl(
+        ActiveWindowSet<W> activeWindows,
+        Coder<W> windowCoder,
+        StateInternals stateInternals,
+        StateContext<W> context,
+        StateStyle style) {
 
       this.activeWindows = activeWindows;
       this.windowCoder = windowCoder;
@@ -203,7 +199,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
     }
 
     @Override
-    public <StateT extends State> StateT access(StateTag<? super K, StateT> address) {
+    public <StateT extends State> StateT access(StateTag<StateT> address) {
       switch (style) {
         case DIRECT:
           return stateInternals.state(windowNamespace(), address, context);
@@ -219,8 +215,12 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
       extends StateAccessorImpl<K, W> implements MergingStateAccessor<K, W> {
     private final Collection<W> activeToBeMerged;
 
-    public MergingStateAccessorImpl(ActiveWindowSet<W> activeWindows, Coder<W> windowCoder,
-        StateInternals<K> stateInternals, StateStyle style, Collection<W> activeToBeMerged,
+    public MergingStateAccessorImpl(
+        ActiveWindowSet<W> activeWindows,
+        Coder<W> windowCoder,
+        StateInternals stateInternals,
+        StateStyle style,
+        Collection<W> activeToBeMerged,
         W mergeResult) {
       super(activeWindows, windowCoder, stateInternals,
           stateContextForWindowOnly(mergeResult), style);
@@ -228,7 +228,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
     }
 
     @Override
-    public <StateT extends State> StateT access(StateTag<? super K, StateT> address) {
+    public <StateT extends State> StateT access(StateTag<StateT> address) {
       switch (style) {
         case DIRECT:
           return stateInternals.state(windowNamespace(), address, context);
@@ -244,7 +244,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
 
     @Override
     public <StateT extends State> Map<W, StateT> accessInEachMergingWindow(
-        StateTag<? super K, StateT> address) {
+        StateTag<StateT> address) {
       ImmutableMap.Builder<W, StateT> builder = ImmutableMap.builder();
       for (W mergingWindow : activeToBeMerged) {
         StateNamespace namespace = null;
@@ -265,8 +265,11 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
 
   static class PremergingStateAccessorImpl<K, W extends BoundedWindow>
       extends StateAccessorImpl<K, W> implements MergingStateAccessor<K, W> {
-    public PremergingStateAccessorImpl(ActiveWindowSet<W> activeWindows, Coder<W> windowCoder,
-        StateInternals<K> stateInternals, W window) {
+    public PremergingStateAccessorImpl(
+        ActiveWindowSet<W> activeWindows,
+        Coder<W> windowCoder,
+        StateInternals stateInternals,
+        W window) {
       super(activeWindows, windowCoder, stateInternals,
           stateContextForWindowOnly(window), StateStyle.RENAMED);
     }
@@ -277,7 +280,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
 
     @Override
     public <StateT extends State> Map<W, StateT> accessInEachMergingWindow(
-        StateTag<? super K, StateT> address) {
+        StateTag<StateT> address) {
       ImmutableMap.Builder<W, StateT> builder = ImmutableMap.builder();
       for (W stateAddressWindow : activeWindows.readStateAddresses(context.window())) {
         StateT stateForWindow =
@@ -521,8 +524,7 @@ class ReduceFnContextFactory<K, InputT, OutputT, W extends BoundedWindow> {
         public <T> T sideInput(PCollectionView<T> view) {
           return sideInputReader.get(
               view,
-              view.getWindowingStrategyInternal()
-                  .getWindowFn()
+              view.getWindowMappingFn()
                   .getSideInputWindow(mainInputWindow));
         }
 

@@ -17,15 +17,17 @@
  */
 package org.apache.beam.sdk.coders;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.assertThat;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import org.apache.beam.sdk.testing.CoderProperties;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.util.CoderUtils;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -42,7 +44,12 @@ public class IterableCoderTest {
       Collections.<Integer>emptyList(),
       Collections.<Integer>singletonList(13),
       Arrays.<Integer>asList(1, 2, 3, 4),
-      new LinkedList<Integer>(Arrays.asList(7, 6, 5)));
+      new LinkedList<>(Arrays.asList(7, 6, 5)));
+
+  @Test
+  public void testCoderIsSerializableWithWellKnownCoderType() throws Exception {
+    CoderProperties.coderSerializable(ListCoder.of(GlobalWindow.Coder.INSTANCE));
+  }
 
   @Test
   public void testDecodeEncodeContentsInSameOrder() throws Exception {
@@ -53,31 +60,8 @@ public class IterableCoderTest {
   }
 
   @Test
-  public void testGetInstanceComponentsNonempty() {
-    Iterable<Integer> iterable = Arrays.asList(2, 58, 99, 5);
-    List<Object> components = IterableCoder.getInstanceComponents(iterable);
-    assertEquals(1, components.size());
-    assertEquals(2, components.get(0));
-  }
-
-  @Test
-  public void testGetInstanceComponentsEmpty() {
-    Iterable<Integer> iterable = Arrays.asList();
-    List<Object> components = IterableCoder.getInstanceComponents(iterable);
-    assertNull(components);
-  }
-
-  @Test
   public void testCoderSerializable() throws Exception {
     CoderProperties.coderSerializable(TEST_CODER);
-  }
-
-  // If this changes, it implies that the binary format has changed.
-  private static final String EXPECTED_ENCODING_ID = "";
-
-  @Test
-  public void testEncodingId() throws Exception {
-    CoderProperties.coderHasEncodingId(TEST_CODER, EXPECTED_ENCODING_ID);
   }
 
   /**
@@ -104,5 +88,11 @@ public class IterableCoderTest {
     thrown.expectMessage("cannot encode a null Iterable");
 
     CoderUtils.encodeToBase64(TEST_CODER, null);
+  }
+
+  @Test
+  public void testEncodedTypeDescriptor() throws Exception {
+    TypeDescriptor<Iterable<Integer>> typeDescriptor = new TypeDescriptor<Iterable<Integer>>() {};
+    assertThat(TEST_CODER.getEncodedTypeDescriptor(), equalTo(typeDescriptor));
   }
 }

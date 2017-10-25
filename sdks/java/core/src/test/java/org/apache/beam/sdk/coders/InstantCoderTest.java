@@ -17,6 +17,9 @@
  */
 package org.apache.beam.sdk.coders;
 
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.assertThat;
+
 import com.google.common.collect.Lists;
 import com.google.common.primitives.UnsignedBytes;
 import java.util.ArrayList;
@@ -25,6 +28,7 @@ import java.util.Collections;
 import java.util.List;
 import org.apache.beam.sdk.testing.CoderProperties;
 import org.apache.beam.sdk.util.CoderUtils;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.joda.time.Instant;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -76,14 +80,6 @@ public class InstantCoderTest {
     Assert.assertEquals(encodings, sortedEncodings);
   }
 
-  // If this changes, it implies that the binary format has changed.
-  private static final String EXPECTED_ENCODING_ID = "";
-
-  @Test
-  public void testEncodingId() throws Exception {
-    CoderProperties.coderHasEncodingId(TEST_CODER, EXPECTED_ENCODING_ID);
-  }
-
   /**
    * Generated data to check that the wire format has not changed. To regenerate, see
    * {@link org.apache.beam.sdk.coders.PrintBase64Encodings}.
@@ -111,5 +107,10 @@ public class InstantCoderTest {
     thrown.expectMessage("cannot encode a null Instant");
 
     CoderUtils.encodeToBase64(TEST_CODER, null);
+  }
+
+  @Test
+  public void testEncodedTypeDescriptor() throws Exception {
+    assertThat(TEST_CODER.getEncodedTypeDescriptor(), equalTo(TypeDescriptor.of(Instant.class)));
   }
 }

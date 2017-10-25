@@ -26,15 +26,14 @@ import com.datatorrent.common.util.BaseOperator;
 import com.esotericsoftware.kryo.serializers.FieldSerializer.Bind;
 import com.esotericsoftware.kryo.serializers.JavaSerializer;
 import com.google.common.base.Throwables;
-
 import java.io.IOException;
-
 import org.apache.beam.runners.apex.ApexPipelineOptions;
 import org.apache.beam.runners.apex.translation.utils.ApexStreamTuple;
 import org.apache.beam.runners.apex.translation.utils.ApexStreamTuple.DataTuple;
-import org.apache.beam.runners.apex.translation.utils.SerializablePipelineOptions;
 import org.apache.beam.runners.apex.translation.utils.ValuesSource;
+import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
 import org.apache.beam.sdk.io.UnboundedSource;
+import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
 import org.apache.beam.sdk.util.WindowedValue;
@@ -86,9 +85,7 @@ public class ApexReadUnboundedInputOperator<OutputT, CheckpointMarkT
   public void beginWindow(long windowId) {
     if (!available && (isBoundedSource || source instanceof ValuesSource)) {
       // if it's a Create and the input was consumed, emit final watermark
-      emitWatermarkIfNecessary(GlobalWindow.TIMESTAMP_MAX_VALUE.getMillis());
-      // terminate the stream (allows tests to finish faster)
-      BaseOperator.shutdown();
+      emitWatermarkIfNecessary(BoundedWindow.TIMESTAMP_MAX_VALUE.getMillis());
     } else {
       emitWatermarkIfNecessary(reader.getWatermark().getMillis());
     }
@@ -106,11 +103,25 @@ public class ApexReadUnboundedInputOperator<OutputT, CheckpointMarkT
 
   @Override
   public void endWindow() {
+    if (outputWatermark >= BoundedWindow.TIMESTAMP_MAX_VALUE.getMillis()) {
+      // terminate the stream
+      if (traceTuples) {
+        LOG.debug("terminating input after final watermark");
+      }
+      try {
+        // see BEAM-1140 for why the delay after mark was emitted
+        Thread.sleep(100);
+      } catch (InterruptedException e) {
+      }
+      BaseOperator.shutdown();
+    }
   }
 
   @Override
   public void setup(OperatorContext context) {
-    this.traceTuples = ApexStreamTuple.Logging.isDebugEnabled(pipelineOptions.get(), this);
+    this.traceTuples =
+        ApexStreamTuple.Logging.isDebugEnabled(
+            pipelineOptions.get().as(ApexPipelineOptions.class), this);
     try {
       reader = source.createReader(this.pipelineOptions.get(), null);
       available = reader.start();

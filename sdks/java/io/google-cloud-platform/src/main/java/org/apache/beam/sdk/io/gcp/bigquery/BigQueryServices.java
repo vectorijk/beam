@@ -31,9 +31,8 @@ import com.google.api.services.bigquery.model.TableRow;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
-import java.util.NoSuchElementException;
 import javax.annotation.Nullable;
-import org.apache.beam.sdk.options.BigQueryOptions;
+import org.apache.beam.sdk.values.ValueInSingleWindow;
 
 /** An interface for real, mock, or fake implementations of Cloud BigQuery services. */
 interface BigQueryServices extends Serializable {
@@ -47,18 +46,6 @@ interface BigQueryServices extends Serializable {
    * Returns a real, mock, or fake {@link DatasetService}.
    */
   DatasetService getDatasetService(BigQueryOptions bqOptions);
-
-  /**
-   * Returns a real, mock, or fake {@link BigQueryJsonReader} to read tables.
-   */
-  BigQueryJsonReader getReaderFromTable(BigQueryOptions bqOptions, TableReference tableRef);
-
-  /**
-   * Returns a real, mock, or fake {@link BigQueryJsonReader} to query tables.
-   */
-  BigQueryJsonReader getReaderFromQuery(
-      BigQueryOptions bqOptions, String query, String projectId, @Nullable Boolean flatten,
-      @Nullable Boolean useLegacySql);
 
   /**
    * An interface for the Cloud BigQuery load service.
@@ -114,10 +101,12 @@ interface BigQueryServices extends Serializable {
    */
   interface DatasetService {
     /**
-     * Gets the specified {@link Table} resource by table ID or {@code null} if no table exists.
+     * Gets the specified {@link Table} resource by table ID.
+     *
+     * <p>Returns null if the table is not found.
      */
-    Table getTable(String projectId, String datasetId, String tableId)
-        throws InterruptedException, IOException;
+    @Nullable
+    Table getTable(TableReference tableRef) throws InterruptedException, IOException;
 
     /**
      * Creates the specified table if it does not exist.
@@ -128,14 +117,14 @@ interface BigQueryServices extends Serializable {
      * Deletes the table specified by tableId from the dataset.
      * If the table contains data, all the data will be deleted.
      */
-    void deleteTable(String projectId, String datasetId, String tableId)
-        throws IOException, InterruptedException;
+    void deleteTable(TableReference tableRef) throws IOException, InterruptedException;
 
     /**
      * Returns true if the table is empty.
+     *
+     * @throws IOException if the table is not found.
      */
-    boolean isTableEmpty(String projectId, String datasetId, String tableId)
-        throws IOException, InterruptedException;
+    boolean isTableEmpty(TableReference tableRef) throws IOException, InterruptedException;
 
     /**
      * Gets the specified {@link Dataset} resource by dataset ID.
@@ -144,10 +133,15 @@ interface BigQueryServices extends Serializable {
         throws IOException, InterruptedException;
 
     /**
-     * Create a {@link Dataset} with the given {@code location} and {@code description}.
+     * Create a {@link Dataset} with the given {@code location}, {@code description} and default
+     * expiration time for tables in the dataset (if {@code null}, tables don't expire).
      */
     void createDataset(
-        String projectId, String datasetId, @Nullable String location, @Nullable String description)
+        String projectId,
+        String datasetId,
+        @Nullable String location,
+        @Nullable String description,
+        @Nullable Long defaultTableExpirationMs)
         throws IOException, InterruptedException;
 
     /**
@@ -161,42 +155,19 @@ interface BigQueryServices extends Serializable {
     /**
      * Inserts {@link TableRow TableRows} with the specified insertIds if not null.
      *
+     * <p>If any insert fail permanently according to the retry policy, those rows are added
+     * to failedInserts.
+     *
      * <p>Returns the total bytes count of {@link TableRow TableRows}.
      */
-    long insertAll(TableReference ref, List<TableRow> rowList, @Nullable List<String> insertIdList)
+    long insertAll(TableReference ref, List<ValueInSingleWindow<TableRow>> rowList,
+                   @Nullable List<String> insertIdList, InsertRetryPolicy retryPolicy,
+                   List<ValueInSingleWindow<TableRow>> failedInserts)
+        throws IOException, InterruptedException;
+
+    /** Patch BigQuery {@link Table} description. */
+    Table patchTableDescription(TableReference tableReference, @Nullable String tableDescription)
         throws IOException, InterruptedException;
   }
 
-  /**
-   * An interface to read the Cloud BigQuery directly.
-   */
-  interface BigQueryJsonReader {
-    /**
-     * Initializes the reader and advances the reader to the first record.
-     */
-    boolean start() throws IOException;
-
-    /**
-     * Advances the reader to the next valid record.
-     */
-    boolean advance() throws IOException;
-
-    /**
-     * Returns the value of the data item that was read by the last {@link #start} or
-     * {@link #advance} call. The returned value must be effectively immutable and remain valid
-     * indefinitely.
-     *
-     * <p>Multiple calls to this method without an intervening call to {@link #advance} should
-     * return the same result.
-     *
-     * @throws java.util.NoSuchElementException if {@link #start} was never called, or if
-     *         the last {@link #start} or {@link #advance} returned {@code false}.
-     */
-    TableRow getCurrent() throws NoSuchElementException;
-
-    /**
-     * Closes the reader. The reader cannot be used after this method is called.
-     */
-    void close() throws IOException;
-  }
 }

@@ -18,27 +18,26 @@
 package org.apache.beam.runners.core.triggers;
 
 import java.util.Objects;
-import org.apache.beam.runners.core.triggers.TriggerStateMachine.OnceTriggerStateMachine;
+import org.apache.beam.runners.core.MergingStateAccessor;
+import org.apache.beam.runners.core.StateAccessor;
+import org.apache.beam.runners.core.StateMerging;
+import org.apache.beam.runners.core.StateTag;
+import org.apache.beam.runners.core.StateTags;
 import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.coders.VarLongCoder;
+import org.apache.beam.sdk.state.CombiningState;
 import org.apache.beam.sdk.transforms.Sum;
-import org.apache.beam.sdk.util.state.AccumulatorCombiningState;
-import org.apache.beam.sdk.util.state.MergingStateAccessor;
-import org.apache.beam.sdk.util.state.StateAccessor;
-import org.apache.beam.sdk.util.state.StateMerging;
-import org.apache.beam.sdk.util.state.StateTag;
-import org.apache.beam.sdk.util.state.StateTags;
 
 /**
  * {@link TriggerStateMachine}s that fire based on properties of the elements in the current pane.
  */
 @Experimental(Experimental.Kind.TRIGGER)
-public class AfterPaneStateMachine extends OnceTriggerStateMachine {
+public class AfterPaneStateMachine extends TriggerStateMachine {
 
-private static final StateTag<Object, AccumulatorCombiningState<Long, long[], Long>>
+private static final StateTag<CombiningState<Long, long[], Long>>
       ELEMENTS_IN_PANE_TAG =
       StateTags.makeSystemTagInternal(StateTags.combiningValueFromInputInternal(
-          "count", VarLongCoder.of(), new Sum.SumLongFn()));
+          "count", VarLongCoder.of(), Sum.ofLongs()));
 
   private final int countElems;
 
@@ -130,7 +129,8 @@ private static final StateTag<Object, AccumulatorCombiningState<Long, long[], Lo
   }
 
   @Override
-  protected void onOnlyFiring(TriggerStateMachine.TriggerContext context) throws Exception {
+  public void onFire(TriggerStateMachine.TriggerContext context) throws Exception {
     clear(context);
+    context.trigger().setFinished(true);
   }
 }

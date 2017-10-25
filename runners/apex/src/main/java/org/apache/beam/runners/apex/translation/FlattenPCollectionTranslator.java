@@ -18,12 +18,12 @@
 
 package org.apache.beam.runners.apex.translation;
 
-import com.google.common.collect.Lists;
+import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.common.collect.Lists;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-
 import org.apache.beam.runners.apex.translation.operators.ApexFlattenOperator;
 import org.apache.beam.runners.apex.translation.operators.ApexReadUnboundedInputOperator;
 import org.apache.beam.runners.apex.translation.utils.ValuesSource;
@@ -32,21 +32,21 @@ import org.apache.beam.sdk.coders.VoidCoder;
 import org.apache.beam.sdk.io.UnboundedSource;
 import org.apache.beam.sdk.transforms.Flatten;
 import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.PCollectionList;
+import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.sdk.values.TupleTag;
 
 /**
- * {@link Flatten.FlattenPCollectionList} translation to Apex operator.
+ * {@link Flatten.PCollections} translation to Apex operator.
  */
 class FlattenPCollectionTranslator<T> implements
-    TransformTranslator<Flatten.FlattenPCollectionList<T>> {
+    TransformTranslator<Flatten.PCollections<T>> {
   private static final long serialVersionUID = 1L;
 
   @Override
-  public void translate(Flatten.FlattenPCollectionList<T> transform, TranslationContext context) {
-    PCollectionList<T> input = context.getInput();
-    List<PCollection<T>> collections = input.getAll();
+  public void translate(Flatten.PCollections<T> transform, TranslationContext context) {
+    List<PCollection<T>> inputCollections = extractPCollections(context.getInputs());
 
-    if (collections.isEmpty()) {
+    if (inputCollections.isEmpty()) {
       // create a dummy source that never emits anything
       @SuppressWarnings("unchecked")
       UnboundedSource<T, ?> unboundedSource = new ValuesSource<>(Collections.EMPTY_LIST,
@@ -54,11 +54,27 @@ class FlattenPCollectionTranslator<T> implements
       ApexReadUnboundedInputOperator<T, ?> operator = new ApexReadUnboundedInputOperator<>(
           unboundedSource, context.getPipelineOptions());
       context.addOperator(operator, operator.output);
+    } else if (inputCollections.size() == 1) {
+      context.addAlias(context.getOutput(), inputCollections.get(0));
     } else {
-      PCollection<T> output = context.getOutput();
+      @SuppressWarnings("unchecked")
+      PCollection<T> output = (PCollection<T>) context.getOutput();
       Map<PCollection<?>, Integer> unionTags = Collections.emptyMap();
-      flattenCollections(collections, unionTags, output, context);
+      flattenCollections(inputCollections, unionTags, output, context);
     }
+  }
+
+  private List<PCollection<T>> extractPCollections(Map<TupleTag<?>, PValue> inputs) {
+    List<PCollection<T>> collections = Lists.newArrayList();
+    for (PValue pv : inputs.values()) {
+      checkArgument(
+          pv instanceof PCollection,
+          "Non-PCollection provided as input to flatten: %s of type %s",
+          pv,
+          pv.getClass().getSimpleName());
+      collections.add((PCollection<T>) pv);
+    }
+    return collections;
   }
 
   /**
@@ -94,8 +110,12 @@ class FlattenPCollectionTranslator<T> implements
           }
 
           if (collections.size() > 2) {
-            PCollection<T> intermediateCollection = intermediateCollection(collection,
-                collection.getCoder());
+            PCollection<T> intermediateCollection =
+                PCollection.createPrimitiveOutputInternal(
+                    collection.getPipeline(),
+                    collection.getWindowingStrategy(),
+                    collection.isBounded(),
+                    collection.getCoder());
             context.addOperator(operator, operator.out, intermediateCollection);
             remainingCollections.add(intermediateCollection);
           } else {
@@ -117,13 +137,6 @@ class FlattenPCollectionTranslator<T> implements
         collections = Lists.newArrayList();
       }
     }
-  }
-
-  static <T> PCollection<T> intermediateCollection(PCollection<T> input, Coder<T> outputCoder) {
-    PCollection<T> output = PCollection.createPrimitiveOutputInternal(input.getPipeline(),
-        input.getWindowingStrategy(), input.isBounded());
-    output.setCoder(outputCoder);
-    return output;
   }
 
 }

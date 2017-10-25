@@ -18,7 +18,7 @@
 package org.apache.beam.sdk.transforms;
 
 
-import static org.apache.beam.sdk.TestUtils.checkCombineFn;
+import static org.apache.beam.sdk.testing.CombineFnTester.testCombineFn;
 import static org.apache.beam.sdk.transforms.display.DisplayDataMatchers.hasDisplayItem;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -35,42 +35,41 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class MinTest {
   @Test
-  public void testMeanGetNames() {
-    assertEquals("Min.Globally", Min.integersGlobally().getName());
-    assertEquals("Min.Globally", Min.doublesGlobally().getName());
-    assertEquals("Min.Globally", Min.longsGlobally().getName());
-    assertEquals("Min.PerKey", Min.integersPerKey().getName());
-    assertEquals("Min.PerKey", Min.doublesPerKey().getName());
-    assertEquals("Min.PerKey", Min.longsPerKey().getName());
+  public void testMinGetNames() {
+    assertEquals("Combine.globally(MinInteger)", Min.integersGlobally().getName());
+    assertEquals("Combine.globally(MinDouble)", Min.doublesGlobally().getName());
+    assertEquals("Combine.globally(MinLong)", Min.longsGlobally().getName());
+    assertEquals("Combine.perKey(MinInteger)", Min.integersPerKey().getName());
+    assertEquals("Combine.perKey(MinDouble)", Min.doublesPerKey().getName());
+    assertEquals("Combine.perKey(MinLong)", Min.longsPerKey().getName());
   }
-
   @Test
   public void testMinIntegerFn() {
-    checkCombineFn(
-        new Min.MinIntegerFn(),
+    testCombineFn(
+        Min.ofIntegers(),
         Lists.newArrayList(1, 2, 3, 4),
         1);
   }
 
   @Test
   public void testMinLongFn() {
-    checkCombineFn(
-        new Min.MinLongFn(),
+    testCombineFn(
+        Min.ofLongs(),
         Lists.newArrayList(1L, 2L, 3L, 4L),
         1L);
   }
 
   @Test
   public void testMinDoubleFn() {
-    checkCombineFn(
-        new Min.MinDoubleFn(),
+    testCombineFn(
+        Min.ofDoubles(),
         Lists.newArrayList(1.0, 2.0, 3.0, 4.0),
         1.0);
   }
 
   @Test
   public void testDisplayData() {
-    Top.Smallest<Integer> comparer = new Top.Smallest<>();
+    Top.Reversed<Integer> comparer = new Top.Reversed<>();
 
     Combine.Globally<Integer, Integer> min = Min.globally(comparer);
     assertThat(DisplayData.from(min), hasDisplayItem("comparer", comparer.getClass()));

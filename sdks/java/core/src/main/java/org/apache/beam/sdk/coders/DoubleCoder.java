@@ -17,7 +17,6 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
@@ -25,13 +24,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UTFDataFormatException;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link DoubleCoder} encodes {@link Double} values in 8 bytes using Java serialization.
  */
 public class DoubleCoder extends AtomicCoder<Double> {
 
-  @JsonCreator
   public static DoubleCoder of() {
     return INSTANCE;
   }
@@ -39,11 +38,12 @@ public class DoubleCoder extends AtomicCoder<Double> {
   /////////////////////////////////////////////////////////////////////////////
 
   private static final DoubleCoder INSTANCE = new DoubleCoder();
+  private static final TypeDescriptor<Double> TYPE_DESCRIPTOR = new TypeDescriptor<Double>() {};
 
   private DoubleCoder() {}
 
   @Override
-  public void encode(Double value, OutputStream outStream, Context context)
+  public void encode(Double value, OutputStream outStream)
       throws IOException, CoderException {
     if (value == null) {
       throw new CoderException("cannot encode a null Double");
@@ -52,7 +52,7 @@ public class DoubleCoder extends AtomicCoder<Double> {
   }
 
   @Override
-  public Double decode(InputStream inStream, Context context)
+  public Double decode(InputStream inStream)
       throws IOException, CoderException {
     try {
       return new DataInputStream(inStream).readDouble();
@@ -93,8 +93,13 @@ public class DoubleCoder extends AtomicCoder<Double> {
    * @return {@code true}. {@link DoubleCoder#getEncodedElementByteSize} returns a constant.
    */
   @Override
-  public boolean isRegisterByteSizeObserverCheap(Double value, Context context) {
+  public boolean isRegisterByteSizeObserverCheap(Double value) {
     return true;
+  }
+
+  @Override
+  public TypeDescriptor<Double> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
   }
 
   /**
@@ -103,7 +108,7 @@ public class DoubleCoder extends AtomicCoder<Double> {
    * @return {@code 8}, the byte size of a {@link Double} encoded using Java serialization.
    */
   @Override
-  protected long getEncodedElementByteSize(Double value, Context context)
+  protected long getEncodedElementByteSize(Double value)
       throws Exception {
     if (value == null) {
       throw new CoderException("cannot encode a null Double");

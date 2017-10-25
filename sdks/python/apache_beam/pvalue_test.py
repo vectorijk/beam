@@ -19,48 +19,24 @@
 
 import unittest
 
-from apache_beam.pipeline import Pipeline
-from apache_beam.pvalue import AsDict
-from apache_beam.pvalue import AsIter
-from apache_beam.pvalue import AsList
 from apache_beam.pvalue import AsSingleton
 from apache_beam.pvalue import PValue
-from apache_beam.transforms import Create
-
-
-class FakePipeline(Pipeline):
-  """Fake pipeline object used to check if apply() receives correct args."""
-
-  def apply(self, *args, **kwargs):
-    self.args = args
-    self.kwargs = kwargs
+from apache_beam.testing.test_pipeline import TestPipeline
 
 
 class PValueTest(unittest.TestCase):
 
   def test_pvalue_expected_arguments(self):
-    pipeline = Pipeline('DirectRunner')
+    pipeline = TestPipeline()
     value = PValue(pipeline)
     self.assertEqual(pipeline, value.pipeline)
 
-  def test_pcollectionview_not_recreated(self):
-    pipeline = Pipeline('DirectRunner')
-    value = pipeline | 'create1' >> Create([1, 2, 3])
-    value2 = pipeline | 'create2' >> Create([(1, 1), (2, 2), (3, 3)])
-    value3 = pipeline | 'create3' >> Create([(1, 1), (2, 2), (3, 3)])
-    self.assertEqual(AsSingleton(value), AsSingleton(value))
-    self.assertEqual(AsSingleton('new', value, default_value=1),
-                     AsSingleton('new', value, default_value=1))
-    self.assertNotEqual(AsSingleton(value),
-                        AsSingleton('new', value, default_value=1))
-    self.assertEqual(AsIter(value), AsIter(value))
-    self.assertEqual(AsList(value), AsList(value))
-    self.assertEqual(AsDict(value2), AsDict(value2))
-
-    self.assertNotEqual(AsSingleton(value), AsSingleton(value2))
-    self.assertNotEqual(AsIter(value), AsIter(value2))
-    self.assertNotEqual(AsList(value), AsList(value2))
-    self.assertNotEqual(AsDict(value2), AsDict(value3))
+  def test_assingleton_multi_element(self):
+    with self.assertRaisesRegexp(
+        ValueError,
+        'PCollection of size 2 with more than one element accessed as a '
+        'singleton view. First two elements encountered are \"1\", \"2\".'):
+      AsSingleton._from_runtime_iterable([1, 2], {})
 
 
 if __name__ == '__main__':

@@ -17,22 +17,22 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UTFDataFormatException;
+import java.util.Collections;
+import java.util.List;
 import org.apache.beam.sdk.util.VarInt;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link Coder} that encodes {@link Long Longs} using between 1 and 10 bytes. Negative
  * numbers always take 10 bytes, so {@link BigEndianLongCoder} may be preferable for
  * longs that are known to often be large or negative.
  */
-public class VarLongCoder extends AtomicCoder<Long> {
-
-  @JsonCreator
+public class VarLongCoder extends StructuredCoder<Long> {
   public static VarLongCoder of() {
     return INSTANCE;
   }
@@ -40,11 +40,12 @@ public class VarLongCoder extends AtomicCoder<Long> {
   /////////////////////////////////////////////////////////////////////////////
 
   private static final VarLongCoder INSTANCE = new VarLongCoder();
+  private static final TypeDescriptor<Long> TYPE_DESCRIPTOR = new TypeDescriptor<Long>() {};
 
   private VarLongCoder() {}
 
   @Override
-  public void encode(Long value, OutputStream outStream, Context context)
+  public void encode(Long value, OutputStream outStream)
       throws IOException, CoderException {
     if (value == null) {
       throw new CoderException("cannot encode a null Long");
@@ -53,7 +54,7 @@ public class VarLongCoder extends AtomicCoder<Long> {
   }
 
   @Override
-  public Long decode(InputStream inStream, Context context)
+  public Long decode(InputStream inStream)
       throws IOException, CoderException {
     try {
       return VarInt.decodeLong(inStream);
@@ -63,6 +64,14 @@ public class VarLongCoder extends AtomicCoder<Long> {
       throw new CoderException(exn);
     }
   }
+
+  @Override
+  public List<? extends Coder<?>> getCoderArguments() {
+    return Collections.emptyList();
+  }
+
+  @Override
+  public void verifyDeterministic() {}
 
   /**
    * {@inheritDoc}
@@ -80,12 +89,17 @@ public class VarLongCoder extends AtomicCoder<Long> {
    * @return {@code true}. {@link #getEncodedElementByteSize} is cheap.
    */
   @Override
-  public boolean isRegisterByteSizeObserverCheap(Long value, Context context) {
+  public boolean isRegisterByteSizeObserverCheap(Long value) {
     return true;
   }
 
   @Override
-  protected long getEncodedElementByteSize(Long value, Context context)
+  public TypeDescriptor<Long> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
+  }
+
+  @Override
+  protected long getEncodedElementByteSize(Long value)
       throws Exception {
     if (value == null) {
       throw new CoderException("cannot encode a null Long");

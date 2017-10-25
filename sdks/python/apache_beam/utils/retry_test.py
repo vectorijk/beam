@@ -19,9 +19,16 @@
 
 import unittest
 
-from apitools.base.py.exceptions import HttpError
-
 from apache_beam.utils import retry
+
+# Protect against environments where apitools library is not available.
+# pylint: disable=wrong-import-order, wrong-import-position
+# TODO(sourabhbajaj): Remove the GCP specific error code to a submodule
+try:
+  from apitools.base.py.exceptions import HttpError
+except ImportError:
+  HttpError = None
+# pylint: enable=wrong-import-order, wrong-import-position
 
 
 class FakeClock(object):
@@ -51,7 +58,7 @@ def test_function(a, b):
   raise NotImplementedError
 
 
-@retry.with_exponential_backoff(initial_delay_secs=1.0, num_retries=1)
+@retry.with_exponential_backoff(initial_delay_secs=0.1, num_retries=1)
 def test_function_with_real_clock(a, b):
   _ = a, b
   raise NotImplementedError
@@ -75,11 +82,13 @@ class RetryTest(unittest.TestCase):
 
   def transient_failure(self, a, b):
     self.calls += 1
-    if self.calls > 8:
+    if self.calls > 4:
       return a + b
     raise NotImplementedError
 
   def http_error(self, code):
+    if HttpError is None:
+      raise RuntimeError("This is not a valid test as GCP is not enabled")
     raise HttpError({'status': str(code)}, '', '')
 
   def test_with_explicit_decorator(self):
@@ -99,7 +108,7 @@ class RetryTest(unittest.TestCase):
                       retry.with_exponential_backoff(clock=self.clock)(
                           self.permanent_failure),
                       10, b=20)
-    self.assertEqual(len(self.clock.calls), 16)
+    self.assertEqual(len(self.clock.calls), 7)
 
   def test_with_explicit_number_of_retries(self):
     self.assertRaises(NotImplementedError,
@@ -109,6 +118,7 @@ class RetryTest(unittest.TestCase):
                       10, b=20)
     self.assertEqual(len(self.clock.calls), 10)
 
+  @unittest.skipIf(HttpError is None, 'google-apitools is not installed')
   def test_with_http_error_that_should_not_be_retried(self):
     self.assertRaises(HttpError,
                       retry.with_exponential_backoff(
@@ -118,6 +128,7 @@ class RetryTest(unittest.TestCase):
     # Make sure just one call was made.
     self.assertEqual(len(self.clock.calls), 0)
 
+  @unittest.skipIf(HttpError is None, 'google-apitools is not installed')
   def test_with_http_error_that_should_be_retried(self):
     self.assertRaises(HttpError,
                       retry.with_exponential_backoff(
@@ -133,7 +144,7 @@ class RetryTest(unittest.TestCase):
                           fuzz=False)(
                               self.permanent_failure),
                       10, b=20)
-    self.assertEqual(len(self.clock.calls), 16)
+    self.assertEqual(len(self.clock.calls), 7)
     self.assertEqual(self.clock.calls[0], 10.0)
 
   def test_log_calls_for_permanent_failure(self):
@@ -142,7 +153,7 @@ class RetryTest(unittest.TestCase):
                           clock=self.clock, logger=self.logger.log)(
                               self.permanent_failure),
                       10, b=20)
-    self.assertEqual(len(self.logger.calls), 16)
+    self.assertEqual(len(self.logger.calls), 7)
     for message, func_name, exn_name  in self.logger.calls:
       self.assertTrue(message.startswith('Retry with exponential backoff:'))
       self.assertEqual(exn_name, 'NotImplementedError\n')
@@ -153,11 +164,10 @@ class RetryTest(unittest.TestCase):
         clock=self.clock, logger=self.logger.log, fuzz=False)(
             self.transient_failure)(10, b=20)
     self.assertEqual(result, 30)
-    self.assertEqual(len(self.clock.calls), 8)
+    self.assertEqual(len(self.clock.calls), 4)
     self.assertEqual(self.clock.calls,
-                     [5.0 * 1, 5.0 * 2, 5.0 * 4, 5.0 * 8,
-                      5.0 * 16, 5.0 * 32, 5.0 * 64, 5.0 * 128])
-    self.assertEqual(len(self.logger.calls), 8)
+                     [5.0 * 1, 5.0 * 2, 5.0 * 4, 5.0 * 8,])
+    self.assertEqual(len(self.logger.calls), 4)
     for message, func_name, exn_name  in self.logger.calls:
       self.assertTrue(message.startswith('Retry with exponential backoff:'))
       self.assertEqual(exn_name, 'NotImplementedError\n')

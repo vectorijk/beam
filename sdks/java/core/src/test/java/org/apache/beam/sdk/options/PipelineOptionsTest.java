@@ -19,9 +19,12 @@ package org.apache.beam.sdk.options;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.collect.ImmutableMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +37,8 @@ import org.junit.runners.JUnit4;
 /** Unit tests for {@link PipelineOptions}. */
 @RunWith(JUnit4.class)
 public class PipelineOptionsTest {
+  private static final String DEFAULT_USER_AGENT_NAME = "Apache_Beam_SDK_for_Java";
+
   @Rule public ExpectedException expectedException = ExpectedException.none();
 
   /** Interfaces used for testing that {@link PipelineOptions#as(Class)} functions. */
@@ -88,10 +93,28 @@ public class PipelineOptionsTest {
   @Test
   public void testOutputRuntimeOptions() {
     ValueProviderOptions options =
-        PipelineOptionsFactory.fromArgs(
-            new String[]{"--string=baz"}).as(ValueProviderOptions.class);
+        PipelineOptionsFactory.fromArgs("--string=baz").as(ValueProviderOptions.class);
     Map<String, ?> expected = ImmutableMap.of(
         "bool", ImmutableMap.of("type", Boolean.class));
     assertEquals(expected, options.outputRuntimeOptions());
+  }
+
+  @Test
+  public void testPipelineOptionsIdIsUniquePerInstance() {
+    Set<Long> ids = new HashSet<Long>();
+    for (int i = 0; i < 1000; ++i) {
+      long id = PipelineOptionsFactory.create().getOptionsId();
+      if (!ids.add(id)) {
+        fail(String.format("Generated duplicate id %s, existing generated ids %s", id, ids));
+      }
+    }
+  }
+
+  @Test
+  public void testUserAgentFactory() {
+    PipelineOptions options = PipelineOptionsFactory.create();
+    String userAgent = options.getUserAgent();
+    assertNotNull(userAgent);
+    assertTrue(userAgent.contains(DEFAULT_USER_AGENT_NAME));
   }
 }

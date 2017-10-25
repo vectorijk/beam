@@ -17,27 +17,21 @@
  */
 package org.apache.beam.sdk.transforms.join;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static org.apache.beam.sdk.util.Structs.addObject;
-
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.google.common.collect.PeekingIterator;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
+import org.apache.beam.sdk.coders.CustomCoder;
 import org.apache.beam.sdk.coders.IterableCoder;
-import org.apache.beam.sdk.coders.StandardCoder;
-import org.apache.beam.sdk.util.CloudObject;
-import org.apache.beam.sdk.util.PropertyNames;
 import org.apache.beam.sdk.util.common.Reiterator;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TupleTag;
@@ -210,7 +204,7 @@ public class CoGbkResult {
   /**
    * A {@link Coder} for {@link CoGbkResult}s.
    */
-  public static class CoGbkResultCoder extends StandardCoder<CoGbkResult> {
+  public static class CoGbkResultCoder extends CustomCoder<CoGbkResult> {
 
     private final CoGbkResultSchema schema;
     private final UnionCoder unionCoder;
@@ -224,15 +218,6 @@ public class CoGbkResult {
       return new CoGbkResultCoder(schema, unionCoder);
     }
 
-    @JsonCreator
-    public static CoGbkResultCoder of(
-        @JsonProperty(PropertyNames.COMPONENT_ENCODINGS)
-        List<Coder<?>> components,
-        @JsonProperty(PropertyNames.CO_GBK_RESULT_SCHEMA) CoGbkResultSchema schema) {
-      checkArgument(components.size() == 1, "Expecting 1 component, got %s", components.size());
-      return new CoGbkResultCoder(schema, (UnionCoder) components.get(0));
-    }
-
     private CoGbkResultCoder(
         CoGbkResultSchema tupleTags,
         UnionCoder unionCoder) {
@@ -240,54 +225,53 @@ public class CoGbkResult {
       this.unionCoder = unionCoder;
     }
 
-
     @Override
     public List<? extends Coder<?>> getCoderArguments() {
-      return null;
+      return ImmutableList.of(unionCoder);
     }
 
-    @Override
-    public List<? extends Coder<?>> getComponents() {
-      return Arrays.<Coder<?>>asList(unionCoder);
+    public CoGbkResultSchema getSchema() {
+      return schema;
     }
 
-    @Override
-    public CloudObject asCloudObject() {
-      CloudObject result = super.asCloudObject();
-      addObject(result, PropertyNames.CO_GBK_RESULT_SCHEMA, schema.asCloudObject());
-      return result;
+    public UnionCoder getUnionCoder() {
+      return unionCoder;
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public void encode(
         CoGbkResult value,
-        OutputStream outStream,
-        Context context) throws CoderException,
+        OutputStream outStream) throws CoderException,
         IOException {
       if (!schema.equals(value.getSchema())) {
         throw new CoderException("input schema does not match coder schema");
       }
+      if (schema.size() == 0) {
+        return;
+      }
       for (int unionTag = 0; unionTag < schema.size(); unionTag++) {
-        tagListCoder(unionTag).encode(value.valueMap.get(unionTag), outStream, Context.NESTED);
+        tagListCoder(unionTag).encode(value.valueMap.get(unionTag), outStream);
       }
     }
 
     @Override
     public CoGbkResult decode(
-        InputStream inStream,
-        Context context)
+        InputStream inStream)
         throws CoderException, IOException {
-      List<Iterable<?>> valueMap = new ArrayList<>();
+      if (schema.size() == 0) {
+        return new CoGbkResult(schema, ImmutableList.<Iterable<?>>of());
+      }
+      List<Iterable<?>> valueMap = Lists.newArrayListWithExpectedSize(schema.size());
       for (int unionTag = 0; unionTag < schema.size(); unionTag++) {
-        valueMap.add(tagListCoder(unionTag).decode(inStream, Context.NESTED));
+        valueMap.add(tagListCoder(unionTag).decode(inStream));
       }
       return new CoGbkResult(schema, valueMap);
     }
 
     @SuppressWarnings("rawtypes")
     private IterableCoder tagListCoder(int unionTag) {
-      return IterableCoder.of(unionCoder.getComponents().get(unionTag));
+      return IterableCoder.of(unionCoder.getElementCoders().get(unionTag));
     }
 
     @Override
@@ -310,7 +294,7 @@ public class CoGbkResult {
     @Override
     public void verifyDeterministic() throws NonDeterministicException {
       verifyDeterministic(
-          "CoGbkResult requires the union coder to be deterministic", unionCoder);
+          this, "CoGbkResult requires the union coder to be deterministic", unionCoder);
     }
   }
 

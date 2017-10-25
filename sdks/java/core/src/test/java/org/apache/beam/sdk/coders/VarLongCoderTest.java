@@ -17,10 +17,14 @@
  */
 package org.apache.beam.sdk.coders;
 
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.assertThat;
+
 import java.util.Arrays;
 import java.util.List;
 import org.apache.beam.sdk.testing.CoderProperties;
 import org.apache.beam.sdk.util.CoderUtils;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -47,14 +51,6 @@ public class VarLongCoderTest {
     for (Long value : TEST_VALUES) {
       CoderProperties.coderDecodeEncodeEqual(TEST_CODER, value);
     }
-  }
-
-  // If this changes, it implies the binary format has changed.
-  private static final String EXPECTED_ENCODING_ID = "";
-
-  @Test
-  public void testEncodingId() throws Exception {
-    CoderProperties.coderHasEncodingId(TEST_CODER, EXPECTED_ENCODING_ID);
   }
 
   /**
@@ -89,5 +85,10 @@ public class VarLongCoderTest {
     thrown.expectMessage("cannot encode a null Long");
 
     CoderUtils.encodeToBase64(TEST_CODER, null);
+  }
+
+  @Test
+  public void testEncodedTypeDescriptor() throws Exception {
+    assertThat(TEST_CODER.getEncodedTypeDescriptor(), equalTo(TypeDescriptor.of(Long.class)));
   }
 }

@@ -17,11 +17,15 @@
  */
 package org.apache.beam.sdk.coders;
 
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.assertThat;
+
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import org.apache.beam.sdk.coders.Coder.NonDeterministicException;
 import org.apache.beam.sdk.testing.CoderProperties;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -64,8 +68,9 @@ public class StringDelegateCoderTest {
   }
 
   @Test
-  public void testEncodingId() throws Exception {
-    StringDelegateCoder<URI> coder = StringDelegateCoder.of(URI.class);
-    CoderProperties.coderHasEncodingId(coder, URI.class.getName());
+  public void testEncodedTypeDescriptor() throws Exception {
+    assertThat(
+        StringDelegateCoder.of(URI.class).getEncodedTypeDescriptor(),
+        equalTo(TypeDescriptor.of(URI.class)));
   }
 }

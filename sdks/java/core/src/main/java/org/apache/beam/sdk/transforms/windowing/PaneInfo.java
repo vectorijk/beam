@@ -27,9 +27,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Objects;
 import org.apache.beam.sdk.coders.AtomicCoder;
-import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
 import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.DoFn.WindowedContext;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.util.VarInt;
 
@@ -65,16 +65,14 @@ public final class PaneInfo {
    * produces a final pane, it will not be merged into any new windows.
    *
    * <p>The predictions above are made using the mechanism of watermarks.
-   * See {@link org.apache.beam.sdk.util.TimerInternals} for more information
-   * about watermarks.
    *
    * <p>We can state some properties of {@code LATE} and {@code ON_TIME} panes, but first need some
    * definitions:
    * <ol>
    * <li>We'll call a pipeline 'simple' if it does not use
-   * {@link DoFn.Context#outputWithTimestamp} in
+   * {@link WindowedContext#outputWithTimestamp} in
    * any {@link DoFn}, and it uses the same
-   * {@link org.apache.beam.sdk.transforms.windowing.Window.Bound#withAllowedLateness}
+   * {@link org.apache.beam.sdk.transforms.windowing.Window#withAllowedLateness}
    * argument value on all windows (or uses the default of {@link org.joda.time.Duration#ZERO}).
    * <li>We'll call an element 'locally late', from the point of view of a computation on a
    * worker, if the element's timestamp is before the input watermark for that computation
@@ -235,7 +233,7 @@ public final class PaneInfo {
   }
 
   /**
-   * Return true if this is the last pane that will be produced in the associated window.
+   * Return the timing of this pane.
    */
   public Timing getTiming() {
     return timing;
@@ -319,7 +317,7 @@ public final class PaneInfo {
 
       public final byte tag;
 
-      private Encoding() {
+      Encoding() {
         assert ordinal() < 16;
         tag = (byte) (ordinal() << 4);
       }
@@ -341,8 +339,14 @@ public final class PaneInfo {
 
     public static final PaneInfoCoder INSTANCE = new PaneInfoCoder();
 
+    public static PaneInfoCoder of() {
+      return INSTANCE;
+    }
+
+    private PaneInfoCoder() {}
+
     @Override
-    public void encode(PaneInfo value, final OutputStream outStream, Coder.Context context)
+    public void encode(PaneInfo value, final OutputStream outStream)
         throws CoderException, IOException {
       Encoding encoding = chooseEncoding(value);
       switch (chooseEncoding(value)) {
@@ -364,7 +368,7 @@ public final class PaneInfo {
     }
 
     @Override
-    public PaneInfo decode(final InputStream inStream, Coder.Context context)
+    public PaneInfo decode(final InputStream inStream)
         throws CoderException, IOException {
       byte keyAndTag = (byte) inStream.read();
       PaneInfo base = BYTE_TO_PANE_INFO.get((byte) (keyAndTag & 0x0F));
@@ -385,5 +389,8 @@ public final class PaneInfo {
       }
       return new PaneInfo(base.isFirst, base.isLast, base.timing, index, onTimeIndex);
     }
+
+    @Override
+    public void verifyDeterministic() {}
   }
 }

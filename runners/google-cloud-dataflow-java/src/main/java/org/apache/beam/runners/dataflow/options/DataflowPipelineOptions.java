@@ -17,22 +17,26 @@
  */
 package org.apache.beam.runners.dataflow.options;
 
-import java.io.IOException;
+import java.util.Map;
+
 import org.apache.beam.runners.dataflow.DataflowRunner;
 import org.apache.beam.sdk.annotations.Experimental;
+import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
+import org.apache.beam.sdk.extensions.gcp.options.GcsOptions;
+import org.apache.beam.sdk.io.FileSystems;
+import org.apache.beam.sdk.io.fs.ResolveOptions.StandardResolveOptions;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryOptions;
+import org.apache.beam.sdk.io.gcp.pubsub.PubsubOptions;
 import org.apache.beam.sdk.options.ApplicationNameOptions;
-import org.apache.beam.sdk.options.BigQueryOptions;
 import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.DefaultValueFactory;
 import org.apache.beam.sdk.options.Description;
-import org.apache.beam.sdk.options.GcpOptions;
-import org.apache.beam.sdk.options.GcsOptions;
 import org.apache.beam.sdk.options.Hidden;
 import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.sdk.options.PubsubOptions;
 import org.apache.beam.sdk.options.StreamingOptions;
 import org.apache.beam.sdk.options.Validation;
-import org.apache.beam.sdk.util.IOChannelUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Options that can be used to configure the {@link DataflowRunner}.
@@ -97,13 +101,39 @@ public interface DataflowPipelineOptions
   void setServiceAccount(String value);
 
   /**
+   * The Google Compute Engine
+   * <a href="https://cloud.google.com/compute/docs/regions-zones/regions-zones">region</a>
+   * for creating Dataflow jobs.
+   *
+   * <p>NOTE: The Cloud Dataflow service does not yet honor this setting. However, once service
+   * support is added then users of this SDK will be able to control the region.
+   */
+  @Hidden
+  @Experimental
+  @Description("The Google Compute Engine region for creating Dataflow jobs. See "
+      + "https://cloud.google.com/compute/docs/regions-zones/regions-zones for a list of valid "
+      + "options. Default is up to the Dataflow service.")
+  @Default.String("us-central1")
+  String getRegion();
+  void setRegion(String region);
+
+  /**
+   * Labels that will be applied to the billing records for this job.
+   */
+  @Description("Labels that will be applied to the billing records for this job.")
+  Map<String, String> getLabels();
+  void setLabels(Map<String, String> labels);
+
+  /**
    * Returns a default staging location under {@link GcpOptions#getGcpTempLocation}.
    */
   class StagingLocationFactory implements DefaultValueFactory<String> {
+    private static final Logger LOG = LoggerFactory.getLogger(StagingLocationFactory.class);
 
     @Override
     public String create(PipelineOptions options) {
       GcsOptions gcsOptions = options.as(GcsOptions.class);
+      LOG.info("No stagingLocation provided, falling back to gcpTempLocation");
       String gcpTempLocation;
       try {
         gcpTempLocation = gcsOptions.getGcpTempLocation();
@@ -120,13 +150,9 @@ public interface DataflowPipelineOptions
             "Error constructing default value for stagingLocation: gcpTempLocation is not"
             + " a valid GCS path, %s. ", gcpTempLocation), e);
       }
-      try {
-        return IOChannelUtils.resolve(gcpTempLocation, "staging");
-      } catch (IOException e) {
-        throw new IllegalArgumentException(String.format(
-            "Unable to resolve stagingLocation from gcpTempLocation: %s."
-            + " Please set the staging location explicitly.", gcpTempLocation), e);
-      }
+      return FileSystems.matchNewResource(gcpTempLocation, true /* isDirectory */)
+          .resolve("staging", StandardResolveOptions.RESOLVE_DIRECTORY)
+          .toString();
     }
   }
 }

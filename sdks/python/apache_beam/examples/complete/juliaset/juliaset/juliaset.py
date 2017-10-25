@@ -33,8 +33,9 @@ def from_pixel(x, y, n):
   return complex(2.0 * x / n - 1.0, 2.0 * y / n - 1.0)
 
 
-def get_julia_set_point_color((x, y), c, n, max_iterations):
+def get_julia_set_point_color(element, c, n, max_iterations):
   """Given an pixel, convert it into a point in our julia set."""
+  x, y = element
   z = from_pixel(x, y, n)
   for i in xrange(max_iterations):
     if z.real * z.real + z.imag * z.imag > 2.0:
@@ -98,26 +99,24 @@ def run(argv=None):  # pylint: disable=missing-docstring
                       help='Output file to write the resulting image to.')
   known_args, pipeline_args = parser.parse_known_args(argv)
 
-  p = beam.Pipeline(argv=pipeline_args)
-  n = int(known_args.grid_size)
+  with beam.Pipeline(argv=pipeline_args) as p:
+    n = int(known_args.grid_size)
 
-  coordinates = generate_julia_set_colors(p, complex(-.62772, .42193), n, 100)
+    coordinates = generate_julia_set_colors(p, complex(-.62772, .42193), n, 100)
 
-  # Group each coordinate triplet by its x value, then write the coordinates to
-  # the output file with an x-coordinate grouping per line.
-  # pylint: disable=expression-not-assigned
-  (coordinates
-   | 'x coord key' >> beam.Map(lambda (x, y, i): (x, (x, y, i)))
-   | 'x coord' >> beam.GroupByKey()
-   | 'format' >> beam.Map(
-       lambda (k, coords): ' '.join('(%s, %s, %s)' % coord for coord in coords))
-   | WriteToText(known_args.coordinate_output))
-  # pylint: enable=expression-not-assigned
-  return p.run()
+    # Group each coordinate triplet by its x value, then write the coordinates
+    # to the output file with an x-coordinate grouping per line.
+    # pylint: disable=expression-not-assigned
+    (coordinates
+     | 'x coord key' >> beam.Map(lambda (x, y, i): (x, (x, y, i)))
+     | 'x coord' >> beam.GroupByKey()
+     | 'format' >> beam.Map(
+         lambda (k, coords): ' '.join('(%s, %s, %s)' % c for c in coords))
+     | WriteToText(known_args.coordinate_output))
 
-  # Optionally render the image and save it to a file.
-  # TODO(silviuc): Add this functionality.
-  # if p.options.image_output is not None:
-  #  julia_set_image = generate_julia_set_visualization(
-  #      file_with_coordinates, n, 100)
-  #  save_julia_set_visualization(p.options.image_output, julia_set_image)
+    # Optionally render the image and save it to a file.
+    # TODO(silviuc): Add this functionality.
+    # if p.options.image_output is not None:
+    #  julia_set_image = generate_julia_set_visualization(
+    #      file_with_coordinates, n, 100)
+    #  save_julia_set_visualization(p.options.image_output, julia_set_image)

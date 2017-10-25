@@ -17,15 +17,16 @@
  */
 package org.apache.beam.sdk.transforms.windowing;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import org.apache.beam.sdk.coders.AtomicCoder;
+import java.util.Collections;
+import java.util.List;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
 import org.apache.beam.sdk.coders.DurationCoder;
 import org.apache.beam.sdk.coders.InstantCoder;
+import org.apache.beam.sdk.coders.StructuredCoder;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.joda.time.ReadableDuration;
@@ -166,34 +167,46 @@ public class IntervalWindow extends BoundedWindow
   /**
    * Encodes an {@link IntervalWindow} as a pair of its upper bound and duration.
    */
-  private static class IntervalWindowCoder extends AtomicCoder<IntervalWindow> {
+  public static class IntervalWindowCoder extends StructuredCoder<IntervalWindow> {
 
-    private static final IntervalWindowCoder INSTANCE =
-        new IntervalWindowCoder();
+    private static final IntervalWindowCoder INSTANCE = new IntervalWindowCoder();
 
     private static final Coder<Instant> instantCoder = InstantCoder.of();
     private static final Coder<ReadableDuration> durationCoder = DurationCoder.of();
 
-    @JsonCreator
     public static IntervalWindowCoder of() {
       return INSTANCE;
     }
 
     @Override
-    public void encode(IntervalWindow window,
-                       OutputStream outStream,
-                       Context context)
+    public void encode(IntervalWindow window, OutputStream outStream)
         throws IOException, CoderException {
-      instantCoder.encode(window.end, outStream, context.nested());
-      durationCoder.encode(new Duration(window.start, window.end), outStream, context.nested());
+      instantCoder.encode(window.end, outStream);
+      durationCoder.encode(new Duration(window.start, window.end), outStream);
     }
 
     @Override
-    public IntervalWindow decode(InputStream inStream, Context context)
+    public IntervalWindow decode(InputStream inStream)
         throws IOException, CoderException {
-      Instant end = instantCoder.decode(inStream, context.nested());
-      ReadableDuration duration = durationCoder.decode(inStream, context.nested());
+      Instant end = instantCoder.decode(inStream);
+      ReadableDuration duration = durationCoder.decode(inStream);
       return new IntervalWindow(end.minus(duration), end);
+    }
+
+    @Override
+    public void verifyDeterministic() throws NonDeterministicException {
+      instantCoder.verifyDeterministic();
+      durationCoder.verifyDeterministic();
+    }
+
+    @Override
+    public boolean consistentWithEquals() {
+      return instantCoder.consistentWithEquals() && durationCoder.consistentWithEquals();
+    }
+
+    @Override
+    public List<? extends Coder<?>> getCoderArguments() {
+      return Collections.emptyList();
     }
   }
 }

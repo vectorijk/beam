@@ -27,11 +27,9 @@ import com.google.common.collect.Table;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 import javax.annotation.Nullable;
+import org.apache.beam.sdk.state.TimeDomain;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
-import org.apache.beam.sdk.util.TimeDomain;
-import org.apache.beam.sdk.util.TimerInternals;
 import org.apache.beam.sdk.util.WindowTracing;
-import org.apache.beam.sdk.util.state.StateNamespace;
 import org.joda.time.Instant;
 
 /** {@link TimerInternals} with all watermarks and processing clock simulated in-memory. */
@@ -109,6 +107,9 @@ public class InMemoryTimerInternals implements TimerInternals {
     setTimer(TimerData.of(timerId, namespace, target, timeDomain));
   }
 
+  /**
+   * @deprecated use {@link #setTimer(StateNamespace, String, Instant, TimeDomain)}.
+   */
   @Deprecated
   @Override
   public void setTimer(TimerData timerData) {
@@ -138,6 +139,9 @@ public class InMemoryTimerInternals implements TimerInternals {
     throw new UnsupportedOperationException("Canceling a timer by ID is not yet supported.");
   }
 
+  /**
+   * @deprecated use {@link #deleteTimer(StateNamespace, String, TimeDomain)}.
+   */
   @Deprecated
   @Override
   public void deleteTimer(StateNamespace namespace, String timerId) {
@@ -147,6 +151,9 @@ public class InMemoryTimerInternals implements TimerInternals {
     }
   }
 
+  /**
+   * @deprecated use {@link #deleteTimer(StateNamespace, String, TimeDomain)}.
+   */
   @Deprecated
   @Override
   public void deleteTimer(TimerData timer) {

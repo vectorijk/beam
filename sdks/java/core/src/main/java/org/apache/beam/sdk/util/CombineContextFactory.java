@@ -18,10 +18,8 @@
 package org.apache.beam.sdk.util;
 
 import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.state.StateContext;
 import org.apache.beam.sdk.transforms.CombineWithContext.Context;
-import org.apache.beam.sdk.transforms.OldDoFn;
-import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
-import org.apache.beam.sdk.util.state.StateContext;
 import org.apache.beam.sdk.values.PCollectionView;
 
 /**
@@ -49,23 +47,6 @@ public class CombineContextFactory {
   }
 
   /**
-   * Returns a {@code Combine.Context} that wraps a {@code OldDoFn.ProcessContext}.
-   */
-  public static Context createFromProcessContext(final OldDoFn<?, ?>.ProcessContext c) {
-    return new Context() {
-      @Override
-      public PipelineOptions getPipelineOptions() {
-        return c.getPipelineOptions();
-      }
-
-      @Override
-      public <T> T sideInput(PCollectionView<T> view) {
-        return c.sideInput(view);
-      }
-    };
-  }
-
-  /**
    * Returns a {@code Combine.Context} that wraps a {@link StateContext}.
    */
   public static Context createFromStateContext(final StateContext<?> c) {
@@ -82,28 +63,4 @@ public class CombineContextFactory {
     };
   }
 
-  /**
-   * Returns a {@code Combine.Context} from {@code PipelineOptions}, {@code SideInputReader},
-   * and the main input window.
-   */
-  public static Context createFromComponents(final PipelineOptions options,
-      final SideInputReader sideInputReader, final BoundedWindow mainInputWindow) {
-    return new Context() {
-      @Override
-      public PipelineOptions getPipelineOptions() {
-        return options;
-      }
-
-      @Override
-      public <T> T sideInput(PCollectionView<T> view) {
-        if (!sideInputReader.contains(view)) {
-          throw new IllegalArgumentException("calling sideInput() with unknown view");
-        }
-
-        BoundedWindow sideInputWindow =
-            view.getWindowingStrategyInternal().getWindowFn().getSideInputWindow(mainInputWindow);
-        return sideInputReader.get(view, sideInputWindow);
-      }
-    };
-  }
 }

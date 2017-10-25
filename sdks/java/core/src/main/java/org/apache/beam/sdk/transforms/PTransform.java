@@ -20,15 +20,20 @@ package org.apache.beam.sdk.transforms;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.Map;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.CannotProvideCoderException;
 import org.apache.beam.sdk.coders.Coder;
+import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.transforms.display.DisplayData.Builder;
 import org.apache.beam.sdk.transforms.display.HasDisplayData;
-import org.apache.beam.sdk.util.StringUtils;
+import org.apache.beam.sdk.util.NameUtils;
+import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PInput;
 import org.apache.beam.sdk.values.POutput;
-import org.apache.beam.sdk.values.TypedPValue;
+import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.sdk.values.TupleTag;
 
 /**
  * A {@code PTransform<InputT, OutputT>} is an operation that takes an
@@ -84,9 +89,8 @@ import org.apache.beam.sdk.values.TypedPValue;
  * <p>PTransform operations have unique names, which are used by the
  * system when explaining what's going on during optimization and
  * execution.  Each PTransform gets a system-provided default name,
- * but it's a good practice to specify an explicit name, where
- * possible, using the {@code named()} method offered by some
- * PTransforms such as {@link ParDo}.  For example:
+ * but it's a good practice to specify a more informative explicit
+ * name when applying the transform. For example:
  *
  * <pre> {@code
  * ...
@@ -113,12 +117,12 @@ import org.apache.beam.sdk.values.TypedPValue;
  * mapping from Java types to the default Coder to use, for a standard
  * set of Java types; users can extend this mapping for additional
  * types, via
- * {@link org.apache.beam.sdk.coders.CoderRegistry#registerCoder}.
+ * {@link org.apache.beam.sdk.coders.CoderRegistry#registerCoderProvider}.
  * If this inference process fails, either because the Java type was
  * not known at run-time (e.g., due to Java's "erasure" of generic
  * types) or there was no default Coder registered, then the Coder
  * should be specified manually by calling
- * {@link org.apache.beam.sdk.values.TypedPValue#setCoder}
+ * {@link PCollection#setCoder}
  * on the output PCollection.  The Coder of every output
  * PCollection must be determined one way or another
  * before that output is used as an input to another PTransform, or
@@ -163,7 +167,7 @@ import org.apache.beam.sdk.values.TypedPValue;
  * operations that do not save or restore any state.
  *
  * @see <a href=
- * "https://cloud.google.com/dataflow/java-sdk/applying-transforms"
+ * "https://beam.apache.org/documentation/programming-guide/#transforms"
  * >Applying Transformations</a>
  *
  * @param <InputT> the type of the input to this PTransform
@@ -172,8 +176,12 @@ import org.apache.beam.sdk.values.TypedPValue;
 public abstract class PTransform<InputT extends PInput, OutputT extends POutput>
     implements Serializable /* See the note above */, HasDisplayData {
   /**
-   * Applies this {@code PTransform} on the given {@code InputT}, and returns its
-   * {@code Output}.
+   * Override this method to specify how this {@code PTransform} should be expanded
+   * on the given {@code InputT}.
+   *
+   * <p>NOTE: This method should not be called directly. Instead apply the
+   * {@code PTransform} should be applied to the {@code InputT} using the {@code apply}
+   * method.
    *
    * <p>Composite transforms, which are defined in terms of other transforms,
    * should return the output of one of the composed transforms.  Non-composite
@@ -184,13 +192,22 @@ public abstract class PTransform<InputT extends PInput, OutputT extends POutput>
   public abstract OutputT expand(InputT input);
 
   /**
-   * Called before invoking apply (which may be intercepted by the runner) to
-   * verify this transform is fully specified and applicable to the specified
-   * input.
+   * Called before running the Pipeline to verify this transform is fully and correctly
+   * specified.
    *
    * <p>By default, does nothing.
    */
-  public void validate(InputT input) {}
+  public void validate(PipelineOptions options) {}
+
+  /**
+   * Returns all {@link PValue PValues} that are consumed as inputs to this {@link PTransform} that
+   * are independent of the expansion of the {@link InputT} within {@link #expand(PInput)}.
+   *
+   * <p>For example, this can contain any side input consumed by this {@link PTransform}.
+   */
+  public Map<TupleTag<?>, PValue> getAdditionalInputs() {
+    return Collections.emptyMap();
+  }
 
   /**
    * Returns the transform name.
@@ -243,7 +260,7 @@ public abstract class PTransform<InputT extends PInput, OutputT extends POutput>
     if (getClass().isAnonymousClass()) {
       return "AnonymousTransform";
     } else {
-      return StringUtils.approximatePTransformName(getClass());
+      return NameUtils.approximatePTransformName(getClass());
     }
   }
 
@@ -260,15 +277,18 @@ public abstract class PTransform<InputT extends PInput, OutputT extends POutput>
   }
 
   /**
-   * Returns the default {@code Coder} to use for the output of this
-   * single-output {@code PTransform}.
+   * Returns the default {@code Coder} to use for the output of this single-output {@code
+   * PTransform}.
    *
    * <p>By default, always throws
    *
    * @throws CannotProvideCoderException if no coder can be inferred
+   * @deprecated Instead, the PTransform should explicitly call {@link PCollection#setCoder} on the
+   *     returned PCollection.
    */
+  @Deprecated
   protected Coder<?> getDefaultOutputCoder() throws CannotProvideCoderException {
-    throw new CannotProvideCoderException("PTransform.getDefaultOutputCoder called.");
+    throw new CannotProvideCoderException("PTransform.getOutputCoder called.");
   }
 
   /**
@@ -278,7 +298,10 @@ public abstract class PTransform<InputT extends PInput, OutputT extends POutput>
    * <p>By default, always throws.
    *
    * @throws CannotProvideCoderException if none can be inferred.
+   * @deprecated Instead, the PTransform should explicitly call {@link PCollection#setCoder} on the
+   *     returned PCollection.
    */
+  @Deprecated
   protected Coder<?> getDefaultOutputCoder(@SuppressWarnings("unused") InputT input)
       throws CannotProvideCoderException {
     return getDefaultOutputCoder();
@@ -291,9 +314,12 @@ public abstract class PTransform<InputT extends PInput, OutputT extends POutput>
    * <p>By default, always throws.
    *
    * @throws CannotProvideCoderException if none can be inferred.
+   * @deprecated Instead, the PTransform should explicitly call {@link PCollection#setCoder} on the
+   *     returned PCollection.
    */
+  @Deprecated
   public <T> Coder<T> getDefaultOutputCoder(
-      InputT input, @SuppressWarnings("unused") TypedPValue<T> output)
+      InputT input, @SuppressWarnings("unused") PCollection<T> output)
       throws CannotProvideCoderException {
     @SuppressWarnings("unchecked")
     Coder<T> defaultOutputCoder = (Coder<T>) getDefaultOutputCoder(input);

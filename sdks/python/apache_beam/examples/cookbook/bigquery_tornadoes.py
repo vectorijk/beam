@@ -24,8 +24,9 @@ is a boolean field.
 
 The workflow will compute the number of tornadoes in each month and output
 the results to a table (created if needed) with the following schema:
-  - month: number
-  - tornado_count: number
+
+- month: number
+- tornado_count: number
 
 This example uses the default behavior for BigQuery source and sinks that
 represents table rows as plain Python dictionaries.
@@ -53,7 +54,7 @@ def count_tornadoes(input_data):
   """
 
   return (input_data
-          | 'months with tornatoes' >> beam.FlatMap(
+          | 'months with tornadoes' >> beam.FlatMap(
               lambda row: [(int(row['month']), 1)] if row['tornado'] else [])
           | 'monthly count' >> beam.CombinePerKey(sum)
           | 'format' >> beam.Map(
@@ -74,24 +75,21 @@ def run(argv=None):
        'or DATASET.TABLE.'))
   known_args, pipeline_args = parser.parse_known_args(argv)
 
-  p = beam.Pipeline(argv=pipeline_args)
+  with beam.Pipeline(argv=pipeline_args) as p:
 
-  # Read the table rows into a PCollection.
-  rows = p | 'read' >> beam.io.Read(beam.io.BigQuerySource(known_args.input))
-  counts = count_tornadoes(rows)
+    # Read the table rows into a PCollection.
+    rows = p | 'read' >> beam.io.Read(beam.io.BigQuerySource(known_args.input))
+    counts = count_tornadoes(rows)
 
-  # Write the output using a "Write" transform that has side effects.
-  # pylint: disable=expression-not-assigned
-  counts | beam.io.Write(
-      'write',
-      beam.io.BigQuerySink(
-          known_args.output,
-          schema='month:INTEGER, tornado_count:INTEGER',
-          create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-          write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE))
+    # Write the output using a "Write" transform that has side effects.
+    # pylint: disable=expression-not-assigned
+    counts | 'Write' >> beam.io.WriteToBigQuery(
+        known_args.output,
+        schema='month:INTEGER, tornado_count:INTEGER',
+        create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+        write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE)
 
-  # Run the pipeline (all operations are deferred until run() is called).
-  p.run()
+    # Run the pipeline (all operations are deferred until run() is called).
 
 
 if __name__ == '__main__':

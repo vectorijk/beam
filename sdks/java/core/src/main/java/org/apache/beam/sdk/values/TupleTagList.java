@@ -17,6 +17,7 @@
  */
 package org.apache.beam.sdk.values;
 
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -27,7 +28,7 @@ import org.apache.beam.sdk.transforms.ParDo;
 /**
  * A {@link TupleTagList} is an immutable list of heterogeneously
  * typed {@link TupleTag TupleTags}. A {@link TupleTagList} is used, for instance, to
- * specify the tags of the side outputs of a
+ * specify the tags of the additional outputs of a
  * {@link ParDo}.
  *
  * <p>A {@link TupleTagList} can be created and accessed like follows:
@@ -144,5 +145,10 @@ public class TupleTagList implements Serializable {
 
   TupleTagList(List<TupleTag<?>> tupleTags) {
     this.tupleTags = Collections.unmodifiableList(tupleTags);
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(TupleTagList.class).add("tupleTags", tupleTags).toString();
   }
 }

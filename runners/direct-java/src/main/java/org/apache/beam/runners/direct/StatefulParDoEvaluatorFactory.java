@@ -17,19 +17,30 @@
  */
 package org.apache.beam.runners.direct;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import com.google.auto.value.AutoValue;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Lists;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
 import org.apache.beam.runners.core.KeyedWorkItem;
 import org.apache.beam.runners.core.KeyedWorkItems;
+import org.apache.beam.runners.core.StateNamespace;
+import org.apache.beam.runners.core.StateNamespaces;
+import org.apache.beam.runners.core.StateNamespaces.WindowNamespace;
+import org.apache.beam.runners.core.StateTag;
+import org.apache.beam.runners.core.StateTags;
+import org.apache.beam.runners.core.TimerInternals.TimerData;
 import org.apache.beam.runners.direct.DirectExecutionContext.DirectStepContext;
-import org.apache.beam.runners.direct.DirectRunner.CommittedBundle;
 import org.apache.beam.runners.direct.ParDoMultiOverrideFactory.StatefulParDo;
 import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.transforms.AppliedPTransform;
+import org.apache.beam.sdk.runners.AppliedPTransform;
+import org.apache.beam.sdk.state.StateSpec;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.reflect.DoFnSignature;
@@ -37,15 +48,12 @@ import org.apache.beam.sdk.transforms.reflect.DoFnSignature.StateDeclaration;
 import org.apache.beam.sdk.transforms.reflect.DoFnSignatures;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.util.WindowedValue;
-import org.apache.beam.sdk.util.WindowingStrategy;
-import org.apache.beam.sdk.util.state.StateNamespace;
-import org.apache.beam.sdk.util.state.StateNamespaces;
-import org.apache.beam.sdk.util.state.StateSpec;
-import org.apache.beam.sdk.util.state.StateTag;
-import org.apache.beam.sdk.util.state.StateTags;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionTuple;
+import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.sdk.values.WindowingStrategy;
 
 /** A {@link TransformEvaluatorFactory} for stateful {@link ParDo}. */
 final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements TransformEvaluatorFactory {
@@ -56,7 +64,21 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
   private final ParDoEvaluatorFactory<KV<K, InputT>, OutputT> delegateFactory;
 
   StatefulParDoEvaluatorFactory(EvaluationContext evaluationContext) {
-    this.delegateFactory = new ParDoEvaluatorFactory<>(evaluationContext);
+    this.delegateFactory =
+        new ParDoEvaluatorFactory<>(
+            evaluationContext,
+            ParDoEvaluator.<KV<K, InputT>, OutputT>defaultRunnerFactory(),
+            new CacheLoader<AppliedPTransform<?, ?, ?>, DoFnLifecycleManager>() {
+              @Override
+              public DoFnLifecycleManager load(AppliedPTransform<?, ?, ?> appliedStatefulParDo)
+                  throws Exception {
+                // StatefulParDo is overridden after the portable pipeline is received, so we
+                // do not go through the portability translation layers
+                StatefulParDo<?, ?, ?> statefulParDo =
+                    (StatefulParDo<?, ?, ?>) appliedStatefulParDo.getTransform();
+                return DoFnLifecycleManager.of(statefulParDo.getDoFn());
+              }
+            });
     this.cleanupRegistry =
         CacheBuilder.newBuilder()
             .weakValues()
@@ -88,7 +110,7 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
       throws Exception {
 
     final DoFn<KV<K, InputT>, OutputT> doFn =
-        application.getTransform().getUnderlyingParDo().getFn();
+        application.getTransform().getDoFn();
     final DoFnSignature signature = DoFnSignatures.getSignature(doFn.getClass());
 
     // If the DoFn is stateful, schedule state clearing.
@@ -104,14 +126,14 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
       }
     }
 
-    TransformEvaluator<KV<K, InputT>> delegateEvaluator =
+    DoFnLifecycleManagerRemovingTransformEvaluator<KV<K, InputT>> delegateEvaluator =
         delegateFactory.createEvaluator(
             (AppliedPTransform) application,
+            (PCollection) inputBundle.getPCollection(),
             inputBundle.getKey(),
-            doFn,
-            application.getTransform().getUnderlyingParDo().getSideInputs(),
-            application.getTransform().getUnderlyingParDo().getMainOutputTag(),
-            application.getTransform().getUnderlyingParDo().getSideOutputTags().getAll());
+            application.getTransform().getSideInputs(),
+            application.getTransform().getMainOutputTag(),
+            application.getTransform().getAdditionalOutputTags().getAll());
 
     return new StatefulParDoEvaluator<>(delegateEvaluator);
   }
@@ -130,27 +152,29 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
         final AppliedPTransformOutputKeyAndWindow<K, InputT, OutputT> transformOutputWindow) {
       String stepName = evaluationContext.getStepName(transformOutputWindow.getTransform());
 
+      Map<TupleTag<?>, PCollection<?>> taggedValues = new HashMap<>();
+      for (Entry<TupleTag<?>, PValue> pv :
+          transformOutputWindow.getTransform().getOutputs().entrySet()) {
+        taggedValues.put(pv.getKey(), (PCollection<?>) pv.getValue());
+      }
       PCollection<?> pc =
-          transformOutputWindow
-              .getTransform()
-              .getOutput()
+          taggedValues
               .get(
                   transformOutputWindow
                       .getTransform()
                       .getTransform()
-                      .getUnderlyingParDo()
                       .getMainOutputTag());
       WindowingStrategy<?, ?> windowingStrategy = pc.getWindowingStrategy();
       BoundedWindow window = transformOutputWindow.getWindow();
       final DoFn<?, ?> doFn =
-          transformOutputWindow.getTransform().getTransform().getUnderlyingParDo().getFn();
+          transformOutputWindow.getTransform().getTransform().getDoFn();
       final DoFnSignature signature = DoFnSignatures.getSignature(doFn.getClass());
 
       final DirectStepContext stepContext =
           evaluationContext
               .getExecutionContext(
                   transformOutputWindow.getTransform(), transformOutputWindow.getKey())
-              .getOrCreateStepContext(stepName, stepName);
+              .getStepContext(stepName);
 
       final StateNamespace namespace =
           StateNamespaces.window(
@@ -161,10 +185,11 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
             @Override
             public void run() {
               for (StateDeclaration stateDecl : signature.stateDeclarations().values()) {
-                StateTag<Object, ?> tag;
+                StateTag<?> tag;
                 try {
                   tag =
-                      StateTags.tagForSpec(stateDecl.id(), (StateSpec) stateDecl.field().get(doFn));
+                      StateTags.tagForSpec(
+                          stateDecl.id(), (StateSpec) stateDecl.field().get(doFn));
                 } catch (IllegalAccessException e) {
                   throw new RuntimeException(
                       String.format(
@@ -210,18 +235,30 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
   private static class StatefulParDoEvaluator<K, InputT>
       implements TransformEvaluator<KeyedWorkItem<K, KV<K, InputT>>> {
 
-    private final TransformEvaluator<KV<K, InputT>> delegateEvaluator;
+    private final DoFnLifecycleManagerRemovingTransformEvaluator<KV<K, InputT>> delegateEvaluator;
 
-    public StatefulParDoEvaluator(TransformEvaluator<KV<K, InputT>> delegateEvaluator) {
+    public StatefulParDoEvaluator(
+        DoFnLifecycleManagerRemovingTransformEvaluator<KV<K, InputT>> delegateEvaluator) {
       this.delegateEvaluator = delegateEvaluator;
     }
 
     @Override
     public void processElement(WindowedValue<KeyedWorkItem<K, KV<K, InputT>>> gbkResult)
         throws Exception {
-
       for (WindowedValue<KV<K, InputT>> windowedValue : gbkResult.getValue().elementsIterable()) {
         delegateEvaluator.processElement(windowedValue);
+      }
+
+      for (TimerData timer : gbkResult.getValue().timersIterable()) {
+        checkState(
+            timer.getNamespace() instanceof WindowNamespace,
+            "Expected Timer %s to be in a %s, but got %s",
+            timer,
+            WindowNamespace.class.getSimpleName(),
+            timer.getNamespace().getClass().getName());
+        WindowNamespace<?> windowNamespace = (WindowNamespace) timer.getNamespace();
+        BoundedWindow timerWindow = windowNamespace.getWindow();
+        delegateEvaluator.onTimer(timer, timerWindow);
       }
     }
 
@@ -234,7 +271,6 @@ final class StatefulParDoEvaluatorFactory<K, InputT, OutputT> implements Transfo
                   delegateResult.getTransform(), delegateResult.getWatermarkHold())
               .withTimerUpdate(delegateResult.getTimerUpdate())
               .withState(delegateResult.getState())
-              .withAggregatorChanges(delegateResult.getAggregatorChanges())
               .withMetricUpdates(delegateResult.getLogicalMetricUpdates())
               .addOutput(Lists.newArrayList(delegateResult.getOutputBundles()));
 

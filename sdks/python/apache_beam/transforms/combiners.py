@@ -26,16 +26,15 @@ from apache_beam.transforms import core
 from apache_beam.transforms import cy_combiners
 from apache_beam.transforms import ptransform
 from apache_beam.transforms.display import DisplayDataItem
+from apache_beam.typehints import KV
 from apache_beam.typehints import Any
 from apache_beam.typehints import Dict
-from apache_beam.typehints import KV
 from apache_beam.typehints import List
 from apache_beam.typehints import Tuple
 from apache_beam.typehints import TypeVariable
 from apache_beam.typehints import Union
 from apache_beam.typehints import with_input_types
 from apache_beam.typehints import with_output_types
-
 
 __all__ = [
     'Count',
@@ -95,8 +94,7 @@ class MeanCombineFn(core.CombineFn):
       return cy_combiners.MeanInt64Fn()
     elif input_type is float:
       return cy_combiners.MeanFloatFn()
-    else:
-      return self
+    return self
 
 
 class Count(object):
@@ -120,7 +118,7 @@ class Count(object):
     def expand(self, pcoll):
       paired_with_void_type = KV[pcoll.element_type, Any]
       return (pcoll
-              | (core.Map('%s:PairWithVoid' % self.label, lambda x: (x, None))
+              | ('%s:PairWithVoid' % self.label >> core.Map(lambda x: (x, None))
                  .with_output_types(paired_with_void_type))
               | core.CombinePerKey(CountCombineFn()))
 
@@ -150,6 +148,7 @@ class Top(object):
   """Combiners for obtaining extremal elements."""
   # pylint: disable=no-self-argument
 
+  @staticmethod
   @ptransform.ptransform_fn
   def Of(pcoll, n, compare=None, *args, **kwargs):
     """Obtain a list of the compare-most N elements in a PCollection.
@@ -178,6 +177,7 @@ class Top(object):
     return pcoll | core.CombineGlobally(
         TopCombineFn(n, compare, key, reverse), *args, **kwargs)
 
+  @staticmethod
   @ptransform.ptransform_fn
   def PerKey(pcoll, n, compare=None, *args, **kwargs):
     """Identifies the compare-most N elements associated with each key.
@@ -211,21 +211,25 @@ class Top(object):
     return pcoll | core.CombinePerKey(
         TopCombineFn(n, compare, key, reverse), *args, **kwargs)
 
+  @staticmethod
   @ptransform.ptransform_fn
   def Largest(pcoll, n):
     """Obtain a list of the greatest N elements in a PCollection."""
     return pcoll | Top.Of(n)
 
+  @staticmethod
   @ptransform.ptransform_fn
   def Smallest(pcoll, n):
     """Obtain a list of the least N elements in a PCollection."""
     return pcoll | Top.Of(n, reverse=True)
 
+  @staticmethod
   @ptransform.ptransform_fn
   def LargestPerKey(pcoll, n):
     """Identifies the N greatest elements associated with each key."""
     return pcoll | Top.PerKey(n)
 
+  @staticmethod
   @ptransform.ptransform_fn
   def SmallestPerKey(pcoll, n, reverse=True):
     """Identifies the N least elements associated with each key."""
@@ -310,23 +314,19 @@ class TopCombineFn(core.CombineFn):
     if len(buffer) < self._n:
       if not buffer:
         return element_key, [element]
-      else:
-        buffer.append(element)
-        if lt(element_key, threshold):  # element_key < threshold
-          return element_key, buffer
-        else:
-          return accumulator  # with mutated buffer
+      buffer.append(element)
+      if lt(element_key, threshold):  # element_key < threshold
+        return element_key, buffer
+      return accumulator  # with mutated buffer
     elif lt(threshold, element_key):  # threshold < element_key
       buffer.append(element)
       if len(buffer) < self._buffer_size:
         return accumulator
-      else:
-        self._sort_buffer(buffer, lt)
-        min_element = buffer[-self._n]
-        threshold = self._key_fn(min_element) if self._key_fn else min_element
-        return threshold, buffer[-self._n:]
-    else:
-      return accumulator
+      self._sort_buffer(buffer, lt)
+      min_element = buffer[-self._n]
+      threshold = self._key_fn(min_element) if self._key_fn else min_element
+      return threshold, buffer[-self._n:]
+    return accumulator
 
   def merge_accumulators(self, accumulators, *args, **kwargs):
     accumulators = list(accumulators)
@@ -357,10 +357,6 @@ class TopCombineFn(core.CombineFn):
 
 
 class Largest(TopCombineFn):
-
-  def __init__(self, n):
-    super(Largest, self).__init__(n)
-
   def default_label(self):
     return 'Largest(%s)' % self._n
 
@@ -378,10 +374,12 @@ class Sample(object):
   """Combiners for sampling n elements without replacement."""
   # pylint: disable=no-self-argument
 
+  @staticmethod
   @ptransform.ptransform_fn
   def FixedSizeGlobally(pcoll, n):
     return pcoll | core.CombineGlobally(SampleCombineFn(n))
 
+  @staticmethod
   @ptransform.ptransform_fn
   def FixedSizePerKey(pcoll, n):
     return pcoll | core.CombinePerKey(SampleCombineFn(n))
@@ -472,11 +470,11 @@ class SingleInputTupleCombineFn(_TupleCombineFnBase):
 class ToList(ptransform.PTransform):
   """A global CombineFn that condenses a PCollection into a single list."""
 
-  def __init__(self, label='ToList'):
+  def __init__(self, label='ToList'):  # pylint: disable=useless-super-delegation
     super(ToList, self).__init__(label)
 
   def expand(self, pcoll):
-    return pcoll | core.CombineGlobally(self.label, ToListCombineFn())
+    return pcoll | self.label >> core.CombineGlobally(ToListCombineFn())
 
 
 @with_input_types(T)
@@ -506,11 +504,11 @@ class ToDict(ptransform.PTransform):
   will be present in the resulting dict.
   """
 
-  def __init__(self, label='ToDict'):
+  def __init__(self, label='ToDict'):  # pylint: disable=useless-super-delegation
     super(ToDict, self).__init__(label)
 
   def expand(self, pcoll):
-    return pcoll | core.CombineGlobally(self.label, ToDictCombineFn())
+    return pcoll | self.label >> core.CombineGlobally(ToDictCombineFn())
 
 
 @with_input_types(Tuple[K, V])
@@ -540,27 +538,26 @@ def curry_combine_fn(fn, args, kwargs):
   if not args and not kwargs:
     return fn
 
-  else:
+  # Create CurriedFn class for the combiner
+  class CurriedFn(core.CombineFn):
+    """CombineFn that applies extra arguments."""
 
-    class CurriedFn(core.CombineFn):
-      """CombineFn that applies extra arguments."""
+    def create_accumulator(self):
+      return fn.create_accumulator(*args, **kwargs)
 
-      def create_accumulator(self):
-        return fn.create_accumulator(*args, **kwargs)
+    def add_input(self, accumulator, element):
+      return fn.add_input(accumulator, element, *args, **kwargs)
 
-      def add_input(self, accumulator, element):
-        return fn.add_input(accumulator, element, *args, **kwargs)
+    def merge_accumulators(self, accumulators):
+      return fn.merge_accumulators(accumulators, *args, **kwargs)
 
-      def merge_accumulators(self, accumulators):
-        return fn.merge_accumulators(accumulators, *args, **kwargs)
+    def extract_output(self, accumulator):
+      return fn.extract_output(accumulator, *args, **kwargs)
 
-      def extract_output(self, accumulator):
-        return fn.extract_output(accumulator, *args, **kwargs)
+    def apply(self, elements):
+      return fn.apply(elements, *args, **kwargs)
 
-      def apply(self, elements):
-        return fn.apply(elements, *args, **kwargs)
-
-    return CurriedFn()
+  return CurriedFn()
 
 
 class PhasedCombineFnExecutor(object):

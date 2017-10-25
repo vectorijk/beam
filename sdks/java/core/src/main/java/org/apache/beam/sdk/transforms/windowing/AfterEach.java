@@ -57,6 +57,13 @@ public class AfterEach extends Trigger {
     return new AfterEach(Arrays.<Trigger>asList(triggers));
   }
 
+  /**
+   * Returns an {@code AfterEach} {@code Trigger} with the given subtriggers.
+   */
+  public static AfterEach inOrder(List<Trigger> triggers) {
+    return new AfterEach(triggers);
+  }
+
   @Override
   public Instant getWatermarkThatGuaranteesFiring(BoundedWindow window) {
     // This trigger will fire at least once when the first trigger in the sequence
@@ -65,7 +72,7 @@ public class AfterEach extends Trigger {
   }
 
   @Override
-  public Trigger getContinuationTrigger(List<Trigger> continuationTriggers) {
+  protected Trigger getContinuationTrigger(List<Trigger> continuationTriggers) {
     return Repeatedly.forever(new AfterFirst(continuationTriggers));
   }
 

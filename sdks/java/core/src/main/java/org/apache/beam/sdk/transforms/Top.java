@@ -27,6 +27,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
@@ -39,6 +40,8 @@ import org.apache.beam.sdk.transforms.Combine.PerKey;
 import org.apache.beam.sdk.transforms.display.DisplayData;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
+import org.apache.beam.sdk.util.NameUtils;
+import org.apache.beam.sdk.util.NameUtils.NameOverride;
 import org.apache.beam.sdk.util.common.ElementByteSizeObserver;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
@@ -63,7 +66,7 @@ public class Top {
    * given {@code Comparator<T>}.  The {@code Comparator<T>} must also
    * be {@code Serializable}.
    *
-   * <p>If {@code count} {@code <} the number of elements in the
+   * <p>If {@code count} {@code >} the number of elements in the
    * input {@code PCollection}, then all the elements of the input
    * {@code PCollection} will be in the resulting
    * {@code List}, albeit in sorted order.
@@ -97,7 +100,7 @@ public class Top {
    */
   public static <T, ComparatorT extends Comparator<T> & Serializable>
       Combine.Globally<T, List<T>> of(int count, ComparatorT compareFn) {
-    return Combine.globally(new TopCombineFn<>(count, compareFn)).named("Top.Globally");
+    return Combine.globally(new TopCombineFn<>(count, compareFn));
   }
 
   /**
@@ -107,7 +110,7 @@ public class Top {
    * {@code PCollection<T>}, in increasing order, sorted according to
    * their natural order.
    *
-   * <p>If {@code count} {@code <} the number of elements in the
+   * <p>If {@code count} {@code >} the number of elements in the
    * input {@code PCollection}, then all the elements of the input
    * {@code PCollection} will be in the resulting {@code PCollection}'s
    * {@code List}, albeit in sorted order.
@@ -141,8 +144,7 @@ public class Top {
    * {@code KV}s and return the top values associated with each key.
    */
   public static <T extends Comparable<T>> Combine.Globally<T, List<T>> smallest(int count) {
-    return Combine.globally(new TopCombineFn<>(count, new Smallest<T>()))
-        .named("Smallest.Globally");
+    return Combine.globally(new TopCombineFn<>(count, new Reversed<T>()));
   }
 
   /**
@@ -152,7 +154,7 @@ public class Top {
    * {@code PCollection<T>}, in decreasing order, sorted according to
    * their natural order.
    *
-   * <p>If {@code count} {@code <} the number of elements in the
+   * <p>If {@code count} {@code >} the number of elements in the
    * input {@code PCollection}, then all the elements of the input
    * {@code PCollection} will be in the resulting {@code PCollection}'s
    * {@code List}, albeit in sorted order.
@@ -186,7 +188,7 @@ public class Top {
    * {@code KV}s and return the top values associated with each key.
    */
   public static <T extends Comparable<T>> Combine.Globally<T, List<T>> largest(int count) {
-    return Combine.globally(new TopCombineFn<>(count, new Largest<T>())).named("Largest.Globally");
+    return Combine.globally(new TopCombineFn<>(count, new Natural<T>()));
   }
 
   /**
@@ -233,8 +235,7 @@ public class Top {
   public static <K, V, ComparatorT extends Comparator<V> & Serializable>
       PTransform<PCollection<KV<K, V>>, PCollection<KV<K, List<V>>>>
       perKey(int count, ComparatorT compareFn) {
-    return Combine.perKey(
-        new TopCombineFn<>(count, compareFn).<K>asKeyedFn()).named("Top.PerKey");
+    return Combine.perKey(new TopCombineFn<>(count, compareFn));
   }
 
   /**
@@ -280,8 +281,7 @@ public class Top {
   public static <K, V extends Comparable<V>>
       PTransform<PCollection<KV<K, V>>, PCollection<KV<K, List<V>>>>
       smallestPerKey(int count) {
-    return Combine.perKey(new TopCombineFn<>(count, new Smallest<V>()).<K>asKeyedFn())
-        .named("Smallest.PerKey");
+    return Combine.perKey(new TopCombineFn<>(count, new Reversed<V>()));
   }
 
   /**
@@ -327,15 +327,13 @@ public class Top {
   public static <K, V extends Comparable<V>>
       PerKey<K, V, List<V>>
       largestPerKey(int count) {
-    return Combine.perKey(
-new TopCombineFn<>(count, new Largest<V>()).<K>asKeyedFn())
-        .named("Largest.PerKey");
+    return Combine.perKey(new TopCombineFn<>(count, new Natural<V>()));
   }
 
   /**
-   * A {@code Serializable} {@code Comparator} that that uses the compared elements' natural
-   * ordering.
+   * @deprecated use {@link Natural} instead
    */
+  @Deprecated
   public static class Largest<T extends Comparable<? super T>>
       implements Comparator<T>, Serializable {
     @Override
@@ -345,10 +343,34 @@ new TopCombineFn<>(count, new Largest<V>()).<K>asKeyedFn())
   }
 
   /**
+   * A {@code Serializable} {@code Comparator} that that uses the compared elements' natural
+   * ordering.
+   */
+  public static class Natural<T extends Comparable<? super T>>
+      implements Comparator<T>, Serializable {
+    @Override
+    public int compare(T a, T b) {
+      return a.compareTo(b);
+    }
+  }
+
+  /**
+   * @deprecated use {@link Reversed} instead
+   */
+  @Deprecated
+  public static class Smallest<T extends Comparable<? super T>>
+      implements Comparator<T>, Serializable {
+    @Override
+    public int compare(T a, T b) {
+      return b.compareTo(a);
+    }
+  }
+
+  /**
    * {@code Serializable} {@code Comparator} that that uses the reverse of the compared elements'
    * natural ordering.
    */
-  public static class Smallest<T extends Comparable<? super T>>
+  public static class Reversed<T extends Comparable<? super T>>
       implements Comparator<T>, Serializable {
     @Override
     public int compare(T a, T b) {
@@ -368,7 +390,8 @@ new TopCombineFn<>(count, new Largest<V>()).<K>asKeyedFn())
    * @param <T> type of element being compared
    */
   public static class TopCombineFn<T, ComparatorT extends Comparator<T> & Serializable>
-      extends AccumulatingCombineFn<T, BoundedHeap<T, ComparatorT>, List<T>> {
+      extends AccumulatingCombineFn<T, BoundedHeap<T, ComparatorT>, List<T>>
+      implements NameOverride {
 
     private final int count;
     private final ComparatorT compareFn;
@@ -377,6 +400,11 @@ new TopCombineFn<>(count, new Largest<V>()).<K>asKeyedFn())
       checkArgument(count >= 0, "count must be >= 0 (not %s)", count);
       this.count = count;
       this.compareFn = compareFn;
+    }
+
+    @Override
+    public String getNameOverride() {
+      return String.format("Top(%s)", NameUtils.approximateSimpleName(compareFn));
     }
 
     @Override
@@ -535,35 +563,52 @@ new TopCombineFn<>(count, new Largest<V>()).<K>asKeyedFn())
 
     @Override
     public void encode(
-        BoundedHeap<T, ComparatorT> value, OutputStream outStream, Context context)
+        BoundedHeap<T, ComparatorT> value, OutputStream outStream)
         throws CoderException, IOException {
-      listCoder.encode(value.asList(), outStream, context);
+      listCoder.encode(value.asList(), outStream);
     }
 
     @Override
-    public BoundedHeap<T, ComparatorT> decode(InputStream inStream, Coder.Context context)
+    public BoundedHeap<T, ComparatorT> decode(InputStream inStream)
         throws CoderException, IOException {
-      return new BoundedHeap<>(maximumSize, compareFn, listCoder.decode(inStream, context));
+      return new BoundedHeap<>(maximumSize, compareFn, listCoder.decode(inStream));
     }
 
     @Override
     public void verifyDeterministic() throws NonDeterministicException {
-      verifyDeterministic(
-          "HeapCoder requires a deterministic list coder", listCoder);
+      verifyDeterministic(this, "HeapCoder requires a deterministic list coder", listCoder);
     }
 
     @Override
     public boolean isRegisterByteSizeObserverCheap(
-        BoundedHeap<T, ComparatorT> value, Context context) {
-      return listCoder.isRegisterByteSizeObserverCheap(
-          value.asList(), context);
+        BoundedHeap<T, ComparatorT> value) {
+      return listCoder.isRegisterByteSizeObserverCheap(value.asList());
     }
 
     @Override
     public void registerByteSizeObserver(
-        BoundedHeap<T, ComparatorT> value, ElementByteSizeObserver observer, Context context)
+        BoundedHeap<T, ComparatorT> value, ElementByteSizeObserver observer)
             throws Exception {
-      listCoder.registerByteSizeObserver(value.asList(), observer, context);
+      listCoder.registerByteSizeObserver(value.asList(), observer);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == this) {
+        return true;
+      }
+      if (!(other instanceof BoundedHeapCoder)) {
+        return false;
+      }
+      BoundedHeapCoder<?, ?> that = (BoundedHeapCoder<?, ?>) other;
+      return Objects.equals(this.compareFn, that.compareFn)
+          && Objects.equals(this.listCoder, that.listCoder)
+          && this.maximumSize == that.maximumSize;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(compareFn, listCoder, maximumSize);
     }
   }
 }

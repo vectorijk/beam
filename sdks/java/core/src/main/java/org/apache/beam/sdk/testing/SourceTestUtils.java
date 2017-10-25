@@ -27,6 +27,7 @@ import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -60,7 +61,7 @@ import org.slf4j.LoggerFactory;
  * amount of test coverage with few code. Most notable ones are:
  * <ul>
  *   <li>{@link #assertSourcesEqualReferenceSource} helps testing that the data read
- *   by the union of sources produced by {@link BoundedSource#splitIntoBundles}
+ *   by the union of sources produced by {@link BoundedSource#split}
  *   is the same as data read by the original source.
  *   <li>If your source implements dynamic work rebalancing, use the
  *   {@code assertSplitAtFraction} family of functions - they test behavior of
@@ -72,9 +73,8 @@ import org.slf4j.LoggerFactory;
  *   as a heavy-weight stress test including concurrency. We strongly recommend to
  *   use both.
  * </ul>
- * For example usages, see the unit tests of classes such as
- * {@link org.apache.beam.sdk.io.AvroSource} or
- * {@link org.apache.beam.sdk.io.XmlSource}.
+ * For example usages, see the unit tests of classes such as {@code AvroSource} or
+ * {@code TextSource}.
  *
  * <p>Like {@link PAssert}, requires JUnit and Hamcrest to be present in the classpath.
  */
@@ -138,6 +138,16 @@ public class SourceTestUtils {
     try (BoundedSource.BoundedReader<T> reader = source.createReader(options)) {
       return readFromUnstartedReader(reader);
     }
+  }
+
+  public static <T> List<T> readFromSplitsOfSource(
+      BoundedSource<T> source, long desiredBundleSizeBytes, PipelineOptions options)
+      throws Exception {
+    List<T> res = Lists.newArrayList();
+    for (BoundedSource<T> split : source.split(desiredBundleSizeBytes, options)) {
+      res.addAll(readFromSource(split, options));
+    }
+    return res;
   }
 
   /**
@@ -213,7 +223,7 @@ public class SourceTestUtils {
       List<? extends BoundedSource<T>> sources,
       PipelineOptions options)
       throws Exception {
-    Coder<T> coder = referenceSource.getDefaultOutputCoder();
+    Coder<T> coder = referenceSource.getOutputCoder();
     List<T> referenceRecords = readFromSource(referenceSource, options);
     List<T> bundleRecords = new ArrayList<>();
     for (BoundedSource<T> source : sources) {
@@ -222,7 +232,7 @@ public class SourceTestUtils {
               + source
               + " is not compatible with Coder type for referenceSource "
               + referenceSource,
-          source.getDefaultOutputCoder(),
+          source.getOutputCoder(),
           equalTo(coder));
       List<T> elems = readFromSource(source, options);
       bundleRecords.addAll(elems);
@@ -240,7 +250,7 @@ public class SourceTestUtils {
    */
   public static <T> void assertUnstartedReaderReadsSameAsItsSource(
       BoundedSource.BoundedReader<T> reader, PipelineOptions options) throws Exception {
-    Coder<T> coder = reader.getCurrentSource().getDefaultOutputCoder();
+    Coder<T> coder = reader.getCurrentSource().getOutputCoder();
     List<T> expected = readFromUnstartedReader(reader);
     List<T> actual = readFromSource(reader.getCurrentSource(), options);
     List<ReadableStructuralValue<T>> expectedStructural = createStructuralValues(coder, expected);
@@ -416,7 +426,7 @@ public class SourceTestUtils {
               source,
               primary,
               residual);
-      Coder<T> coder = primary.getDefaultOutputCoder();
+      Coder<T> coder = primary.getOutputCoder();
       List<ReadableStructuralValue<T>> primaryValues =
           createStructuralValues(coder, primaryItems);
       List<ReadableStructuralValue<T>> currentValues =
@@ -685,7 +695,7 @@ public class SourceTestUtils {
    *
    * <p>It forwards most methods to the given {@code boundedSource}, except:
    * <ol>
-   * <li> {@link BoundedSource#splitIntoBundles} rejects initial splitting
+   * <li> {@link BoundedSource#split} rejects initial splitting
    * by returning itself in a list.
    * <li> {@link BoundedReader#splitAtFraction} rejects dynamic splitting by returning null.
    * </ol>
@@ -708,7 +718,7 @@ public class SourceTestUtils {
     }
 
     @Override
-    public List<? extends BoundedSource<T>> splitIntoBundles(
+    public List<? extends BoundedSource<T>> split(
         long desiredBundleSizeBytes, PipelineOptions options) throws Exception {
       return ImmutableList.of(this);
     }
@@ -716,11 +726,6 @@ public class SourceTestUtils {
     @Override
     public long getEstimatedSizeBytes(PipelineOptions options) throws Exception {
       return boundedSource.getEstimatedSizeBytes(options);
-    }
-
-    @Override
-    public boolean producesSortedKeys(PipelineOptions options) throws Exception {
-      return boundedSource.producesSortedKeys(options);
     }
 
     @Override
@@ -734,8 +739,8 @@ public class SourceTestUtils {
     }
 
     @Override
-    public Coder<T> getDefaultOutputCoder() {
-      return boundedSource.getDefaultOutputCoder();
+    public Coder<T> getOutputCoder() {
+      return boundedSource.getOutputCoder();
     }
 
     private static class UnsplittableReader<T> extends BoundedReader<T> {

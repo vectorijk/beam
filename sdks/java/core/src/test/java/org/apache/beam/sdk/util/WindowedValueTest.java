@@ -28,7 +28,9 @@ import java.util.Arrays;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
+import org.apache.beam.sdk.testing.CoderProperties;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo.Timing;
@@ -61,6 +63,17 @@ public class WindowedValueTest {
     Assert.assertEquals(value.getValue(), decodedValue.getValue());
     Assert.assertEquals(value.getTimestamp(), decodedValue.getTimestamp());
     Assert.assertArrayEquals(value.getWindows().toArray(), decodedValue.getWindows().toArray());
+  }
+
+  @Test
+  public void testFullWindowedValueCoderIsSerializableWithWellKnownCoderType() {
+    CoderProperties.coderSerializable(WindowedValue.getFullCoder(
+        GlobalWindow.Coder.INSTANCE, GlobalWindow.Coder.INSTANCE));
+  }
+
+  @Test
+  public void testValueOnlyWindowedValueCoderIsSerializableWithWellKnownCoderType() {
+    CoderProperties.coderSerializable(WindowedValue.getValueOnlyCoder(GlobalWindow.Coder.INSTANCE));
   }
 
   @Test

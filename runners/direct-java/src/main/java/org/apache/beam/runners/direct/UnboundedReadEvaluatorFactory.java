@@ -17,27 +17,30 @@
  */
 package org.apache.beam.runners.direct;
 
+import static com.google.common.collect.Iterables.getOnlyElement;
+
 import com.google.auto.value.AutoValue;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import javax.annotation.Nullable;
-import org.apache.beam.runners.direct.DirectRunner.CommittedBundle;
-import org.apache.beam.runners.direct.DirectRunner.UncommittedBundle;
+import org.apache.beam.runners.core.construction.ReadTranslation;
 import org.apache.beam.runners.direct.UnboundedReadDeduplicator.NeverDeduplicator;
 import org.apache.beam.sdk.io.Read;
 import org.apache.beam.sdk.io.Read.Unbounded;
 import org.apache.beam.sdk.io.UnboundedSource;
 import org.apache.beam.sdk.io.UnboundedSource.CheckpointMark;
 import org.apache.beam.sdk.io.UnboundedSource.UnboundedReader;
-import org.apache.beam.sdk.transforms.AppliedPTransform;
+import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
+import org.apache.beam.sdk.util.CoderUtils;
 import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
@@ -115,7 +118,9 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
     @Override
     public void processElement(
         WindowedValue<UnboundedSourceShard<OutputT, CheckpointMarkT>> element) throws IOException {
-      UncommittedBundle<OutputT> output = evaluationContext.createBundle(transform.getOutput());
+      UncommittedBundle<OutputT> output =
+          evaluationContext.createBundle(
+              (PCollection<OutputT>) getOnlyElement(transform.getOutputs().values()));
       UnboundedSourceShard<OutputT, CheckpointMarkT> shard = element.getValue();
       UnboundedReader<OutputT> reader = null;
       try {
@@ -134,7 +139,24 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
             numElements++;
           } while (numElements < ARBITRARY_MAX_ELEMENTS && reader.advance());
           Instant watermark = reader.getWatermark();
-          UnboundedSourceShard<OutputT, CheckpointMarkT> residual = finishRead(reader, shard);
+
+          CheckpointMarkT finishedCheckpoint = finishRead(reader, shard);
+          UnboundedSourceShard<OutputT, CheckpointMarkT> residual;
+          // Sometimes resume from a checkpoint even if it's not required
+          if (ThreadLocalRandom.current().nextDouble(1.0) >= readerReuseChance) {
+            UnboundedReader<OutputT> toClose = reader;
+            // Prevent double-close. UnboundedReader is AutoCloseable, which does not require
+            // idempotency of close. Nulling out the reader here prevents trying to re-close it
+            // if the call to close throws an IOException.
+            reader = null;
+            toClose.close();
+            residual =
+                UnboundedSourceShard.of(
+                    shard.getSource(), shard.getDeduplicator(), null, finishedCheckpoint);
+          } else {
+            residual = shard.withCheckpoint(finishedCheckpoint);
+          }
+
           resultBuilder
               .addOutput(output)
               .addUnprocessedElements(
@@ -164,9 +186,13 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
         throws IOException {
       UnboundedReader<OutputT> existing = shard.getExistingReader();
       if (existing == null) {
+        CheckpointMarkT checkpoint = shard.getCheckpoint();
+        if (checkpoint != null) {
+          checkpoint = CoderUtils.clone(shard.getSource().getCheckpointMarkCoder(), checkpoint);
+        }
         return shard
             .getSource()
-            .createReader(evaluationContext.getPipelineOptions(), shard.getCheckpoint());
+            .createReader(evaluationContext.getPipelineOptions(), checkpoint);
       } else {
         return existing;
       }
@@ -176,9 +202,6 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
         UnboundedReader<OutputT> reader, UnboundedSourceShard<OutputT, CheckpointMarkT> shard)
         throws IOException {
       if (shard.getExistingReader() == null) {
-        if (shard.getCheckpoint() != null) {
-          shard.getCheckpoint().finalizeCheckpoint();
-        }
         return reader.start();
       } else {
         return shard.getExistingReader().advance();
@@ -189,7 +212,7 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
      * Checkpoint the current reader, finalize the previous checkpoint, and return the residual
      * {@link UnboundedSourceShard}.
      */
-    private UnboundedSourceShard<OutputT, CheckpointMarkT> finishRead(
+    private CheckpointMarkT finishRead(
         UnboundedReader<OutputT> reader, UnboundedSourceShard<OutputT, CheckpointMarkT> shard)
         throws IOException {
       final CheckpointMark oldMark = shard.getCheckpoint();
@@ -202,10 +225,12 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
       // If the watermark is the max value, this source may not be invoked again. Finalize after
       // committing the output.
       if (!reader.getWatermark().isBefore(BoundedWindow.TIMESTAMP_MAX_VALUE)) {
+        PCollection<OutputT> outputPc =
+            (PCollection<OutputT>) Iterables.getOnlyElement(transform.getOutputs().values());
         evaluationContext.scheduleAfterOutputWouldBeProduced(
-            transform.getOutput(),
+            outputPc,
             GlobalWindow.INSTANCE,
-            transform.getOutput().getWindowingStrategy(),
+            outputPc.getWindowingStrategy(),
             new Runnable() {
               @Override
               public void run() {
@@ -218,14 +243,7 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
               }
             });
       }
-
-      // Sometimes resume from a checkpoint even if it's not required
-      if (ThreadLocalRandom.current().nextDouble(1.0) >= readerReuseChance) {
-        reader.close();
-        return UnboundedSourceShard.of(shard.getSource(), shard.getDeduplicator(), null, mark);
-      } else {
-        return shard.withCheckpoint(mark);
-      }
+      return mark;
     }
 
     @Override
@@ -236,7 +254,8 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
   }
 
   @AutoValue
-  abstract static class UnboundedSourceShard<T, CheckpointT extends CheckpointMark> {
+  abstract static class UnboundedSourceShard<T, CheckpointT extends CheckpointMark>
+      implements SourceShard<T> {
     static <T, CheckpointT extends CheckpointMark> UnboundedSourceShard<T, CheckpointT> unstarted(
         UnboundedSource<T, CheckpointT> source, UnboundedReadDeduplicator deduplicator) {
       return of(source, deduplicator, null, null);
@@ -251,7 +270,8 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
           source, deduplicator, reader, checkpoint);
     }
 
-    abstract UnboundedSource<T, CheckpointT> getSource();
+    @Override
+    public abstract UnboundedSource<T, CheckpointT> getSource();
 
     abstract UnboundedReadDeduplicator getDeduplicator();
 
@@ -266,9 +286,8 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
     }
   }
 
-  static class InputProvider<OutputT>
-      implements RootInputProvider<
-          OutputT, UnboundedSourceShard<OutputT, ?>, PBegin, Unbounded<OutputT>> {
+  static class InputProvider<T>
+      implements RootInputProvider<T, UnboundedSourceShard<T, ?>, PBegin> {
     private final EvaluationContext evaluationContext;
 
     InputProvider(EvaluationContext evaluationContext) {
@@ -276,27 +295,28 @@ class UnboundedReadEvaluatorFactory implements TransformEvaluatorFactory {
     }
 
     @Override
-    public Collection<CommittedBundle<UnboundedSourceShard<OutputT, ?>>> getInitialInputs(
-        AppliedPTransform<PBegin, PCollection<OutputT>, Unbounded<OutputT>> transform,
+    public Collection<CommittedBundle<UnboundedSourceShard<T, ?>>> getInitialInputs(
+        AppliedPTransform<PBegin, PCollection<T>, PTransform<PBegin, PCollection<T>>>
+            transform,
         int targetParallelism)
         throws Exception {
-      UnboundedSource<OutputT, ?> source = transform.getTransform().getSource();
-      List<? extends UnboundedSource<OutputT, ?>> splits =
-          source.generateInitialSplits(targetParallelism, evaluationContext.getPipelineOptions());
+      UnboundedSource<T, ?> source = ReadTranslation.unboundedSourceFromTransform(transform);
+      List<? extends UnboundedSource<T, ?>> splits =
+          source.split(targetParallelism, evaluationContext.getPipelineOptions());
       UnboundedReadDeduplicator deduplicator =
           source.requiresDeduping()
               ? UnboundedReadDeduplicator.CachedIdDeduplicator.create()
               : NeverDeduplicator.create();
 
-      ImmutableList.Builder<CommittedBundle<UnboundedSourceShard<OutputT, ?>>> initialShards =
+      ImmutableList.Builder<CommittedBundle<UnboundedSourceShard<T, ?>>> initialShards =
           ImmutableList.builder();
-      for (UnboundedSource<OutputT, ?> split : splits) {
-        UnboundedSourceShard<OutputT, ?> shard =
+      for (UnboundedSource<T, ?> split : splits) {
+        UnboundedSourceShard<T, ?> shard =
             UnboundedSourceShard.unstarted(split, deduplicator);
         initialShards.add(
             evaluationContext
-                .<UnboundedSourceShard<OutputT, ?>>createRootBundle()
-                .add(WindowedValue.<UnboundedSourceShard<OutputT, ?>>valueInGlobalWindow(shard))
+                .<UnboundedSourceShard<T, ?>>createRootBundle()
+                .add(WindowedValue.<UnboundedSourceShard<T, ?>>valueInGlobalWindow(shard))
                 .commit(BoundedWindow.TIMESTAMP_MAX_VALUE));
       }
       return initialShards.build();

@@ -21,22 +21,26 @@ package org.apache.beam.runners.spark.translation;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.collect.Iterables;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
+import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.runners.spark.SparkPipelineOptions;
-import org.apache.beam.runners.spark.translation.streaming.UnboundedDataset;
+import org.apache.beam.runners.spark.coders.CoderHelpers;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.transforms.AppliedPTransform;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
-import org.apache.beam.sdk.values.PInput;
-import org.apache.beam.sdk.values.POutput;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.sdk.values.TupleTag;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
@@ -48,24 +52,27 @@ import org.apache.spark.streaming.api.java.JavaStreamingContext;
 public class EvaluationContext {
   private final JavaSparkContext jsc;
   private JavaStreamingContext jssc;
-  private final SparkRuntimeContext runtime;
   private final Pipeline pipeline;
   private final Map<PValue, Dataset> datasets = new LinkedHashMap<>();
   private final Map<PValue, Dataset> pcollections = new LinkedHashMap<>();
   private final Set<Dataset> leaves = new LinkedHashSet<>();
-  private final Set<PValue> multiReads = new LinkedHashSet<>();
   private final Map<PValue, Object> pobjects = new LinkedHashMap<>();
-  private final Map<PValue, Iterable<? extends WindowedValue<?>>> pview = new LinkedHashMap<>();
   private AppliedPTransform<?, ?, ?> currentTransform;
+  private final SparkPCollectionView pviews = new SparkPCollectionView();
+  private final Map<PCollection, Long> cacheCandidates = new HashMap<>();
+  private final PipelineOptions options;
+  private final SerializablePipelineOptions serializableOptions;
 
-  public EvaluationContext(JavaSparkContext jsc, Pipeline pipeline) {
+  public EvaluationContext(JavaSparkContext jsc, Pipeline pipeline, PipelineOptions options) {
     this.jsc = jsc;
     this.pipeline = pipeline;
-    this.runtime = new SparkRuntimeContext(pipeline);
+    this.options = options;
+    this.serializableOptions = new SerializablePipelineOptions(options);
   }
 
-  public EvaluationContext(JavaSparkContext jsc, Pipeline pipeline, JavaStreamingContext jssc) {
-    this(jsc, pipeline);
+  public EvaluationContext(
+      JavaSparkContext jsc, Pipeline pipeline, PipelineOptions options, JavaStreamingContext jssc) {
+    this(jsc, pipeline, options);
     this.jssc = jssc;
   }
 
@@ -81,76 +88,112 @@ public class EvaluationContext {
     return pipeline;
   }
 
-  public SparkRuntimeContext getRuntimeContext() {
-    return runtime;
+  public PipelineOptions getOptions() {
+    return options;
+  }
+
+  public SerializablePipelineOptions getSerializableOptions() {
+    return serializableOptions;
   }
 
   public void setCurrentTransform(AppliedPTransform<?, ?, ?> transform) {
     this.currentTransform = transform;
   }
 
-  public <T extends PInput> T getInput(PTransform<T, ?> transform) {
-    checkArgument(currentTransform != null && currentTransform.getTransform() == transform,
-        "can only be called with current transform");
+  public AppliedPTransform<?, ?, ?> getCurrentTransform() {
+    return currentTransform;
+  }
+
+  public <T extends PValue> T getInput(PTransform<T, ?> transform) {
     @SuppressWarnings("unchecked")
-    T input = (T) currentTransform.getInput();
+    T input =
+        (T) Iterables.getOnlyElement(TransformInputs.nonAdditionalInputs(getCurrentTransform()));
     return input;
   }
 
-  public <T extends POutput> T getOutput(PTransform<?, T> transform) {
+  public <T> Map<TupleTag<?>, PValue> getInputs(PTransform<?, ?> transform) {
     checkArgument(currentTransform != null && currentTransform.getTransform() == transform,
         "can only be called with current transform");
+    return currentTransform.getInputs();
+  }
+
+  public <T extends PValue> T getOutput(PTransform<?, T> transform) {
     @SuppressWarnings("unchecked")
-    T output = (T) currentTransform.getOutput();
+    T output = (T) Iterables.getOnlyElement(getOutputs(transform).values());
     return output;
   }
 
-  public void putDataset(PTransform<?, ?> transform, Dataset dataset) {
-    putDataset((PValue) getOutput(transform), dataset);
+  public Map<TupleTag<?>, PValue> getOutputs(PTransform<?, ?> transform) {
+    checkArgument(currentTransform != null && currentTransform.getTransform() == transform,
+        "can only be called with current transform");
+    return currentTransform.getOutputs();
   }
 
-  public void putDataset(PValue pvalue, Dataset dataset) {
+  private boolean shouldCache(PValue pvalue) {
+    if ((pvalue instanceof PCollection)
+        && cacheCandidates.containsKey(pvalue)
+        && cacheCandidates.get(pvalue) > 1) {
+      return true;
+    }
+    return false;
+  }
+
+  public void putDataset(PTransform<?, ? extends PValue> transform, Dataset dataset,
+      boolean forceCache) {
+    putDataset(getOutput(transform), dataset, forceCache);
+  }
+
+
+  public void putDataset(PTransform<?, ? extends PValue> transform, Dataset dataset) {
+    putDataset(transform, dataset,  false);
+  }
+
+  public void putDataset(PValue pvalue, Dataset dataset, boolean forceCache) {
     try {
       dataset.setName(pvalue.getName());
     } catch (IllegalStateException e) {
       // name not set, ignore
     }
+    if (forceCache || shouldCache(pvalue)) {
+      // we cache only PCollection
+      if (pvalue instanceof PCollection) {
+        Coder<?> coder = ((PCollection<?>) pvalue).getCoder();
+        Coder<? extends BoundedWindow> wCoder =
+            ((PCollection<?>) pvalue).getWindowingStrategy().getWindowFn().windowCoder();
+        dataset.cache(storageLevel(), WindowedValue.getFullCoder(coder, wCoder));
+      }
+    }
     datasets.put(pvalue, dataset);
     leaves.add(dataset);
   }
 
-  <T> void putBoundedDatasetFromValues(PTransform<?, ?> transform, Iterable<T> values,
-                                       Coder<T> coder) {
-    datasets.put((PValue) getOutput(transform), new BoundedDataset<>(values, jsc, coder));
+  <T> void putBoundedDatasetFromValues(
+      PTransform<?, ? extends PValue> transform, Iterable<T> values, Coder<T> coder) {
+    PValue output = getOutput(transform);
+    if (shouldCache(output)) {
+      // eagerly create the RDD, as it will be reused.
+      Iterable<WindowedValue<T>> elems = Iterables.transform(values,
+          WindowingHelpers.<T>windowValueFunction());
+      WindowedValue.ValueOnlyWindowedValueCoder<T> windowCoder =
+          WindowedValue.getValueOnlyCoder(coder);
+      JavaRDD<WindowedValue<T>> rdd =
+          getSparkContext().parallelize(CoderHelpers.toByteArrays(elems, windowCoder))
+          .map(CoderHelpers.fromByteFunction(windowCoder));
+      putDataset(transform, new BoundedDataset<>(rdd));
+    } else {
+      // create a BoundedDataset that would create a RDD on demand
+      datasets.put(getOutput(transform), new BoundedDataset<>(values, jsc, coder));
+    }
   }
 
-  public <T> void putUnboundedDatasetFromQueue(
-      PTransform<?, ?> transform, Iterable<Iterable<T>> values, Coder<T> coder) {
-    datasets.put((PValue) getOutput(transform), new UnboundedDataset<>(values, jssc, coder));
-  }
-
-  void putPView(PValue view, Iterable<? extends WindowedValue<?>> value) {
-    pview.put(view, value);
-  }
-
-  public Dataset borrowDataset(PTransform<?, ?> transform) {
-    return borrowDataset((PValue) getInput(transform));
+  public Dataset borrowDataset(PTransform<? extends PValue, ?> transform) {
+    return borrowDataset(getInput(transform));
   }
 
   public Dataset borrowDataset(PValue pvalue) {
     Dataset dataset = datasets.get(pvalue);
     leaves.remove(dataset);
-    if (multiReads.contains(pvalue)) {
-      // Ensure the RDD is marked as cached
-      dataset.cache(storageLevel());
-    } else {
-      multiReads.add(pvalue);
-    }
     return dataset;
-  }
-
-  <T> Iterable<? extends WindowedValue<?>> getPCollectionView(PCollectionView<T> view) {
-    return pview.get(view);
   }
 
   /**
@@ -159,8 +202,6 @@ public class EvaluationContext {
    */
   public void computeOutputs() {
     for (Dataset dataset : leaves) {
-      // cache so that any subsequent get() is cheap.
-      dataset.cache(storageLevel());
       dataset.action(); // force computation.
     }
   }
@@ -188,26 +229,46 @@ public class EvaluationContext {
   }
 
   /**
-   * Retrieves an iterable of results associated with the PCollection passed in.
+   * Retrun the current views creates in the pipepline.
    *
-   * @param pcollection Collection we wish to translate.
-   * @param <T>         Type of elements contained in collection.
-   * @return Natively types result associated with collection.
+   * @return SparkPCollectionView
    */
-  public <T> Iterable<T> get(PCollection<T> pcollection) {
-    @SuppressWarnings("unchecked")
-    BoundedDataset<T> boundedDataset = (BoundedDataset<T>) datasets.get(pcollection);
-    Iterable<WindowedValue<T>> windowedValues = boundedDataset.getValues(pcollection);
-    return Iterables.transform(windowedValues, WindowingHelpers.<T>unwindowValueFunction());
+  public SparkPCollectionView getPViews() {
+    return pviews;
+  }
+
+  /**
+   * Adds/Replaces a view to the current views creates in the pipepline.
+   *
+   * @param view - Identifier of the view
+   * @param value - Actual value of the view
+   * @param coder - Coder of the value
+   */
+  public void putPView(
+      PCollectionView<?> view,
+      Iterable<WindowedValue<?>> value,
+      Coder<Iterable<WindowedValue<?>>> coder) {
+    pviews.putPView(view, value, coder);
+  }
+
+  /**
+   * Get the map of cache candidates hold by the evaluation context.
+   *
+   * @return The current {@link Map} of cache candidates.
+   */
+  public Map<PCollection, Long> getCacheCandidates() {
+    return this.cacheCandidates;
   }
 
   <T> Iterable<WindowedValue<T>> getWindowedValues(PCollection<T> pcollection) {
     @SuppressWarnings("unchecked")
     BoundedDataset<T> boundedDataset = (BoundedDataset<T>) datasets.get(pcollection);
+    leaves.remove(boundedDataset);
     return boundedDataset.getValues(pcollection);
   }
 
-  private String storageLevel() {
-    return runtime.getPipelineOptions().as(SparkPipelineOptions.class).getStorageLevel();
+  public String storageLevel() {
+    return serializableOptions.get().as(SparkPipelineOptions.class).getStorageLevel();
   }
+
 }

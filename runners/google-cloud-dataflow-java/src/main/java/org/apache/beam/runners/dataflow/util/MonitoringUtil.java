@@ -44,7 +44,7 @@ import org.slf4j.LoggerFactory;
 /**
  * A helper class for monitoring jobs submitted to the service.
  */
-public final class MonitoringUtil {
+public class MonitoringUtil {
 
   private static final String GCLOUD_DATAFLOW_PREFIX = "gcloud beta dataflow";
   private static final String ENDPOINT_OVERRIDE_ENV_VAR =
@@ -60,6 +60,10 @@ public final class MonitoringUtil {
           .put("JOB_STATE_FAILED", State.FAILED)
           .put("JOB_STATE_CANCELLED", State.CANCELLED)
           .put("JOB_STATE_UPDATED", State.UPDATED)
+          // A DRAINING job is still running - the closest mapping is RUNNING.
+          .put("JOB_STATE_DRAINING", State.RUNNING)
+          // A DRAINED job has successfully terminated - the closest mapping is DONE.
+          .put("JOB_STATE_DRAINED", State.DONE)
           .build();
   private static final String JOB_MESSAGE_ERROR = "JOB_MESSAGE_ERROR";
   private static final String JOB_MESSAGE_WARNING = "JOB_MESSAGE_WARNING";
@@ -143,7 +147,7 @@ public final class MonitoringUtil {
    *   timestamp greater than this value.
    * @return collection of messages
    */
-  public ArrayList<JobMessage> getJobMessages(
+  public List<JobMessage> getJobMessages(
       String jobId, long startTimestampMs) throws IOException {
     // TODO: Allow filtering messages by importance
     Instant startTimestamp = new Instant(startTimestampMs);
@@ -176,14 +180,24 @@ public final class MonitoringUtil {
     return allMessages;
   }
 
+  /**
+   * @deprecated this method defaults the region to "us-central1". Prefer using the overload with
+   * an explicit regionId parameter.
+   */
+  @Deprecated
   public static String getJobMonitoringPageURL(String projectName, String jobId) {
+    return getJobMonitoringPageURL(projectName, "us-central1", jobId);
+  }
+
+  public static String getJobMonitoringPageURL(String projectName, String regionId, String jobId) {
     try {
       // Project name is allowed in place of the project id: the user will be redirected to a URL
       // that has the project name replaced with project id.
       return String.format(
-          "https://console.developers.google.com/project/%s/dataflow/job/%s",
-          URLEncoder.encode(projectName, "UTF-8"),
-          URLEncoder.encode(jobId, "UTF-8"));
+          "https://console.cloud.google.com/dataflow/jobsDetail/locations/%s/jobs/%s?project=%s",
+          URLEncoder.encode(regionId, "UTF-8"),
+          URLEncoder.encode(jobId, "UTF-8"),
+          URLEncoder.encode(projectName, "UTF-8"));
     } catch (UnsupportedEncodingException e) {
       // Should never happen.
       throw new AssertionError("UTF-8 encoding is not supported by the environment", e);

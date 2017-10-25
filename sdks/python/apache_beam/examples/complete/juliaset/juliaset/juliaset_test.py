@@ -23,8 +23,8 @@ import re
 import tempfile
 import unittest
 
-
 from apache_beam.examples.complete.juliaset.juliaset import juliaset
+from apache_beam.testing.util import open_shards
 
 
 class JuliaSetTest(unittest.TestCase):
@@ -52,7 +52,7 @@ class JuliaSetTest(unittest.TestCase):
     if image_file_name is not None:
       args.append('--image_output=%s' % image_file_name)
 
-    juliaset.run(args).wait_until_finish()
+    juliaset.run(args)
 
   def test_output_file_format(self):
     grid_size = 5
@@ -60,8 +60,8 @@ class JuliaSetTest(unittest.TestCase):
 
     # Parse the results from the file, and ensure it was written in the proper
     # format.
-    with open(self.test_files['output_coord_file_name'] +
-              '-00000-of-00001') as result_file:
+    with open_shards(self.test_files['output_coord_file_name'] +
+                     '-*-of-*') as result_file:
       output_lines = result_file.readlines()
 
       # Should have a line for each x-coordinate.
@@ -80,6 +80,7 @@ class JuliaSetTest(unittest.TestCase):
     # Ensure that the image was saved properly.
     # TODO(silviuc): Reactivate the test when --image_output is supported.
     # self.assertTrue(os.stat(temp_image_file).st_size > 0)
+
 
 if __name__ == '__main__':
   logging.getLogger().setLevel(logging.INFO)

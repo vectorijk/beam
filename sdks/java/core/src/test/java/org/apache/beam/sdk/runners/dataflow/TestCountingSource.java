@@ -104,7 +104,7 @@ public class TestCountingSource
   }
 
   @Override
-  public List<TestCountingSource> generateInitialSplits(
+  public List<TestCountingSource> split(
       int desiredNumSplits, PipelineOptions options) {
     List<TestCountingSource> splits = new ArrayList<>();
     int numSplits = allowSplitting ? desiredNumSplits : 1;
@@ -245,10 +245,7 @@ public class TestCountingSource
   }
 
   @Override
-  public void validate() {}
-
-  @Override
-  public Coder<KV<Integer, Integer>> getDefaultOutputCoder() {
+  public Coder<KV<Integer, Integer>> getOutputCoder() {
     return KvCoder.of(VarIntCoder.of(), VarIntCoder.of());
   }
 }

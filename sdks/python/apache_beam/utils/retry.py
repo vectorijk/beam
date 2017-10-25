@@ -17,6 +17,8 @@
 
 """Retry decorators for calls raising exceptions.
 
+For internal use only; no backwards-compatibility guarantees.
+
 This module is used mostly to decorate all integration points where the code
 makes calls to remote services. Searching through the code base for @retry
 should find all such places. For this reason even places where retry is not
@@ -29,7 +31,16 @@ import sys
 import time
 import traceback
 
-from apitools.base.py.exceptions import HttpError
+from apache_beam.io.filesystem import BeamIOError
+
+# Protect against environments where apitools library is not available.
+# pylint: disable=wrong-import-order, wrong-import-position
+# TODO(sourabhbajaj): Remove the GCP specific error code to a submodule
+try:
+  from apitools.base.py.exceptions import HttpError
+except ImportError:
+  HttpError = None
+# pylint: enable=wrong-import-order, wrong-import-position
 
 
 class PermanentException(Exception):
@@ -52,13 +63,13 @@ class FuzzedExponentialIntervals(object):
     fuzz: A value between 0 and 1, indicating the fraction of fuzz. For a
       given delay d, the fuzzed delay is randomly chosen between
       [(1 - fuzz) * d, d].
-    max_delay_sec: Maximum delay (in seconds). After this limit is reached,
+    max_delay_secs: Maximum delay (in seconds). After this limit is reached,
       further tries use max_delay_sec instead of exponentially increasing
-      the time. Defaults to 4 hours.
+      the time. Defaults to 1 hour.
   """
 
   def __init__(self, initial_delay_secs, num_retries, factor=2, fuzz=0.5,
-               max_delay_secs=60 * 60 * 4):
+               max_delay_secs=60 * 60 * 1):
     self._initial_delay_secs = initial_delay_secs
     self._num_retries = num_retries
     self._factor = factor
@@ -78,24 +89,21 @@ class FuzzedExponentialIntervals(object):
 
 def retry_on_server_errors_filter(exception):
   """Filter allowing retries on server errors and non-HttpErrors."""
-  if isinstance(exception, HttpError):
-    if exception.status_code >= 500:
-      return True
-    else:
-      return False
-  elif isinstance(exception, PermanentException):
-    return False
-  else:
-    # We may get here for non HttpErrors such as socket timeouts, SSL
-    # exceptions, etc.
-    return True
+  if (HttpError is not None) and isinstance(exception, HttpError):
+    return exception.status_code >= 500
+  return not isinstance(exception, PermanentException)
 
 
 def retry_on_server_errors_and_timeout_filter(exception):
-  if isinstance(exception, HttpError):
+  if HttpError is not None and isinstance(exception, HttpError):
     if exception.status_code == 408:  # 408 Request Timeout
       return True
   return retry_on_server_errors_filter(exception)
+
+
+def retry_on_beam_io_error_filter(exception):
+  """Filter allowing retries on Beam IO errors."""
+  return isinstance(exception, BeamIOError)
 
 
 SERVER_ERROR_OR_TIMEOUT_CODES = [408, 500, 502, 503, 504, 598, 599]
@@ -115,9 +123,9 @@ def no_retries(fun):
 
 
 def with_exponential_backoff(
-    num_retries=16, initial_delay_secs=5.0, logger=logging.warning,
+    num_retries=7, initial_delay_secs=5.0, logger=logging.warning,
     retry_filter=retry_on_server_errors_filter,
-    clock=Clock(), fuzz=True, factor=2, max_delay_secs=60 * 60 * 4):
+    clock=Clock(), fuzz=True, factor=2, max_delay_secs=60 * 60):
   """Decorator with arguments that control the retry logic.
 
   Args:
@@ -136,9 +144,9 @@ def with_exponential_backoff(
       can be used so that the delays are not randomized.
     factor: The exponential factor to use on subsequent retries.
       Default is 2 (doubling).
-    max_delay_sec: Maximum delay (in seconds). After this limit is reached,
+    max_delay_secs: Maximum delay (in seconds). After this limit is reached,
       further tries use max_delay_sec instead of exponentially increasing
-      the time. Defaults to 4 hours.
+      the time. Defaults to 1 hour.
 
   Returns:
     As per Python decorators with arguments pattern returns a decorator
@@ -177,7 +185,7 @@ def with_exponential_backoff(
               sleep_interval = retry_intervals.next()
             except StopIteration:
               # Re-raise the original exception since we finished the retries.
-              raise exn, None, exn_traceback
+              raise exn, None, exn_traceback  # pylint: disable=raising-bad-type
 
             logger(
                 'Retry with exponential backoff: waiting for %s seconds before '

@@ -21,7 +21,11 @@ import java.io.IOException;
 import java.util.NoSuchElementException;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.annotations.Experimental;
+import org.apache.beam.sdk.io.fs.EmptyMatchTreatment;
+import org.apache.beam.sdk.io.fs.MatchResult.Metadata;
 import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.options.ValueProvider;
+import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
 
 /**
  * A {@code BlockBasedSource} is a {@link FileBasedSource} where a file consists of blocks of
@@ -60,20 +64,43 @@ import org.apache.beam.sdk.options.PipelineOptions;
 public abstract class BlockBasedSource<T> extends FileBasedSource<T> {
   /**
    * Creates a {@code BlockBasedSource} based on a file name or pattern. Subclasses must call this
-   * constructor when creating a {@code BlockBasedSource} for a file pattern. See
-   * {@link FileBasedSource} for more information.
+   * constructor when creating a {@code BlockBasedSource} for a file pattern. See {@link
+   * FileBasedSource} for more information.
+   */
+  public BlockBasedSource(
+      String fileOrPatternSpec, EmptyMatchTreatment emptyMatchTreatment, long minBundleSize) {
+    this(StaticValueProvider.of(fileOrPatternSpec), emptyMatchTreatment, minBundleSize);
+  }
+
+  /**
+   * Like {@link #BlockBasedSource(String, EmptyMatchTreatment, long)} but with a default {@link
+   * EmptyMatchTreatment} of {@link EmptyMatchTreatment#DISALLOW}.
    */
   public BlockBasedSource(String fileOrPatternSpec, long minBundleSize) {
-    super(fileOrPatternSpec, minBundleSize);
+    this(StaticValueProvider.of(fileOrPatternSpec), minBundleSize);
   }
+
+  /** Like {@link #BlockBasedSource(String, long)}. */
+  public BlockBasedSource(ValueProvider<String> fileOrPatternSpec, long minBundleSize) {
+    this(fileOrPatternSpec, EmptyMatchTreatment.DISALLOW, minBundleSize);
+  }
+
+  /** Like {@link #BlockBasedSource(String, EmptyMatchTreatment, long)}. */
+  public BlockBasedSource(
+          ValueProvider<String> fileOrPatternSpec,
+          EmptyMatchTreatment emptyMatchTreatment,
+          long minBundleSize) {
+    super(fileOrPatternSpec, emptyMatchTreatment, minBundleSize);
+  }
+
 
   /**
    * Creates a {@code BlockBasedSource} for a single file. Subclasses must call this constructor
    * when implementing {@link BlockBasedSource#createForSubrangeOfFile}. See documentation in
    * {@link FileBasedSource}.
    */
-  public BlockBasedSource(String fileName, long minBundleSize, long startOffset, long endOffset) {
-    super(fileName, minBundleSize, startOffset, endOffset);
+  public BlockBasedSource(Metadata metadata, long minBundleSize, long startOffset, long endOffset) {
+    super(metadata, minBundleSize, startOffset, endOffset);
   }
 
   /**
@@ -81,7 +108,7 @@ public abstract class BlockBasedSource<T> extends FileBasedSource<T> {
    */
   @Override
   protected abstract BlockBasedSource<T> createForSubrangeOfFile(
-      String fileName, long start, long end);
+      Metadata metadata, long start, long end);
 
   /**
    * Creates a {@code BlockBasedReader}.

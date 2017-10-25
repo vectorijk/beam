@@ -25,16 +25,48 @@ import shelve
 import shutil
 import tempfile
 
+__all__ = ['PipelineRunner', 'PipelineState', 'PipelineResult']
 
+
+def _get_runner_map(runner_names, module_path):
+  """Create a map of runner name in lower case to full import path to the
+  runner class.
+  """
+  return {runner_name.lower(): module_path + runner_name
+          for runner_name in runner_names}
+
+
+_DIRECT_RUNNER_PATH = 'apache_beam.runners.direct.direct_runner.'
+_DATAFLOW_RUNNER_PATH = (
+    'apache_beam.runners.dataflow.dataflow_runner.')
+_TEST_RUNNER_PATH = 'apache_beam.runners.test.'
+_PYTHON_RPC_DIRECT_RUNNER = (
+    'apache_beam.runners.experimental.python_rpc_direct.'
+    'python_rpc_direct_runner.')
+
+_KNOWN_PYTHON_RPC_DIRECT_RUNNER = ('PythonRPCDirectRunner',)
 _KNOWN_DIRECT_RUNNERS = ('DirectRunner', 'EagerRunner')
-_KNOWN_DATAFLOW_RUNNERS = ('DataflowRunner', 'BlockingDataflowRunner')
+_KNOWN_DATAFLOW_RUNNERS = ('DataflowRunner',)
 _KNOWN_TEST_RUNNERS = ('TestDataflowRunner',)
+
+_RUNNER_MAP = {}
+_RUNNER_MAP.update(_get_runner_map(_KNOWN_DIRECT_RUNNERS,
+                                   _DIRECT_RUNNER_PATH))
+_RUNNER_MAP.update(_get_runner_map(_KNOWN_DATAFLOW_RUNNERS,
+                                   _DATAFLOW_RUNNER_PATH))
+_RUNNER_MAP.update(_get_runner_map(_KNOWN_PYTHON_RPC_DIRECT_RUNNER,
+                                   _PYTHON_RPC_DIRECT_RUNNER))
+_RUNNER_MAP.update(_get_runner_map(_KNOWN_TEST_RUNNERS,
+                                   _TEST_RUNNER_PATH))
+
 _ALL_KNOWN_RUNNERS = (
     _KNOWN_DIRECT_RUNNERS + _KNOWN_DATAFLOW_RUNNERS + _KNOWN_TEST_RUNNERS)
 
 
 def create_runner(runner_name):
-  """Creates a runner instance from a runner class name.
+  """For internal use only; no backwards-compatibility guarantees.
+
+  Creates a runner instance from a runner class name.
 
   Args:
     runner_name: Name of the pipeline runner. Possible values are:
@@ -47,29 +79,24 @@ def create_runner(runner_name):
     RuntimeError: if an invalid runner name is used.
   """
 
-  # TODO(BEAM-1185): Remove when all references to PipelineRunners are gone.
-  if 'PipelineRunner' in runner_name:
-    new_runner_name = runner_name.replace('PipelineRunner', 'Runner')
-    if new_runner_name in _ALL_KNOWN_RUNNERS:
-      logging.warning(
-          '%s is deprecated, use %s instead.', runner_name, new_runner_name)
-      runner_name = new_runner_name
-
-  # TODO(BEAM-759): Remove when all BlockingDataflowRunner references are gone.
-  if runner_name == 'BlockingDataflowRunner':
-    logging.warning(
-        'BlockingDataflowRunner is deprecated, use DataflowRunner instead.')
-
-  if runner_name in _KNOWN_DIRECT_RUNNERS:
-    runner_name = 'apache_beam.runners.direct.direct_runner.' + runner_name
-  elif runner_name in _KNOWN_DATAFLOW_RUNNERS:
-    runner_name = 'apache_beam.runners.dataflow_runner.' + runner_name
-  elif runner_name in _KNOWN_TEST_RUNNERS:
-    runner_name = 'apache_beam.runners.test.' + runner_name
+  # Get the qualified runner name by using the lower case runner name. If that
+  # fails try appending the name with 'runner' and check if it matches.
+  # If that also fails, use the given runner name as is.
+  runner_name = _RUNNER_MAP.get(
+      runner_name.lower(),
+      _RUNNER_MAP.get(runner_name.lower() + 'runner', runner_name))
 
   if '.' in runner_name:
     module, runner = runner_name.rsplit('.', 1)
-    return getattr(__import__(module, {}, {}, [runner], -1), runner)()
+    try:
+      return getattr(__import__(module, {}, {}, [runner], -1), runner)()
+    except ImportError:
+      if runner_name in _KNOWN_DATAFLOW_RUNNERS:
+        raise ImportError(
+            'Google Cloud Dataflow runner not available, '
+            'please install apache_beam[gcp]')
+      else:
+        raise
   else:
     raise ValueError(
         'Unexpected pipeline runner: %s. Valid values are %s '
@@ -82,8 +109,6 @@ class PipelineRunner(object):
 
   The base runner provides a run() method for visiting every node in the
   pipeline's DAG and executing the transforms computing the PValue in the node.
-  It also provides a clear() method for visiting every node and clearing out
-  the values contained in PValue objects produced during a run.
 
   A custom runner will typically provide implementations for some of the
   transform methods (ParDo, GroupByKey, Create, etc.). It may also
@@ -111,38 +136,6 @@ class PipelineRunner(object):
           raise
 
     pipeline.visit(RunVisitor(self))
-
-  def clear(self, pipeline, node=None):
-    """Clear all nodes or nodes reachable from node of materialized values.
-
-    Args:
-      pipeline: Pipeline object containing PValues to be cleared.
-      node: Optional node in the Pipeline processing DAG. If specified only
-        nodes reachable from this node will be cleared (ancestors of the node).
-
-    This method is not intended (for now) to be called by users of Runner
-    objects. It is a hook for future layers on top of the current programming
-    model to control how much of the previously computed values are kept
-    around. Presumably an interactivity layer will use it. The simplest way
-    to change the behavior would be to define a runner that overwrites the
-    clear_pvalue() method since this method (runner.clear) will visit all
-    relevant nodes and call clear_pvalue on them.
-
-    """
-
-    # Imported here to avoid circular dependencies.
-    # pylint: disable=wrong-import-order, wrong-import-position
-    from apache_beam.pipeline import PipelineVisitor
-
-    class ClearVisitor(PipelineVisitor):
-
-      def __init__(self, runner):
-        self.runner = runner
-
-      def visit_value(self, value, _):
-        self.runner.clear_pvalue(value)
-
-    pipeline.visit(ClearVisitor(self), node=node)
 
   def apply(self, transform, input):
     """Runner callback for a pipeline.apply call.
@@ -187,7 +180,9 @@ class PipelineRunner(object):
 
 
 class PValueCache(object):
-  """Local cache for arbitrary information computed for PValue objects."""
+  """For internal use only; no backwards-compatibility guarantees.
+
+  Local cache for arbitrary information computed for PValue objects."""
 
   def __init__(self, use_disk_backed_cache=False):
     # Cache of values computed while a runner executes a pipeline. This is a
@@ -213,7 +208,7 @@ class PValueCache(object):
     return len(self._cache)
 
   def to_cache_key(self, transform, tag):
-    return str((id(transform), tag))
+    return transform.full_label, tag
 
   def _ensure_pvalue_has_real_producer(self, pvalue):
     """Ensure the passed-in PValue has the real_producer attribute.
@@ -252,29 +247,30 @@ class PValueCache(object):
     self._cache[
         self.to_cache_key(transform, tag)] = [value, transform.refcounts[tag]]
 
-  def get_pvalue(self, pvalue):
+  def get_pvalue(self, pvalue, decref=True):
     """Gets the value associated with a PValue from the cache."""
     self._ensure_pvalue_has_real_producer(pvalue)
     try:
       value_with_refcount = self._cache[self.key(pvalue)]
-      value_with_refcount[1] -= 1
-      logging.debug('PValue computed by %s (tag %s): refcount: %d => %d',
-                    pvalue.real_producer.full_label, self.key(pvalue)[1],
-                    value_with_refcount[1] + 1, value_with_refcount[1])
-      if value_with_refcount[1] <= 0:
-        self.clear_pvalue(pvalue)
+      if decref:
+        value_with_refcount[1] -= 1
+        logging.debug('PValue computed by %s (tag %s): refcount: %d => %d',
+                      pvalue.real_producer.full_label, self.key(pvalue)[1],
+                      value_with_refcount[1] + 1, value_with_refcount[1])
+        if value_with_refcount[1] <= 0:
+          self.clear_pvalue(pvalue)
       return value_with_refcount[0]
     except KeyError:
       if (pvalue.tag is not None
           and self.to_cache_key(pvalue.real_producer, None) in self._cache):
-        # This is an undeclared, empty side output of a DoFn executed
-        # in the local runner before this side output referenced.
+        # This is an undeclared, empty output of a DoFn executed
+        # in the local runner before this output was referenced.
         return []
       else:
         raise
 
-  def get_unwindowed_pvalue(self, pvalue):
-    return [v.value for v in self.get_pvalue(pvalue)]
+  def get_unwindowed_pvalue(self, pvalue, decref=True):
+    return [v.value for v in self.get_pvalue(pvalue, decref)]
 
   def clear_pvalue(self, pvalue):
     """Removes a PValue from the cache."""
@@ -287,13 +283,14 @@ class PValueCache(object):
 
 
 class PipelineState(object):
-  """State of the Pipeline, as returned by PipelineResult.state.
+  """State of the Pipeline, as returned by :attr:`PipelineResult.state`.
 
   This is meant to be the union of all the states any runner can put a
-  pipeline in.  Currently, it represents the values of the dataflow
+  pipeline in. Currently, it represents the values of the dataflow
   API JobState enum.
   """
   UNKNOWN = 'UNKNOWN'  # not specified
+  STARTING = 'STARTING'  # not yet started
   STOPPED = 'STOPPED'  # paused or not yet started
   RUNNING = 'RUNNING'  # currently running
   DONE = 'DONE'  # successfully completed (terminal state)
@@ -302,10 +299,13 @@ class PipelineState(object):
   UPDATED = 'UPDATED'  # replaced by another job (terminal state)
   DRAINING = 'DRAINING'  # still processing, no longer reading data
   DRAINED = 'DRAINED'  # draining completed (terminal state)
+  PENDING = 'PENDING' # the job has been created but is not yet running.
+  CANCELLING = 'CANCELLING' # job has been explicitly cancelled and is
+                            # in the process of stopping
 
 
 class PipelineResult(object):
-  """A PipelineResult provides access to info about a pipeline."""
+  """A :class:`PipelineResult` provides access to info about a pipeline."""
 
   def __init__(self, state):
     self._state = state
@@ -319,15 +319,18 @@ class PipelineResult(object):
     """Waits until the pipeline finishes and returns the final status.
 
     Args:
-      duration: The time to wait (in milliseconds) for job to finish. If it is
-        set to None, it will wait indefinitely until the job is finished.
+      duration (int): The time to wait (in milliseconds) for job to finish.
+        If it is set to :data:`None`, it will wait indefinitely until the job
+        is finished.
 
     Raises:
-      IOError: If there is a persistent problem getting job information.
-      NotImplementedError: If the runner does not support this operation.
+      ~exceptions.IOError: If there is a persistent problem getting job
+        information.
+      ~exceptions.NotImplementedError: If the runner does not support this
+        operation.
 
     Returns:
-      The final state of the pipeline, or None on timeout.
+      The final state of the pipeline, or :data:`None` on timeout.
     """
     raise NotImplementedError
 
@@ -335,11 +338,23 @@ class PipelineResult(object):
     """Cancels the pipeline execution.
 
     Raises:
-      IOError: If there is a persistent problem getting job information.
-      NotImplementedError: If the runner does not support this operation.
+      ~exceptions.IOError: If there is a persistent problem getting job
+        information.
+      ~exceptions.NotImplementedError: If the runner does not support this
+        operation.
 
     Returns:
       The final state of the pipeline.
+    """
+    raise NotImplementedError
+
+  def metrics(self):
+    """Returns :class:`~apache_beam.metrics.metric.MetricResults` object to
+    query metrics from the runner.
+
+    Raises:
+      ~exceptions.NotImplementedError: If the runner does not support this
+        operation.
     """
     raise NotImplementedError
 

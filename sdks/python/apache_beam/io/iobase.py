@@ -29,21 +29,25 @@ returns a writer object supporting writing records of serialized data to
 the sink.
 """
 
-from collections import namedtuple
-
 import logging
 import random
 import uuid
+from collections import namedtuple
 
-from apache_beam import pvalue
 from apache_beam import coders
+from apache_beam import pvalue
+from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.pvalue import AsIter
 from apache_beam.pvalue import AsSingleton
 from apache_beam.transforms import core
 from apache_beam.transforms import ptransform
 from apache_beam.transforms import window
-from apache_beam.transforms.display import HasDisplayData
 from apache_beam.transforms.display import DisplayDataItem
+from apache_beam.transforms.display import HasDisplayData
+from apache_beam.utils import urns
+from apache_beam.utils.windowed_value import WindowedValue
+
+__all__ = ['BoundedSource', 'RangeTracker', 'Read', 'Sink', 'Write', 'Writer']
 
 
 # Encapsulates information about a bundle of a source generated when method
@@ -67,7 +71,13 @@ SourceBundle = namedtuple(
     'weight source start_position stop_position')
 
 
-class BoundedSource(HasDisplayData):
+class SourceBase(HasDisplayData, urns.RunnerApiFn):
+  """Base class for all sources that can be passed to beam.io.Read(...).
+  """
+  urns.RunnerApiFn.register_pickle_urn(urns.PICKLED_SOURCE)
+
+
+class BoundedSource(SourceBase):
   """A source that reads a finite amount of input records.
 
   This class defines following operations which can be used to read the source
@@ -86,6 +96,7 @@ class BoundedSource(HasDisplayData):
     ``RangeTracker``.
 
   A runner will perform reading the source in two steps.
+
   (1) Method ``get_range_tracker()`` will be invoked with start and end
       positions to obtain a ``RangeTracker`` for the range of positions the
       runner intends to read. Source must define a default initial start and end
@@ -137,6 +148,7 @@ class BoundedSource(HasDisplayData):
 
     Framework may invoke ``read()`` method with the RangeTracker object returned
     here to read data from the source.
+
     Args:
       start_position: starting position of the range. If 'None' default start
                       position of the source must be used.
@@ -183,6 +195,9 @@ class BoundedSource(HasDisplayData):
     more efficiently than pickling.
     """
     return coders.registry.get_coder(object)
+
+  def is_bounded(self):
+    return True
 
 
 class RangeTracker(object):
@@ -298,6 +313,8 @@ class RangeTracker(object):
   the current reader and by a reader of the task starting at 43).
   """
 
+  SPLIT_POINTS_UNKNOWN = object()
+
   def start_position(self):
     """Returns the starting position of the current range, inclusive."""
     raise NotImplementedError(type(self))
@@ -315,8 +332,8 @@ class RangeTracker(object):
 
     ** Thread safety **
 
-    This method along with several other methods of this class may be invoked by
-    multiple threads, hence must be made thread-safe, e.g. by using a single
+    Methods of the class ``RangeTracker`` including this method may get invoked
+    by different threads, hence must be made thread-safe, e.g. by using a single
     lock object.
 
     Args:
@@ -350,8 +367,8 @@ class RangeTracker(object):
 
     ** Thread safety **
 
-    This method along with several other methods of this class may be invoked by
-    multiple threads, hence must be made thread-safe, e.g. by using a single
+    Methods of the class ``RangeTracker`` including this method may get invoked
+    by different threads, hence must be made thread-safe, e.g. by using a single
     lock object.
 
     Args:
@@ -385,8 +402,8 @@ class RangeTracker(object):
 
     ** Thread safety **
 
-    This method along with several other methods of this class may be invoked by
-    multiple threads, hence must be made thread-safe, e.g. by using a single
+    Methods of the class ``RangeTracker`` including this method may get invoked
+    by different threads, hence must be made thread-safe, e.g. by using a single
     lock object.
 
     Args:
@@ -403,8 +420,8 @@ class RangeTracker(object):
 
     ** Thread safety **
 
-    This method along with several other methods of this class may be invoked by
-    multiple threads, hence must be made thread-safe, e.g. by using a single
+    Methods of the class ``RangeTracker`` including this method may get invoked
+    by different threads, hence must be made thread-safe, e.g. by using a single
     lock object.
 
     Returns:
@@ -414,11 +431,152 @@ class RangeTracker(object):
     """
     raise NotImplementedError
 
+  def split_points(self):
+    """Gives the number of split points consumed and remaining.
+
+    For a ``RangeTracker`` used by a ``BoundedSource`` (within a
+    ``BoundedSource.read()`` invocation) this method produces a 2-tuple that
+    gives the number of split points consumed by the ``BoundedSource`` and the
+    number of split points remaining within the range of the ``RangeTracker``
+    that has not been consumed by the ``BoundedSource``.
+
+    More specifically, given that the position of the current record being read
+    by ``BoundedSource`` is current_position this method produces a tuple that
+    consists of
+    (1) number of split points in the range [self.start_position(),
+    current_position) without including the split point that is currently being
+    consumed. This represents the total amount of parallelism in the consumed
+    part of the source.
+    (2) number of split points within the range
+    [current_position, self.stop_position()) including the split point that is
+    currently being consumed. This represents the total amount of parallelism in
+    the unconsumed part of the source.
+
+    Methods of the class ``RangeTracker`` including this method may get invoked
+    by different threads, hence must be made thread-safe, e.g. by using a single
+    lock object.
+
+    ** General information about consumed and remaining number of split
+       points returned by this method. **
+
+      * Before a source read (``BoundedSource.read()`` invocation) claims the
+        first split point, number of consumed split points is 0. This condition
+        holds independent of whether the input is "splittable". A splittable
+        source is a source that has more than one split point.
+      * Any source read that has only claimed one split point has 0 consumed
+        split points since the first split point is the current split point and
+        is still being processed. This condition holds independent of whether
+        the input is splittable.
+      * For an empty source read which never invokes
+        ``RangeTracker.try_claim()``, the consumed number of split points is 0.
+        This condition holds independent of whether the input is splittable.
+      * For a source read which has invoked ``RangeTracker.try_claim()`` n
+        times, the consumed number of split points is  n -1.
+      * If a ``BoundedSource`` sets a callback through function
+        ``set_split_points_unclaimed_callback()``, ``RangeTracker`` can use that
+        callback when determining remaining number of split points.
+      * Remaining split points should include the split point that is currently
+        being consumed by the source read. Hence if the above callback returns
+        an integer value n, remaining number of split points should be (n + 1).
+      * After last split point is claimed remaining split points becomes 1,
+        because this unfinished read itself represents an  unfinished split
+        point.
+      * After all records of the source has been consumed, remaining number of
+        split points becomes 0 and consumed number of split points becomes equal
+        to the total number of split points within the range being read by the
+        source. This method does not address this condition and will continue to
+        report number of consumed split points as
+        ("total number of split points" - 1) and number of remaining split
+        points as 1. A runner that performs the reading of the source can
+        detect when all records have been consumed and adjust remaining and
+        consumed number of split points accordingly.
+
+    ** Examples **
+
+    (1) A "perfectly splittable" input which can be read in parallel down to the
+        individual records.
+
+        Consider a perfectly splittable input that consists of 50 split points.
+
+      * Before a source read (``BoundedSource.read()`` invocation) claims the
+        first split point, number of consumed split points is 0 number of
+        remaining split points is 50.
+      * After claiming first split point, consumed number of split points is 0
+        and remaining number of split is 50.
+      * After claiming split point #30, consumed number of split points is 29
+        and remaining number of split points is 21.
+      * After claiming all 50 split points, consumed number of split points is
+        49 and remaining number of split points is 1.
+
+    (2) a "block-compressed" file format such as ``avroio``, in which a block of
+        records has to be read as a whole, but different blocks can be read in
+        parallel.
+
+        Consider a block compressed input that consists of 5 blocks.
+
+      * Before a source read (``BoundedSource.read()`` invocation) claims the
+        first split point (first block), number of consumed split points is 0
+        number of remaining split points is 5.
+      * After claiming first split point, consumed number of split points is 0
+        and remaining number of split is 5.
+      * After claiming split point #3, consumed number of split points is 2
+        and remaining number of split points is 3.
+      * After claiming all 5 split points, consumed number of split points is
+        4 and remaining number of split points is 1.
+
+    (3) an "unsplittable" input such as a cursor in a database or a gzip
+        compressed file.
+
+        Such an input is considered to have only a single split point. Number of
+        consumed split points is always 0 and number of remaining split points
+        is always 1.
+
+    By default ``RangeTracker` returns ``RangeTracker.SPLIT_POINTS_UNKNOWN`` for
+    both consumed and remaining number of split points, which indicates that the
+    number of split points consumed and remaining is unknown.
+
+    Returns:
+      A pair that gives consumed and remaining number of split points. Consumed
+      number of split points should be an integer larger than or equal to zero
+      or ``RangeTracker.SPLIT_POINTS_UNKNOWN``. Remaining number of split points
+      should be an integer larger than zero or
+      ``RangeTracker.SPLIT_POINTS_UNKNOWN``.
+    """
+    return (RangeTracker.SPLIT_POINTS_UNKNOWN,
+            RangeTracker.SPLIT_POINTS_UNKNOWN)
+
+  def set_split_points_unclaimed_callback(self, callback):
+    """Sets a callback for determining the unclaimed number of split points.
+
+    By invoking this function, a ``BoundedSource`` can set a callback function
+    that may get invoked by the ``RangeTracker`` to determine the number of
+    unclaimed split points. A split point is unclaimed if
+    ``RangeTracker.try_claim()`` method has not been successfully invoked for
+    that particular split point. The callback function accepts a single
+    parameter, a stop position for the BoundedSource (stop_position). If the
+    record currently being consumed by the ``BoundedSource`` is at position
+    current_position, callback should return the number of split points within
+    the range (current_position, stop_position). Note that, this should not
+    include the split point that is currently being consumed by the source.
+
+    This function must be implemented by subclasses before being used.
+
+    Args:
+      callback: a function that takes a single parameter, a stop position,
+                and returns unclaimed number of split points for the source read
+                operation that is calling this function. Value returned from
+                callback should be either an integer larger than or equal to
+                zero or ``RangeTracker.SPLIT_POINTS_UNKNOWN``.
+    """
+    raise NotImplementedError
+
 
 class Sink(HasDisplayData):
-  """A resource that can be written to using the ``df.io.Write`` transform.
+  """This class is deprecated, no backwards-compatibility guarantees.
 
-  Here ``df`` stands for Dataflow Python code imported in following manner.
+  A resource that can be written to using the ``beam.io.Write`` transform.
+
+  Here ``beam`` stands for Apache Beam Python code imported in following manner.
   ``import apache_beam as beam``.
 
   A parallel write to an ``iobase.Sink`` consists of three phases:
@@ -428,9 +586,6 @@ class Sink(HasDisplayData):
   2. A parallel write phase where workers write *bundles* of records
   3. A sequential *finalization* phase (e.g., committing the writes, merging
      output files, etc.)
-
-  For exact definition of a Dataflow bundle please see
-  https://cloud.google.com/dataflow/faq.
 
   Implementing a new sink requires extending two classes.
 
@@ -451,8 +606,8 @@ class Sink(HasDisplayData):
   single record from the bundle and ``close()`` which is called once
   at the end of writing a bundle.
 
-  See also ``df.io.fileio.FileSink`` which provides a simpler API for writing
-  sinks that produce files.
+  See also ``apache_beam.io.filebasedsink.FileBasedSink`` which provides a
+  simpler API for writing sinks that produce files.
 
   **Execution of the Write transform**
 
@@ -549,7 +704,7 @@ class Sink(HasDisplayData):
 
   For more information on creating new sinks please refer to the official
   documentation at
-  ``https://cloud.google.com/dataflow/model/custom-io#creating-sinks``.
+  ``https://beam.apache.org/documentation/sdks/python-custom-io#creating-sinks``
   """
 
   def initialize_write(self):
@@ -616,7 +771,9 @@ class Sink(HasDisplayData):
 
 
 class Writer(object):
-  """Writes a bundle of elements from a ``PCollection`` to a sink.
+  """This class is deprecated, no backwards-compatibility guarantees.
+
+  Writes a bundle of elements from a ``PCollection`` to a sink.
 
   A Writer  ``iobase.Writer.write()`` writes and elements to the sink while
   ``iobase.Writer.close()`` is called after all elements in the bundle have been
@@ -645,17 +802,13 @@ class Writer(object):
 class Read(ptransform.PTransform):
   """A transform that reads a PCollection."""
 
-  def __init__(self, *args, **kwargs):
+  def __init__(self, source):
     """Initializes a Read transform.
 
     Args:
-      *args: A tuple of position arguments.
-      **kwargs: A dictionary of keyword arguments.
-
-    The *args, **kwargs are expected to be (label, source) or (source).
+      source: Data source to read from.
     """
-    label, source = self.parse_label_and_arg(args, kwargs, 'source')
-    super(Read, self).__init__(label)
+    super(Read, self).__init__()
     self.source = source
 
   def expand(self, pbegin):
@@ -676,6 +829,24 @@ class Read(ptransform.PTransform):
     return {'source': DisplayDataItem(self.source.__class__,
                                       label='Read Source'),
             'source_dd': self.source}
+
+  def to_runner_api_parameter(self, context):
+    return (urns.READ_TRANSFORM,
+            beam_runner_api_pb2.ReadPayload(
+                source=self.source.to_runner_api(context),
+                is_bounded=beam_runner_api_pb2.IsBounded.BOUNDED
+                if self.source.is_bounded()
+                else beam_runner_api_pb2.IsBounded.UNBOUNDED))
+
+  @staticmethod
+  def from_runner_api_parameter(parameter, context):
+    return Read(SourceBase.from_runner_api(parameter.source, context))
+
+
+ptransform.PTransform.register_urn(
+    urns.READ_TRANSFORM,
+    beam_runner_api_pb2.ReadPayload,
+    Read.from_runner_api_parameter)
 
 
 class Write(ptransform.PTransform):
@@ -706,17 +877,13 @@ class Write(ptransform.PTransform):
   native write transform.
   """
 
-  def __init__(self, *args, **kwargs):
+  def __init__(self, sink):
     """Initializes a Write transform.
 
     Args:
-      *args: A tuple of position arguments.
-      **kwargs: A dictionary of keyword arguments.
-
-    The *args, **kwargs are expected to be (label, sink) or (sink).
+      sink: Data sink to write to.
     """
-    label, sink = self.parse_label_and_arg(args, kwargs, 'sink')
-    super(Write, self).__init__(label)
+    super(Write, self).__init__()
     self.sink = sink
 
   def display_data(self):
@@ -759,22 +926,20 @@ class WriteImpl(ptransform.PTransform):
       write_result_coll = (keyed_pcoll
                            | core.WindowInto(window.GlobalWindows())
                            | core.GroupByKey()
-                           | 'WriteBundles' >> core.Map(
-                               _write_keyed_bundle, self.sink,
+                           | 'WriteBundles' >> core.ParDo(
+                               _WriteKeyedBundleDoFn(self.sink),
                                AsSingleton(init_result_coll)))
     else:
       min_shards = 1
       write_result_coll = (pcoll
                            | 'WriteBundles' >>
-                           core.ParDo(
-                               _WriteBundleDoFn(), self.sink,
-                               AsSingleton(init_result_coll))
+                           core.ParDo(_WriteBundleDoFn(self.sink),
+                                      AsSingleton(init_result_coll))
                            | 'Pair' >> core.Map(lambda x: (None, x))
                            | core.WindowInto(window.GlobalWindows())
                            | core.GroupByKey()
                            | 'Extract' >> core.FlatMap(lambda x: x[1]))
-    return do_once | core.FlatMap(
-        'finalize_write',
+    return do_once | 'FinalizeWrite' >> core.FlatMap(
         _finalize_write,
         self.sink,
         AsSingleton(init_result_coll),
@@ -784,28 +949,41 @@ class WriteImpl(ptransform.PTransform):
 
 class _WriteBundleDoFn(core.DoFn):
   """A DoFn for writing elements to an iobase.Writer.
-
   Opens a writer at the first element and closes the writer at finish_bundle().
   """
 
-  def __init__(self):
+  def __init__(self, sink):
     self.writer = None
+    self.sink = sink
 
-  def process(self, context, sink, init_result):
+  def display_data(self):
+    return {'sink_dd': self.sink}
+
+  def process(self, element, init_result):
     if self.writer is None:
-      self.writer = sink.open_writer(init_result, str(uuid.uuid4()))
-    self.writer.write(context.element)
+      self.writer = self.sink.open_writer(init_result, str(uuid.uuid4()))
+    self.writer.write(element)
 
-  def finish_bundle(self, context, *args, **kwargs):
+  def finish_bundle(self):
     if self.writer is not None:
-      yield window.TimestampedValue(self.writer.close(), window.MAX_TIMESTAMP)
+      yield WindowedValue(self.writer.close(), window.MAX_TIMESTAMP,
+                          [window.GlobalWindow()])
 
 
-def _write_keyed_bundle(bundle, sink, init_result):
-  writer = sink.open_writer(init_result, str(uuid.uuid4()))
-  for element in bundle[1]:  # values
-    writer.write(element)
-  return window.TimestampedValue(writer.close(), window.MAX_TIMESTAMP)
+class _WriteKeyedBundleDoFn(core.DoFn):
+
+  def __init__(self, sink):
+    self.sink = sink
+
+  def display_data(self):
+    return {'sink_dd': self.sink}
+
+  def process(self, element, init_result):
+    bundle = element
+    writer = self.sink.open_writer(init_result, str(uuid.uuid4()))
+    for e in bundle[1]:  # values
+      writer.write(e)
+    return [window.TimestampedValue(writer.close(), window.MAX_TIMESTAMP)]
 
 
 def _finalize_write(_, sink, init_result, write_results, min_shards):
@@ -827,16 +1005,11 @@ class _RoundRobinKeyFn(core.DoFn):
   def __init__(self, count):
     self.count = count
 
-  def start_bundle(self, context):
+  def start_bundle(self):
     self.counter = random.randint(0, self.count - 1)
 
-  def process(self, context):
+  def process(self, element):
     self.counter += 1
     if self.counter >= self.count:
       self.counter -= self.count
-    yield self.counter, context.element
-
-
-# For backwards compatibility.
-# pylint: disable=wrong-import-position
-from apache_beam.runners.dataflow.native_io.iobase import *
+    yield self.counter, element

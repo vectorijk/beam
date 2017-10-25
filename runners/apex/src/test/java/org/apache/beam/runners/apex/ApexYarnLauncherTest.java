@@ -26,7 +26,6 @@ import com.datatorrent.api.Attribute.AttributeMap;
 import com.datatorrent.api.Context.DAGContext;
 import com.datatorrent.api.DAG;
 import com.datatorrent.api.StreamingApplication;
-
 import java.io.File;
 import java.net.URI;
 import java.nio.file.FileSystem;
@@ -35,8 +34,8 @@ import java.nio.file.Files;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.jar.JarFile;
-
 import org.apache.apex.api.EmbeddedAppLauncher;
 import org.apache.apex.api.Launcher;
 import org.apache.apex.api.Launcher.AppHandle;
@@ -44,12 +43,15 @@ import org.apache.apex.api.Launcher.LaunchMode;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 /**
  * Test for dependency resolution for pipeline execution on YARN.
  */
 public class ApexYarnLauncherTest {
+  @Rule public TemporaryFolder tmpFolder = new TemporaryFolder();
 
   @Test
   public void testGetYarnDeployDependencies() throws Exception {
@@ -78,15 +80,17 @@ public class ApexYarnLauncherTest {
     Configuration conf = new Configuration(false);
     DAG dag = embeddedLauncher.prepareDAG(app, conf);
     Attribute.AttributeMap launchAttributes = new Attribute.AttributeMap.DefaultAttributeMap();
+    Properties configProperties = new Properties();
     ApexYarnLauncher launcher = new ApexYarnLauncher();
-    launcher.launchApp(new MockApexYarnLauncherParams(dag, launchAttributes));
+    launcher.launchApp(new MockApexYarnLauncherParams(dag, launchAttributes, configProperties));
   }
 
   private static class MockApexYarnLauncherParams extends  ApexYarnLauncher.LaunchParams {
     private static final long serialVersionUID = 1L;
 
-    public MockApexYarnLauncherParams(DAG dag, AttributeMap launchAttributes) {
-      super(dag, launchAttributes);
+    public MockApexYarnLauncherParams(DAG dag, AttributeMap launchAttributes,
+        Properties properties) {
+      super(dag, launchAttributes, properties);
     }
 
     @Override
@@ -118,10 +122,9 @@ public class ApexYarnLauncherTest {
 
   @Test
   public void testCreateJar() throws Exception {
-    File baseDir = new File("./target/testCreateJar");
-    File srcDir = new File(baseDir, "src");
+    File baseDir = tmpFolder.newFolder("target", "testCreateJar");
+    File srcDir = tmpFolder.newFolder("target", "testCreateJar", "src");
     String file1 = "file1";
-    FileUtils.forceMkdir(srcDir);
     FileUtils.write(new File(srcDir, file1), "file1");
 
     File jarFile = new File(baseDir, "test.jar");
@@ -133,6 +136,5 @@ public class ApexYarnLauncherTest {
       Assert.assertTrue("manifest", Files.isRegularFile(zipfs.getPath(JarFile.MANIFEST_NAME)));
       Assert.assertTrue("file1", Files.isRegularFile(zipfs.getPath(file1)));
     }
-
   }
 }

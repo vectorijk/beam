@@ -20,15 +20,12 @@
 
 from __future__ import absolute_import
 
-from apache_beam.transforms import window
 from apache_beam.transforms.core import CombinePerKey
 from apache_beam.transforms.core import Flatten
 from apache_beam.transforms.core import GroupByKey
 from apache_beam.transforms.core import Map
-from apache_beam.transforms.core import WindowInto
 from apache_beam.transforms.ptransform import PTransform
 from apache_beam.transforms.ptransform import ptransform_fn
-
 
 __all__ = [
     'CoGroupByKey',
@@ -36,9 +33,6 @@ __all__ = [
     'KvSwap',
     'RemoveDuplicates',
     'Values',
-    'assert_that',
-    'equal_to',
-    'is_empty',
     ]
 
 
@@ -87,8 +81,8 @@ class CoGroupByKey(PTransform):
       to provide pipeline information, and should be considered mandatory.
   """
 
-  def __init__(self, label=None, **kwargs):
-    super(CoGroupByKey, self).__init__(label)
+  def __init__(self, **kwargs):
+    super(CoGroupByKey, self).__init__()
     self.pipeline = kwargs.pop('pipeline', None)
     if kwargs:
       raise ValueError('Unexpected keyword arguments: %s' % kwargs.keys())
@@ -138,7 +132,7 @@ class CoGroupByKey(PTransform):
       if self.pipeline:
         assert pcoll.pipeline == self.pipeline
 
-    return ([pcoll | Map('pair_with_%s' % tag, _pair_tag_with_value, tag)
+    return ([pcoll | 'pair_with_%s' % tag >> Map(_pair_tag_with_value, tag)
              for tag, pcoll in pcolls]
             | Flatten(pipeline=self.pipeline)
             | GroupByKey()
@@ -147,17 +141,17 @@ class CoGroupByKey(PTransform):
 
 def Keys(label='Keys'):  # pylint: disable=invalid-name
   """Produces a PCollection of first elements of 2-tuples in a PCollection."""
-  return Map(label, lambda (k, v): k)
+  return label >> Map(lambda (k, v): k)
 
 
 def Values(label='Values'):  # pylint: disable=invalid-name
   """Produces a PCollection of second elements of 2-tuples in a PCollection."""
-  return Map(label, lambda (k, v): v)
+  return label >> Map(lambda (k, v): v)
 
 
 def KvSwap(label='KvSwap'):  # pylint: disable=invalid-name
   """Produces a PCollection reversing 2-tuples in a PCollection."""
-  return Map(label, lambda (k, v): (v, k))
+  return label >> Map(lambda (k, v): (v, k))
 
 
 @ptransform_fn
@@ -167,69 +161,3 @@ def RemoveDuplicates(pcoll):  # pylint: disable=invalid-name
           | 'ToPairs' >> Map(lambda v: (v, None))
           | 'Group' >> CombinePerKey(lambda vs: None)
           | 'RemoveDuplicates' >> Keys())
-
-
-class DataflowAssertException(Exception):
-  """Exception raised by matcher classes used by assert_that transform."""
-
-  pass
-
-
-# Note that equal_to always sorts the expected and actual since what we
-# compare are PCollections for which there is no guaranteed order.
-# However the sorting does not go beyond top level therefore [1,2] and [2,1]
-# are considered equal and [[1,2]] and [[2,1]] are not.
-# TODO(silviuc): Add contains_in_any_order-style matchers.
-def equal_to(expected):
-  expected = list(expected)
-
-  def _equal(actual):
-    sorted_expected = sorted(expected)
-    sorted_actual = sorted(actual)
-    if sorted_expected != sorted_actual:
-      raise DataflowAssertException(
-          'Failed assert: %r == %r' % (sorted_expected, sorted_actual))
-  return _equal
-
-
-def is_empty():
-  def _empty(actual):
-    actual = list(actual)
-    if actual:
-      raise DataflowAssertException(
-          'Failed assert: [] == %r' % actual)
-  return _empty
-
-
-def assert_that(actual, matcher, label='assert_that'):
-  """A PTransform that checks a PCollection has an expected value.
-
-  Note that assert_that should be used only for testing pipelines since the
-  check relies on materializing the entire PCollection being checked.
-
-  Args:
-    actual: A PCollection.
-    matcher: A matcher function taking as argument the actual value of a
-      materialized PCollection. The matcher validates this actual value against
-      expectations and raises DataflowAssertException if they are not met.
-    label: Optional string label. This is needed in case several assert_that
-      transforms are introduced in the same pipeline.
-
-  Returns:
-    Ignored.
-  """
-
-  class AssertThat(PTransform):
-
-    def expand(self, pcoll):
-      return (pcoll
-              | WindowInto(window.GlobalWindows())
-              | "ToVoidKey" >> Map(lambda v: (None, v))
-              | "Group" >> GroupByKey()
-              | "UnKey" >> Map(lambda (k, v): v)
-              | "Match" >> Map(matcher))
-
-    def default_label(self):
-      return label
-
-  actual | AssertThat()  # pylint: disable=expression-not-assigned

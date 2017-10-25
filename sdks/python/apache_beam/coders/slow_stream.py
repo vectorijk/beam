@@ -15,13 +15,18 @@
 # limitations under the License.
 #
 
-"""A pure Python implementation of stream.pyx."""
+"""A pure Python implementation of stream.pyx.
+
+For internal use only; no backwards-compatibility guarantees.
+"""
 
 import struct
 
 
 class OutputStream(object):
-  """A pure Python implementation of stream.OutputStream."""
+  """For internal use only; no backwards-compatibility guarantees.
+
+  A pure Python implementation of stream.OutputStream."""
 
   def __init__(self):
     self.data = []
@@ -52,6 +57,9 @@ class OutputStream(object):
   def write_bigendian_int64(self, v):
     self.write(struct.pack('>q', v))
 
+  def write_bigendian_uint64(self, v):
+    self.write(struct.pack('>Q', v))
+
   def write_bigendian_int32(self, v):
     self.write(struct.pack('>i', v))
 
@@ -61,9 +69,14 @@ class OutputStream(object):
   def get(self):
     return ''.join(self.data)
 
+  def size(self):
+    return len(self.data)
+
 
 class ByteCountingOutputStream(OutputStream):
-  """A pure Python implementation of stream.ByteCountingOutputStream."""
+  """For internal use only; no backwards-compatibility guarantees.
+
+  A pure Python implementation of stream.ByteCountingOutputStream."""
 
   def __init__(self):
     # Note that we don't actually use any of the data initialized by our super.
@@ -90,7 +103,9 @@ class ByteCountingOutputStream(OutputStream):
 
 
 class InputStream(object):
-  """A pure Python implementation of stream.InputStream."""
+  """For internal use only; no backwards-compatibility guarantees.
+
+  A pure Python implementation of stream.InputStream."""
 
   def __init__(self, data):
     self.data = data
@@ -132,6 +147,9 @@ class InputStream(object):
   def read_bigendian_int64(self):
     return struct.unpack('>q', self.read(8))[0]
 
+  def read_bigendian_uint64(self):
+    return struct.unpack('>Q', self.read(8))[0]
+
   def read_bigendian_int32(self):
     return struct.unpack('>i', self.read(4))[0]
 
@@ -140,7 +158,9 @@ class InputStream(object):
 
 
 def get_varint_size(v):
-  """Returns the size of the given integer value when encode as a VarInt."""
+  """For internal use only; no backwards-compatibility guarantees.
+
+  Returns the size of the given integer value when encode as a VarInt."""
   if v < 0:
     v += 1 << 64
     if v <= 0:

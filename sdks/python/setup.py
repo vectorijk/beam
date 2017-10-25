@@ -19,31 +19,42 @@
 
 from distutils.version import StrictVersion
 
+import glob
 import os
+import pkg_resources
 import platform
+import shutil
+import subprocess
+import sys
 import warnings
 
 import setuptools
+
+from setuptools.command.build_py import build_py
+from setuptools.command.sdist import sdist
+from setuptools.command.test import test
 
 from pkg_resources import get_distribution, DistributionNotFound
 
 
 def get_version():
   global_names = {}
-  execfile(os.path.normpath('./apache_beam/version.py'),
-           global_names)
+  exec(open(os.path.normpath('./apache_beam/version.py')).read(), global_names)
   return global_names['__version__']
 
-PACKAGE_NAME = 'apache-beam-sdk'
+PACKAGE_NAME = 'apache-beam'
 PACKAGE_VERSION = get_version()
 PACKAGE_DESCRIPTION = 'Apache Beam SDK for Python'
-PACKAGE_URL = 'https://beam.incubator.apache.org'
-PACKAGE_DOWNLOAD_URL = 'TBD'
+PACKAGE_URL = 'https://beam.apache.org'
+PACKAGE_DOWNLOAD_URL = 'https://pypi.python.org/pypi/apache-beam'
 PACKAGE_AUTHOR = 'Apache Software Foundation'
-PACKAGE_EMAIL = 'dev@beam.incubator.apache.org'
+PACKAGE_EMAIL = 'dev@beam.apache.org'
 PACKAGE_KEYWORDS = 'apache beam'
 PACKAGE_LONG_DESCRIPTION = '''
-TBD
+Apache Beam is a unified programming model for both batch and streaming
+data processing, enabling efficient execution across diverse distributed
+execution engines and providing extensibility points for connecting to
+different technologies and user communities.
 '''
 
 REQUIRED_PIP_VERSION = '7.0.0'
@@ -84,24 +95,58 @@ else:
 
 
 REQUIRED_PACKAGES = [
-    'avro>=1.7.7,<2.0.0',
+    'avro>=1.8.1,<2.0.0',
     'crcmod>=1.7,<2.0',
-    'dill>=0.2.5,<0.3',
-    'google-apitools>=0.5.6,<1.0.0',
-    'googledatastore==6.4.1',
+    'dill==0.2.6',
+    'grpcio>=1.0,<2.0',
     'httplib2>=0.8,<0.10',
     'mock>=1.0.1,<3.0.0',
     'oauth2client>=2.0.1,<4.0.0',
-    'protobuf==3.0.0',
-    'protorpc>=0.9.1,<0.12',
-    'python-gflags>=2.0,<4.0.0',
-    'pyyaml>=3.10,<4.0.0',
+    'protobuf>=3.2.0,<=3.3.0',
+    'pyyaml>=3.12,<4.0.0',
+    # Six 1.11.0 incompatible with apitools.
+    # TODO(BEAM-2964): Remove the upper bound.
+    'six>=1.9,<1.11',
+    'typing>=3.6.0,<3.7.0',
     ]
 
+REQUIRED_SETUP_PACKAGES = [
+    'nose>=1.0',
+    ]
 
 REQUIRED_TEST_PACKAGES = [
     'pyhamcrest>=1.9,<2.0',
+    # Six required by nose plugins management.
+    # Six 1.11.0 incompatible with apitools.
+    # TODO(BEAM-2964): Remove the upper bound.
+    'six>=1.9,<1.11',
     ]
+
+GCP_REQUIREMENTS = [
+  'google-apitools>=0.5.10,<=0.5.11',
+  'proto-google-cloud-datastore-v1>=0.90.0,<=0.90.4',
+  'googledatastore==7.0.1',
+  'google-cloud-pubsub==0.26.0',
+  # GCP packages required by tests
+  'google-cloud-bigquery==0.25.0',
+]
+
+
+# We must generate protos after setup_requires are installed.
+def generate_protos_first(original_cmd):
+  try:
+    # See https://issues.apache.org/jira/browse/BEAM-2366
+    # pylint: disable=wrong-import-position
+    import gen_protos
+    class cmd(original_cmd, object):
+      def run(self):
+        gen_protos.generate_proto_files()
+        super(cmd, self).run()
+    return cmd
+  except ImportError:
+    warnings.warn("Could not import gen_protos, skipping proto generation.")
+    return original_cmd
+
 
 setuptools.setup(
     name=PACKAGE_NAME,
@@ -113,19 +158,29 @@ setuptools.setup(
     author=PACKAGE_AUTHOR,
     author_email=PACKAGE_EMAIL,
     packages=setuptools.find_packages(),
-    package_data={'apache_beam': ['**/*.pyx', '**/*.pxd', 'tests/data/*']},
+    package_data={'apache_beam': [
+        '*/*.pyx', '*/*/*.pyx', '*/*.pxd', '*/*/*.pxd', 'testing/data/*']},
     ext_modules=cythonize([
-        '**/*.pyx',
+        'apache_beam/**/*.pyx',
         'apache_beam/coders/coder_impl.py',
+        'apache_beam/metrics/execution.py',
         'apache_beam/runners/common.py',
+        'apache_beam/runners/worker/logger.py',
+        'apache_beam/runners/worker/opcounters.py',
+        'apache_beam/runners/worker/operations.py',
         'apache_beam/transforms/cy_combiners.py',
         'apache_beam/utils/counters.py',
         'apache_beam/utils/windowed_value.py',
     ]),
-    setup_requires=['nose>=1.0'],
+    setup_requires=REQUIRED_SETUP_PACKAGES,
     install_requires=REQUIRED_PACKAGES,
     test_suite='nose.collector',
     tests_require=REQUIRED_TEST_PACKAGES,
+    extras_require={
+        'docs': ['Sphinx>=1.5.2,<2.0'],
+        'test': REQUIRED_TEST_PACKAGES,
+        'gcp': GCP_REQUIREMENTS
+    },
     zip_safe=False,
     # PyPI package information.
     classifiers=[
@@ -135,11 +190,16 @@ setuptools.setup(
         'Programming Language :: Python :: 2.7',
         'Topic :: Software Development :: Libraries',
         'Topic :: Software Development :: Libraries :: Python Modules',
-        ],
+    ],
     license='Apache License, Version 2.0',
     keywords=PACKAGE_KEYWORDS,
     entry_points={
         'nose.plugins.0.10': [
             'beam_test_plugin = test_config:BeamTestPlugin'
-            ]}
-    )
+    ]},
+    cmdclass={
+        'build_py': generate_protos_first(build_py),
+        'sdist': generate_protos_first(sdist),
+        'test': generate_protos_first(test),
+    },
+)

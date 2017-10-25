@@ -30,7 +30,6 @@ import com.mongodb.gridfs.GridFS;
 import com.mongodb.gridfs.GridFSDBFile;
 import com.mongodb.gridfs.GridFSInputFile;
 import com.mongodb.util.JSON;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -40,9 +39,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
-
 import javax.annotation.Nullable;
-
+import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.SerializableCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
@@ -119,6 +117,7 @@ import org.joda.time.Instant;
  * to the file separated with line feeds.
  * </p>
  */
+@Experimental(Experimental.Kind.SOURCE_SINK)
 public class MongoDbGridFSIO {
 
   /**
@@ -128,14 +127,11 @@ public class MongoDbGridFSIO {
     /**
      * Output the object.  The default timestamp will be the GridFSDBFile
      * creation timestamp.
-     * @param output
      */
     void output(T output);
 
     /**
      * Output the object using the specified timestamp.
-     * @param output
-     * @param timestamp
      */
     void output(T output, Instant timestamp);
   }
@@ -143,7 +139,6 @@ public class MongoDbGridFSIO {
   /**
    * Interface for the parser that is used to parse the GridFSDBFile into
    * the appropriate types.
-   * @param <T>
    */
   public interface Parser<T> extends Serializable {
     void parse(GridFSDBFile input, ParserCallback<T> callback) throws IOException;
@@ -174,6 +169,7 @@ public class MongoDbGridFSIO {
         .setParser(TEXT_PARSER)
         .setCoder(StringUtf8Coder.of())
         .setConnectionConfiguration(ConnectionConfiguration.create())
+        .setSkew(Duration.ZERO)
         .build();
   }
 
@@ -382,8 +378,8 @@ public class MongoDbGridFSIO {
       }
 
       @Override
-      public List<? extends BoundedSource<ObjectId>> splitIntoBundles(long desiredBundleSizeBytes,
-          PipelineOptions options) throws Exception {
+      public List<? extends BoundedSource<ObjectId>> split(
+          long desiredBundleSizeBytes, PipelineOptions options) throws Exception {
         Mongo mongo = spec.connectionConfiguration().setupMongo();
         try {
           GridFS gridfs = spec.connectionConfiguration().setupGridFS(mongo);
@@ -429,18 +425,9 @@ public class MongoDbGridFSIO {
       }
 
       @Override
-      public boolean producesSortedKeys(PipelineOptions options) throws Exception {
-        return false;
-      }
-
-      @Override
       public BoundedSource.BoundedReader<ObjectId> createReader(
           PipelineOptions options) throws IOException {
         return new GridFSReader(this, objectIds);
-      }
-
-      @Override
-      public void validate() {
       }
 
       @Override
@@ -449,7 +436,7 @@ public class MongoDbGridFSIO {
       }
 
       @Override
-      public Coder<ObjectId> getDefaultOutputCoder() {
+      public Coder<ObjectId> getOutputCoder() {
         return SerializableCoder.of(ObjectId.class);
       }
 
@@ -535,7 +522,6 @@ public class MongoDbGridFSIO {
 
   /**
    * Function that is called to write the data to the give GridFS OutputStream.
-   * @param <T>
    */
   public interface WriteFn<T> extends Serializable {
     /**
@@ -626,6 +612,7 @@ public class MongoDbGridFSIO {
       return PDone.in(input.getPipeline());
     }
   }
+
   private static class GridFsWriteFn<T> extends DoFn<T, Void> {
 
     private final Write<T> spec;
@@ -647,7 +634,7 @@ public class MongoDbGridFSIO {
     }
 
     @StartBundle
-    public void startBundle(Context context) {
+    public void startBundle() {
       gridFsFile = gridfs.createFile(spec.filename());
       if (spec.chunkSize() != null) {
         gridFsFile.setChunkSize(spec.chunkSize());
@@ -662,7 +649,7 @@ public class MongoDbGridFSIO {
     }
 
     @FinishBundle
-    public void finishBundle(Context context) throws Exception {
+    public void finishBundle() throws Exception {
       if (gridFsFile != null) {
         outputStream.flush();
         outputStream.close();
@@ -688,6 +675,5 @@ public class MongoDbGridFSIO {
         }
       }
     }
-
   }
 }

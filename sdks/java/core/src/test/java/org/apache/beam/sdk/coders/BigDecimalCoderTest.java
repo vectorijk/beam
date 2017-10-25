@@ -61,43 +61,35 @@ public class BigDecimalCoderTest {
     }
   }
 
-  // This should never change. The definition of big endian encoding is fixed.
-  private static final String EXPECTED_ENCODING_ID = "";
-
-  @Test
-  public void testEncodingId() throws Exception {
-    CoderProperties.coderHasEncodingId(TEST_CODER, EXPECTED_ENCODING_ID);
-  }
-
   /**
    * Generated data to check that the wire format has not changed. To regenerate, see
    * {@link org.apache.beam.sdk.coders.PrintBase64Encodings}.
    */
   private static final List<String> TEST_ENCODINGS =
       ImmutableList.of(
-          "swi4AjXYo7DnVscE2eM2Q-f7A-JpZD8CyiFN76ZfI4ZZzJtQa31MqLYUepjY4f6BXT8ZapFuM"
-              + "0AaxKyQjsrfF_0mZON_XJJle68X1L0-yBXeRP6yDKlpHD-LUwr-ivNwlWD-zdwQZONNjX9"
-              + "eivckz1QFUqJDLdWm6V_to30sySJAR87byZdCJvJS1cvjKgsjC6OijwCsL1JrJ9sfkeZTF"
-              + "f0bR7nTr9x5-hggYHJ-rczwYunX8wROP3tWJTfyN7GxeSCCrFeswbw87qkJg0Hw_-Nx_2L"
-              + "k5qCk9p96bXyCJnz6_d9Yk83re-Ru461odv273IZB-s3blouk1b2ihT15hsv7V7BIHAQ2m"
-              + "1whPlIyGS6VxVjp70vICpqYZZ2-dt6-nBbzitNCmR4l486Qi3obX-yV-RCfpUHDsnPdWQ",
-          "sgi4AjXYo7DnVscE2eM2Q-f7A-JpZD8CyiFN76ZfI4ZZzJtQa31MqLYUepjY4f6BXT8ZapFu"
-              + "M0AaxKyQjsrfF_0mZON_XJJle68X1L0-yBXeRP6yDKlpHD-LUwr-ivNwlWD-zdwQZONNj"
-              + "X9eivckz1QFUqJDLdWm6V_to30sySJAR87byZdCJvJS1cvjKgsjC6OijwCsL1JrJ9sfke"
-              + "ZTFf0bR7nTr9x5-hggYHJ-rczwYunX8wROP3tWJTfyN7GxeSCCrFeswbw87qkJg0Hw_-Nx"
-              + "_2Lk5qCk9p96bXyCJnz6_d9Yk83re-Ru461odv273IZB-s3blouk1b2ihT15hsv7V7BIHA"
-              + "Q2m1whPlIyGS6VxVjp70vICpqYZZ2-dt6-nBbzitNCmR4l486Qi3obX-yV-RCfpUHDsnPdWQ",
-          "AQGX",
-          "AAH_",
-          "AAEA",
-          "AAEB",
-          "MBUJEk1IAgE1H9Gsru39PDZgUqT1NnU",
-          "AIEBAP________gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-              + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-              + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          "AIEBCf_______7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-              + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-              + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+          "swg12KOw51bHBNnjNkPn-wPiaWQ_AsohTe-mXyOGWcybUGt9TKi2FHqY2OH-gV0_GWqRbjNAGsSskI7K3xf9JmT"
+              + "jf1ySZXuvF9S9PsgV3kT-sgypaRw_i1MK_orzcJVg_s3cEGTjTY1_Xor3JM9UBVKiQy3Vpulf7aN9LMki"
+              + "QEfO28mXQibyUtXL4yoLIwujoo8ArC9SayfbH5HmUxX9G0e506_cefoYIGByfq3M8GLp1_METj97ViU38"
+              + "jexsXkggqxXrMG8PO6pCYNB8P_jcf9i5OagpPafem18giZ8-v3fWJPN63vkbuOtaHb9u9yGQfrN25aLpN"
+              + "W9ooU9eYbL-1ewSBwENptcIT5SMhkulcVY6e9LyAqamGWdvnbevpwW84rTQpkeJePOkIt6G1_slfkQn6V"
+              + "Bw7Jz3Vk",
+          "sgg12KOw51bHBNnjNkPn-wPiaWQ_AsohTe-mXyOGWcybUGt9TKi2FHqY2OH-gV0_GWqRbjNAGsSskI7K3xf9JmT"
+              + "jf1ySZXuvF9S9PsgV3kT-sgypaRw_i1MK_orzcJVg_s3cEGTjTY1_Xor3JM9UBVKiQy3Vpulf7aN9LMki"
+              + "QEfO28mXQibyUtXL4yoLIwujoo8ArC9SayfbH5HmUxX9G0e506_cefoYIGByfq3M8GLp1_METj97ViU38"
+              + "jexsXkggqxXrMG8PO6pCYNB8P_jcf9i5OagpPafem18giZ8-v3fWJPN63vkbuOtaHb9u9yGQfrN25aLpN"
+              + "W9ooU9eYbL-1ewSBwENptcIT5SMhkulcVY6e9LyAqamGWdvnbevpwW84rTQpkeJePOkIt6G1_slfkQn6V"
+              + "Bw7Jz3Vk",
+          "AZc",
+          "AP8",
+          "AAA",
+          "AAE",
+          "MAkSTUgCATUf0ayu7f08NmBSpPU2dQ",
+          "AAD________4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              + "AAAAAA",
+          "AAn_______-wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              + "AAAAAA");
 
   @Test
   public void testWireFormatEncode() throws Exception {
@@ -108,10 +100,11 @@ public class BigDecimalCoderTest {
   public void testGetEncodedElementByteSize() throws Exception {
     TestElementByteSizeObserver observer = new TestElementByteSizeObserver();
     for (BigDecimal value : TEST_VALUES) {
-      TEST_CODER.registerByteSizeObserver(value, observer, Coder.Context.OUTER);
+      TEST_CODER.registerByteSizeObserver(value, observer);
       observer.advance();
       assertThat(observer.getSumAndReset(),
-          equalTo((long) CoderUtils.encodeToByteArray(TEST_CODER, value).length));
+          equalTo((long) CoderUtils.encodeToByteArray(
+              TEST_CODER, value, Coder.Context.NESTED).length));
     }
   }
 
@@ -121,15 +114,5 @@ public class BigDecimalCoderTest {
     thrown.expectMessage("cannot encode a null BigDecimal");
 
     CoderUtils.encodeToBase64(TEST_CODER, null);
-  }
-
-  /**
-   * This is a change-detector test. If this test fails, then the encoding id of
-   * {@link BigDecimalCoder} must change.
-   */
-  @Test
-  public void testCoderIdDependencies() {
-    assertThat(VarIntCoder.of().getEncodingId(), equalTo(""));
-    assertThat(BigIntegerCoder.of().getEncodingId(), equalTo(""));
   }
 }

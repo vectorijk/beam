@@ -17,17 +17,15 @@
  */
 package org.apache.beam.sdk.io;
 
-import static org.apache.beam.sdk.util.StringUtils.approximateSimpleName;
-
 import javax.annotation.Nullable;
-import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.display.DisplayData;
+import org.apache.beam.sdk.util.NameUtils;
 import org.apache.beam.sdk.util.SerializableUtils;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollection.IsBounded;
+import org.apache.beam.sdk.values.WindowingStrategy;
 import org.joda.time.Duration;
 
 /**
@@ -50,15 +48,15 @@ public class Read {
   }
 
   /**
-   * Returns a new {@code Read.Unbounded} {@code PTransform} reading from the given
-   * {@code UnboundedSource}.
+   * Returns a new {@link Read.Unbounded} {@link PTransform} reading from the given
+   * {@link UnboundedSource}.
    */
   public static <T> Unbounded<T> from(UnboundedSource<T, ?> source) {
     return new Unbounded<>(null, source);
   }
 
   /**
-   * Helper class for building {@code Read} transforms.
+   * Helper class for building {@link Read} transforms.
    */
   public static class Builder {
     private final String name;
@@ -96,17 +94,14 @@ public class Read {
     }
 
     @Override
-    protected Coder<T> getDefaultOutputCoder() {
-      return source.getDefaultOutputCoder();
-    }
-
-    @Override
     public final PCollection<T> expand(PBegin input) {
       source.validate();
 
-      return PCollection.<T>createPrimitiveOutputInternal(input.getPipeline(),
-          WindowingStrategy.globalDefault(), IsBounded.BOUNDED)
-          .setCoder(getDefaultOutputCoder());
+      return PCollection.createPrimitiveOutputInternal(
+          input.getPipeline(),
+          WindowingStrategy.globalDefault(),
+          IsBounded.BOUNDED,
+          source.getOutputCoder());
     }
 
     /**
@@ -118,7 +113,7 @@ public class Read {
 
     @Override
     public String getKindString() {
-      return "Read(" + approximateSimpleName(source.getClass()) + ")";
+      return String.format("Read(%s)", NameUtils.approximateSimpleName(source));
     }
 
     @Override
@@ -164,16 +159,13 @@ public class Read {
     }
 
     @Override
-    protected Coder<T> getDefaultOutputCoder() {
-      return source.getDefaultOutputCoder();
-    }
-
-    @Override
     public final PCollection<T> expand(PBegin input) {
       source.validate();
-
-      return PCollection.<T>createPrimitiveOutputInternal(
-          input.getPipeline(), WindowingStrategy.globalDefault(), IsBounded.UNBOUNDED);
+      return PCollection.createPrimitiveOutputInternal(
+          input.getPipeline(),
+          WindowingStrategy.globalDefault(),
+          IsBounded.UNBOUNDED,
+          source.getOutputCoder());
     }
 
     /**
@@ -185,7 +177,7 @@ public class Read {
 
     @Override
     public String getKindString() {
-      return "Read(" + approximateSimpleName(source.getClass()) + ")";
+      return String.format("Read(%s)", NameUtils.approximateSimpleName(source));
     }
 
     @Override

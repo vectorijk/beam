@@ -18,6 +18,7 @@
 package org.apache.beam.sdk.transforms;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -27,23 +28,32 @@ import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Set;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.CannotProvideCoderException;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
 import org.apache.beam.sdk.coders.CoderRegistry;
+import org.apache.beam.sdk.coders.CollectionCoder;
+import org.apache.beam.sdk.coders.IterableCoder;
+import org.apache.beam.sdk.coders.KvCoder;
+import org.apache.beam.sdk.coders.ListCoder;
+import org.apache.beam.sdk.coders.MapCoder;
+import org.apache.beam.sdk.coders.SetCoder;
 import org.apache.beam.sdk.coders.VoidCoder;
 import org.apache.beam.sdk.io.BoundedSource;
 import org.apache.beam.sdk.io.OffsetBasedSource;
 import org.apache.beam.sdk.io.OffsetBasedSource.OffsetBasedReader;
 import org.apache.beam.sdk.io.Read;
 import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.options.ValueProvider;
 import org.apache.beam.sdk.util.CoderUtils;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PBegin;
@@ -83,12 +93,11 @@ import org.joda.time.Instant;
  * needs to be created without dependencies on files or other external
  * entities.  This is especially useful during testing.
  *
- * <p>Caveat: {@code Create} only supports small in-memory datasets,
- * particularly when submitting jobs to the Google Cloud Dataflow
- * service.
+ * <p>Caveat: {@code Create} only supports small in-memory datasets.
  *
  * @param <T> the type of the elements of the resulting {@code PCollection}
  */
+@SuppressWarnings("OptionalUsedAsFieldOrParameterType")
 public class Create<T> {
   /**
    * Returns a new {@code Create.Values} transform that produces a
@@ -108,7 +117,7 @@ public class Create<T> {
    * Otherwise, use {@link Create.Values#withCoder} to set the coder explicitly.
    */
   public static <T> Values<T> of(Iterable<T> elems) {
-    return new Values<>(elems, Optional.<Coder<T>>absent());
+    return new Values<>(elems, Optional.<Coder<T>>absent(), Optional.<TypeDescriptor<T>>absent());
   }
 
   /**
@@ -128,8 +137,45 @@ public class Create<T> {
    * Otherwise, use {@link Create.Values#withCoder} to set the coder explicitly.
    */
   @SafeVarargs
-  public static <T> Values<T> of(T... elems) {
-    return of(Arrays.asList(elems));
+  public static <T> Values<T> of(T elem, T... elems) {
+    // This can't be an ImmutableList, as it may accept nulls
+    List<T> input = new ArrayList<>(elems.length + 1);
+    input.add(elem);
+    input.addAll(Arrays.asList(elems));
+    return of(input);
+  }
+
+  /**
+   * Returns a new {@code Create.Values} transform that produces
+   * an empty {@link PCollection}.
+   *
+   * <p>The elements will have a timestamp of negative infinity, see
+   * {@link Create#timestamped} for a way of creating a {@code PCollection}
+   * with timestamped elements.
+   *
+   * <p>Since there are no elements, the {@code Coder} cannot be automatically determined.
+   * Instead, the {@code Coder} is provided via the {@code coder} argument.
+   */
+  public static <T> Values<T> empty(Coder<T> coder) {
+    return new Values<>(new ArrayList<T>(), Optional.of(coder),
+        Optional.<TypeDescriptor<T>>absent());
+  }
+
+  /**
+   * Returns a new {@code Create.Values} transform that produces
+   * an empty {@link PCollection}.
+   *
+   * <p>The elements will have a timestamp of negative infinity, see
+   * {@link Create#timestamped} for a way of creating a {@code PCollection}
+   * with timestamped elements.
+   *
+   * <p>Since there are no elements, the {@code Coder} cannot be automatically determined.
+   * Instead, the {@code Coder} is determined from given {@code TypeDescriptor<T>}.
+   * Note that a default coder must be registered for the class described in the
+   * {@code TypeDescriptor<T>}.
+   */
+  public static <T> Values<T> empty(TypeDescriptor<T> type) {
+    return new Values<>(new ArrayList<T>(), Optional.<Coder<T>>absent(), Optional.of(type));
   }
 
   /**
@@ -156,6 +202,14 @@ public class Create<T> {
   }
 
   /**
+   * Returns an {@link OfValueProvider} transform that produces a {@link PCollection}
+   * of a single element provided by the given {@link ValueProvider}.
+   */
+  public static <T> OfValueProvider<T> ofProvider(ValueProvider<T> provider, Coder<T> coder) {
+    return new OfValueProvider<>(provider, coder);
+  }
+
+  /**
    * Returns a new {@link Create.TimestampedValues} transform that produces a
    * {@link PCollection} containing the elements of the provided {@code Iterable}
    * with the specified timestamps.
@@ -169,7 +223,10 @@ public class Create<T> {
    * Otherwise, use {@link Create.TimestampedValues#withCoder} to set the coder explicitly.
    */
   public static <T> TimestampedValues<T> timestamped(Iterable<TimestampedValue<T>> elems) {
-    return new TimestampedValues<>(elems, Optional.<Coder<T>>absent());
+    return new TimestampedValues<>(
+        elems,
+        Optional.<Coder<T>>absent(),
+        Optional.<TypeDescriptor<T>>absent());
   }
 
   /**
@@ -180,8 +237,8 @@ public class Create<T> {
    */
   @SafeVarargs
   public static <T> TimestampedValues<T> timestamped(
-      @SuppressWarnings("unchecked") TimestampedValue<T>... elems) {
-    return timestamped(Arrays.asList(elems));
+      TimestampedValue<T> elem, @SuppressWarnings("unchecked") TimestampedValue<T>... elems) {
+    return timestamped(ImmutableList.<TimestampedValue<T>>builder().add(elem).add(elems).build());
   }
 
   /**
@@ -232,7 +289,24 @@ public class Create<T> {
      * <p>Note that for {@link Create.Values} with no elements, the {@link VoidCoder} is used.
      */
     public Values<T> withCoder(Coder<T> coder) {
-      return new Values<>(elems, Optional.of(coder));
+      return new Values<>(elems, Optional.of(coder), typeDescriptor);
+    }
+
+    /**
+     * Returns a {@link Create.Values} PTransform like this one that uses the given
+     * {@code TypeDescriptor<T>} to determine the {@code Coder} to use to decode each of the
+     * objects into a value of type {@code T}. Note that a default coder must be registered for the
+     * class described in the {@code TypeDescriptor<T>}.
+     *
+     * <p>By default, {@code Create.Values} can automatically determine the {@code Coder} to use
+     * if all elements have the same non-parameterized run-time class, and a default coder is
+     * registered for that class. See {@link CoderRegistry} for details on how defaults are
+     * determined.
+     *
+     * <p>Note that for {@link Create.Values} with no elements, the {@link VoidCoder} is used.
+     */
+    public Values<T> withType(TypeDescriptor<T> type) {
+      return new Values<>(elems, coder, Optional.of(type));
     }
 
     public Iterable<T> getElements() {
@@ -241,27 +315,25 @@ public class Create<T> {
 
     @Override
     public PCollection<T> expand(PBegin input) {
+      Coder<T> coder;
       try {
-        Coder<T> coder = getDefaultOutputCoder(input);
-        try {
-          CreateSource<T> source = CreateSource.fromIterable(elems, coder);
-          return input.getPipeline().apply(Read.from(source));
-        } catch (IOException e) {
-          throw new RuntimeException(
-              String.format("Unable to apply Create %s using Coder %s.", this, coder), e);
-        }
+        CoderRegistry registry = input.getPipeline().getCoderRegistry();
+        coder =
+            this.coder.isPresent()
+                ? this.coder.get()
+                : typeDescriptor.isPresent()
+                    ? registry.getCoder(typeDescriptor.get())
+                    : getDefaultCreateCoder(registry, elems);
       } catch (CannotProvideCoderException e) {
         throw new IllegalArgumentException("Unable to infer a coder and no Coder was specified. "
             + "Please set a coder by invoking Create.withCoder() explicitly.", e);
       }
-    }
-
-    @Override
-    public Coder<T> getDefaultOutputCoder(PBegin input) throws CannotProvideCoderException {
-      if (coder.isPresent()) {
-        return coder.get();
-      } else {
-        return getDefaultCreateCoder(input.getPipeline().getCoderRegistry(), elems);
+      try {
+        CreateSource<T> source = CreateSource.fromIterable(elems, coder);
+        return input.getPipeline().apply(Read.from(source));
+      } catch (IOException e) {
+        throw new RuntimeException(
+            String.format("Unable to apply Create %s using Coder %s.", this, coder), e);
       }
     }
 
@@ -273,15 +345,22 @@ public class Create<T> {
     /** The coder used to encode the values to and from a binary representation. */
     private final transient Optional<Coder<T>> coder;
 
+    /** The value type. */
+    private final transient Optional<TypeDescriptor<T>> typeDescriptor;
+
     /**
      * Constructs a {@code Create.Values} transform that produces a
      * {@link PCollection} containing the specified elements.
      *
      * <p>The arguments should not be modified after this is called.
      */
-    private Values(Iterable<T> elems, Optional<Coder<T>> coder) {
+    private Values(
+        Iterable<T> elems,
+        Optional<Coder<T>> coder,
+        Optional<TypeDescriptor<T>> typeDescriptor) {
       this.elems = elems;
       this.coder = coder;
+      this.typeDescriptor = typeDescriptor;
     }
 
     @VisibleForTesting
@@ -319,21 +398,13 @@ public class Create<T> {
       }
 
       @Override
-      public boolean producesSortedKeys(PipelineOptions options) throws Exception {
-        return false;
-      }
-
-      @Override
       public BoundedSource.BoundedReader<T> createReader(PipelineOptions options)
           throws IOException {
         return new BytesReader<>(this);
       }
 
       @Override
-      public void validate() {}
-
-      @Override
-      public Coder<T> getDefaultOutputCoder() {
+      public Coder<T> getOutputCoder() {
         return coder;
       }
 
@@ -402,16 +473,48 @@ public class Create<T> {
       @Override
       protected boolean advanceImpl() throws IOException {
         CreateSource<T> source = getCurrentSource();
-        index++;
-        if (index >= source.allElementsBytes.size()) {
+        if (index + 1 >= source.allElementsBytes.size()) {
           next = null;
           return false;
         }
+        index++;
         next =
             Optional.fromNullable(
                 CoderUtils.decodeFromByteArray(source.coder, source.allElementsBytes.get(index)));
         return true;
       }
+    }
+  }
+
+  /////////////////////////////////////////////////////////////////////////////
+
+  /** Implementation of {@link #ofProvider}. */
+  public static class OfValueProvider<T> extends PTransform<PBegin, PCollection<T>> {
+    private final ValueProvider<T> provider;
+    private final Coder<T> coder;
+
+    private OfValueProvider(ValueProvider<T> provider, Coder<T> coder) {
+      this.provider = checkNotNull(provider, "provider");
+      this.coder = checkNotNull(coder, "coder");
+    }
+
+    @Override
+    public PCollection<T> expand(PBegin input) {
+      if (provider.isAccessible()) {
+        Values<T> values = Create.of(provider.get());
+        return input.apply(values.withCoder(coder));
+      }
+      return input
+          .apply(Create.of((Void) null))
+          .apply(
+              MapElements.via(
+                  new SimpleFunction<Void, T>() {
+                    @Override
+                    public T apply(Void input) {
+                      return provider.get();
+                    }
+                  }))
+          .setCoder(coder);
     }
   }
 
@@ -436,27 +539,48 @@ public class Create<T> {
      * is used.
      */
     public TimestampedValues<T> withCoder(Coder<T> coder) {
-      return new TimestampedValues<>(timestampedElements, Optional.<Coder<T>>of(coder));
+      return new TimestampedValues<>(timestampedElements, Optional.of(coder), typeDescriptor);
+    }
+
+    /**
+     * Returns a {@link Create.TimestampedValues} PTransform like this one that uses the given
+     * {@code TypeDescriptor<T>} to determine the {@code Coder} to use to decode each of the
+     * objects into a value of type {@code T}. Note that a default coder must be registered for the
+     * class described in the {@code TypeDescriptor<T>}.
+     *
+     * <p>By default, {@code Create.TimestampedValues} can automatically determine the {@code Coder}
+     * to use if all elements have the same non-parameterized run-time class, and a default coder is
+     * registered for that class. See {@link CoderRegistry} for details on how defaults are
+     * determined.
+     *
+     * <p>Note that for {@link Create.TimestampedValues} with no elements, the {@link VoidCoder} is
+     * used.
+     */
+    public TimestampedValues<T> withType(TypeDescriptor<T> type) {
+      return new TimestampedValues<>(timestampedElements, elementCoder, Optional.of(type));
     }
 
     @Override
     public PCollection<T> expand(PBegin input) {
       try {
-        Iterable<T> rawElements =
-            Iterables.transform(
-                timestampedElements,
-                new Function<TimestampedValue<T>, T>() {
-                  @Override
-                  public T apply(TimestampedValue<T> input) {
-                    return input.getValue();
-                  }
-                });
         Coder<T> coder;
         if (elementCoder.isPresent()) {
           coder = elementCoder.get();
+        } else if (typeDescriptor.isPresent()) {
+          coder = input.getPipeline().getCoderRegistry().getCoder(typeDescriptor.get());
         } else {
+          Iterable<T> rawElements =
+              Iterables.transform(
+                  timestampedElements,
+                  new Function<TimestampedValue<T>, T>() {
+                    @Override
+                    public T apply(TimestampedValue<T> timestampedValue) {
+                      return timestampedValue.getValue();
+                    }
+                  });
           coder = getDefaultCreateCoder(input.getPipeline().getCoderRegistry(), rawElements);
         }
+
         PCollection<TimestampedValue<T>> intermediate = Pipeline.applyTransform(input,
             Create.of(timestampedElements).withCoder(TimestampedValueCoder.of(coder)));
 
@@ -474,12 +598,19 @@ public class Create<T> {
     /** The timestamped elements of the resulting PCollection. */
     private final transient Iterable<TimestampedValue<T>> timestampedElements;
 
+    /** The coder used to encode the values to and from a binary representation. */
     private final transient Optional<Coder<T>> elementCoder;
 
+    /** The value type. */
+    private final transient Optional<TypeDescriptor<T>> typeDescriptor;
+
     private TimestampedValues(
-        Iterable<TimestampedValue<T>> timestampedElements, Optional<Coder<T>> elementCoder) {
+        Iterable<TimestampedValue<T>> timestampedElements,
+        Optional<Coder<T>> elementCoder,
+        Optional<TypeDescriptor<T>> typeDescriptor) {
       this.timestampedElements = timestampedElements;
       this.elementCoder = elementCoder;
+      this.typeDescriptor = typeDescriptor;
     }
 
     private static class ConvertTimestamps<T> extends DoFn<TimestampedValue<T>, T> {
@@ -492,6 +623,12 @@ public class Create<T> {
 
   private static <T> Coder<T> getDefaultCreateCoder(CoderRegistry registry, Iterable<T> elems)
       throws CannotProvideCoderException {
+    checkArgument(
+        !Iterables.isEmpty(elems),
+        "Can not determine a default Coder for a 'Create' PTransform that "
+        + "has no elements.  Either add elements, call Create.empty(Coder),"
+        + " Create.empty(TypeDescriptor), or call 'withCoder(Coder)' or "
+        + "'withType(TypeDescriptor)' on the PTransform.");
     // First try to deduce a coder using the types of the elements.
     Class<?> elementClazz = Void.class;
     for (T elem : elems) {
@@ -513,7 +650,7 @@ public class Create<T> {
     if (elementClazz.getTypeParameters().length == 0) {
       try {
         @SuppressWarnings("unchecked") // elementClazz is a wildcard type
-        Coder<T> coder = (Coder<T>) registry.getDefaultCoder(TypeDescriptor.of(elementClazz));
+        Coder<T> coder = (Coder<T>) registry.getCoder(TypeDescriptor.of(elementClazz));
         return coder;
       } catch (CannotProvideCoderException exc) {
         // Can't get a coder from the class of the elements, try with the elements next
@@ -521,11 +658,20 @@ public class Create<T> {
     }
 
     // If that fails, try to deduce a coder using the elements themselves
-    Optional<Coder<T>> coder = Optional.absent();
-    for (T elem : elems) {
-      Coder<T> c = registry.getDefaultCoder(elem);
+    return (Coder<T>) inferCoderFromObjects(registry, elems);
+  }
+
+  /**
+   * Attempts to infer the {@link Coder} of the elements ensuring that the returned coder is
+   * equivalent for all elements.
+   */
+  private static Coder<?> inferCoderFromObjects(
+      CoderRegistry registry, Iterable<?> elems) throws CannotProvideCoderException {
+    Optional<Coder<?>> coder = Optional.absent();
+    for (Object elem : elems) {
+      Coder<?> c = inferCoderFromObject(registry, elem);
       if (!coder.isPresent()) {
-        coder = Optional.of(c);
+        coder = (Optional) Optional.of(c);
       } else if (!Objects.equals(c, coder.get())) {
         throw new CannotProvideCoderException(
             "Cannot provide coder for elements of "
@@ -535,11 +681,48 @@ public class Create<T> {
                 + " Based on their values, they do not all default to the same Coder.");
       }
     }
-
-    if (!coder.isPresent()) {
-      throw new CannotProvideCoderException(
-          "Unable to infer a coder. Please register " + "a coder for ");
+    if (coder.isPresent()) {
+      return coder.get();
     }
-    return coder.get();
+
+    throw new CannotProvideCoderException("Cannot provide coder for elements of "
+        + Create.class.getSimpleName()
+        + ":"
+        + " For their common class, no coder could be provided."
+        + " Based on their values, no coder could be inferred.");
+  }
+
+  /**
+   * Attempt to infer the type for some very common Apache Beam parameterized types.
+   *
+   * <p>TODO: Instead, build a TypeDescriptor so that the {@link CoderRegistry} is invoked
+   * for the type instead of hard coding the coders for common types.
+   */
+  private static Coder<?> inferCoderFromObject(CoderRegistry registry, Object o)
+      throws CannotProvideCoderException {
+    if (o == null) {
+      return VoidCoder.of();
+    } else if (o instanceof TimestampedValue) {
+      return TimestampedValueCoder.of(
+          inferCoderFromObject(registry, ((TimestampedValue) o).getValue()));
+    } else if (o instanceof List) {
+      return ListCoder.of(inferCoderFromObjects(registry, ((Iterable) o)));
+    } else if (o instanceof Set) {
+      return SetCoder.of(inferCoderFromObjects(registry, ((Iterable) o)));
+    } else if (o instanceof Collection) {
+      return CollectionCoder.of(inferCoderFromObjects(registry, ((Iterable) o)));
+    } else if (o instanceof Iterable) {
+      return IterableCoder.of(inferCoderFromObjects(registry, ((Iterable) o)));
+    } else if (o instanceof Map) {
+      return MapCoder.of(
+          inferCoderFromObjects(registry, ((Map) o).keySet()),
+          inferCoderFromObjects(registry, ((Map) o).entrySet()));
+    } else if (o instanceof KV) {
+      return KvCoder.of(
+          inferCoderFromObject(registry, ((KV) o).getKey()),
+          inferCoderFromObject(registry, ((KV) o).getValue()));
+    } else {
+      return registry.getCoder(o.getClass());
+    }
   }
 }

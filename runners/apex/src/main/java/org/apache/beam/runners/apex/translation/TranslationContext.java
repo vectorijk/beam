@@ -24,23 +24,28 @@ import com.datatorrent.api.DAG;
 import com.datatorrent.api.Operator;
 import com.datatorrent.api.Operator.InputPort;
 import com.datatorrent.api.Operator.OutputPort;
+import com.google.common.collect.Iterables;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.beam.runners.apex.ApexPipelineOptions;
 import org.apache.beam.runners.apex.translation.utils.ApexStateInternals;
+import org.apache.beam.runners.apex.translation.utils.ApexStateInternals.ApexStateBackend;
 import org.apache.beam.runners.apex.translation.utils.ApexStreamTuple;
 import org.apache.beam.runners.apex.translation.utils.CoderAdapterStreamCodec;
+import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.runners.TransformHierarchy;
-import org.apache.beam.sdk.transforms.AppliedPTransform;
+import org.apache.beam.sdk.runners.AppliedPTransform;
+import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.util.WindowedValue.FullWindowedValueCoder;
-import org.apache.beam.sdk.util.state.StateInternalsFactory;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.PInput;
-import org.apache.beam.sdk.values.POutput;
+import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.sdk.values.TupleTag;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -52,9 +57,11 @@ class TranslationContext {
 
   private final ApexPipelineOptions pipelineOptions;
   private AppliedPTransform<?, ?, ?> currentTransform;
-  private final Map<PCollection, Pair<OutputPort<?>, List<InputPort<?>>>> streams = new HashMap<>();
+  private final Map<PCollection, Pair<OutputPortInfo, List<InputPortInfo>>> streams =
+          new HashMap<>();
   private final Map<String, Operator> operators = new HashMap<>();
   private final Map<PCollectionView<?>, PInput> viewInputs = new HashMap<>();
+  private Map<PInput, PInput> aliasCollections = new HashMap<>();
 
   public void addView(PCollectionView<?> view) {
     this.viewInputs.put(view, this.getInput());
@@ -70,20 +77,33 @@ class TranslationContext {
     this.pipelineOptions = pipelineOptions;
   }
 
-  public void setCurrentTransform(TransformHierarchy.Node treeNode) {
-    this.currentTransform = treeNode.toAppliedPTransform();
+  public void setCurrentTransform(AppliedPTransform<?, ?, ?> transform) {
+    this.currentTransform = transform;
   }
 
   public ApexPipelineOptions getPipelineOptions() {
     return pipelineOptions;
   }
 
-  public <InputT extends PInput> InputT getInput() {
-    return (InputT) getCurrentTransform().getInput();
+  public String getFullName() {
+    return getCurrentTransform().getFullName();
   }
 
-  public <OutputT extends POutput> OutputT getOutput() {
-    return (OutputT) getCurrentTransform().getOutput();
+  public Map<TupleTag<?>, PValue> getInputs() {
+    return getCurrentTransform().getInputs();
+  }
+
+  public <InputT extends PValue> InputT getInput() {
+    return (InputT)
+        Iterables.getOnlyElement(TransformInputs.nonAdditionalInputs(getCurrentTransform()));
+  }
+
+  public Map<TupleTag<?>, PValue> getOutputs() {
+    return getCurrentTransform().getOutputs();
+  }
+
+  public <OutputT extends PValue> OutputT getOutput() {
+    return (OutputT) Iterables.getOnlyElement(getCurrentTransform().getOutputs().values());
   }
 
   private AppliedPTransform<?, ?, ?> getCurrentTransform() {
@@ -92,7 +112,7 @@ class TranslationContext {
   }
 
   public void addOperator(Operator operator, OutputPort port) {
-    addOperator(operator, port, this.<PCollection<?>>getOutput());
+    addOperator(operator, port, (PCollection<?>) getOutput());
   }
 
   /**
@@ -107,8 +127,10 @@ class TranslationContext {
         addOperator(operator, portEntry.getValue(), portEntry.getKey());
         first = false;
       } else {
-        this.streams.put(portEntry.getKey(), (Pair) new ImmutablePair<>(portEntry.getValue(),
-            new ArrayList<>()));
+        this.streams.put(portEntry.getKey(),
+                         (Pair) new ImmutablePair<>(new OutputPortInfo(portEntry.getValue(),
+                                                                       getCurrentTransform()),
+                                                    new ArrayList<>()));
       }
     }
   }
@@ -127,26 +149,52 @@ class TranslationContext {
       name = getCurrentTransform().getFullName() + i;
     }
     this.operators.put(name, operator);
-    this.streams.put(output, (Pair) new ImmutablePair<>(port, new ArrayList<>()));
+    this.streams.put(output, (Pair) new ImmutablePair<>(
+            new OutputPortInfo(port, getCurrentTransform()),
+            new ArrayList<>()));
   }
 
   public void addStream(PInput input, InputPort inputPort) {
-    Pair<OutputPort<?>, List<InputPort<?>>> stream = this.streams.get(input);
-    checkArgument(stream != null, "no upstream operator defined for %s", input);
-    stream.getRight().add(inputPort);
+    while (aliasCollections.containsKey(input)) {
+      input = aliasCollections.get(input);
+    }
+
+    Pair<OutputPortInfo, List<InputPortInfo>> stream = this.streams.get(input);
+    checkArgument(stream != null, "no upstream operator defined for " + input);
+    stream.getRight().add(new InputPortInfo(inputPort, getCurrentTransform()));
+  }
+
+  /**
+   * Set the given output as alias for another input,
+   * i.e. there won't be a stream representation in the target DAG.
+   * @param alias
+   * @param source
+   */
+  public void addAlias(PValue alias, PInput source) {
+    aliasCollections.put(alias, source);
   }
 
   public void populateDAG(DAG dag) {
     for (Map.Entry<String, Operator> nameAndOperator : this.operators.entrySet()) {
       dag.addOperator(nameAndOperator.getKey(), nameAndOperator.getValue());
     }
+
     int streamIndex = 0;
-    for (Map.Entry<PCollection, Pair<OutputPort<?>, List<InputPort<?>>>> streamEntry : this.
+    for (Map.Entry<PCollection, Pair<OutputPortInfo, List<InputPortInfo>>> streamEntry : this.
         streams.entrySet()) {
-      List<InputPort<?>> sinksList = streamEntry.getValue().getRight();
-      InputPort[] sinks = sinksList.toArray(new InputPort[sinksList.size()]);
+      List<InputPortInfo> destInfo = streamEntry.getValue().getRight();
+      InputPort[] sinks = new InputPort[destInfo.size()];
+      for (int i = 0; i < sinks.length; i++) {
+        sinks[i] = destInfo.get(i).port;
+      }
+
       if (sinks.length > 0) {
-        dag.addStream("stream" + streamIndex++, streamEntry.getValue().getLeft(), sinks);
+        DAG.StreamMeta streamMeta = dag.addStream("stream" + streamIndex++,
+                                                  streamEntry.getValue().getLeft().port, sinks);
+        if (pipelineOptions.isParDoFusionEnabled()) {
+          optimizeStreams(streamMeta, streamEntry);
+        }
+
         for (InputPort port : sinks) {
           PCollection pc = streamEntry.getKey();
           Coder coder = pc.getCoder();
@@ -163,12 +211,65 @@ class TranslationContext {
     }
   }
 
-  /**
-   * Return the {@link StateInternalsFactory} for the pipeline translation.
-   * @return
-   */
-  public <K> StateInternalsFactory<K> stateInternalsFactory() {
-    return new ApexStateInternals.ApexStateInternalsFactory();
+  private void optimizeStreams(DAG.StreamMeta streamMeta,
+                               Map.Entry<PCollection,
+                                         Pair<OutputPortInfo, List<InputPortInfo>>> streamEntry) {
+    DAG.Locality loc = null;
+
+    List<InputPortInfo> sinks = streamEntry.getValue().getRight();
+    OutputPortInfo source = streamEntry.getValue().getLeft();
+    PTransform sourceTransform = source.transform.getTransform();
+    if (sourceTransform instanceof ParDo.MultiOutput
+        || sourceTransform instanceof Window.Assign) {
+      // source qualifies for chaining, check sink(s)
+      for (InputPortInfo sink : sinks) {
+        PTransform transform = sink.transform.getTransform();
+        if (transform instanceof ParDo.MultiOutput) {
+          ParDo.MultiOutput t = (ParDo.MultiOutput) transform;
+          if (t.getSideInputs().size() > 0) {
+            loc = DAG.Locality.CONTAINER_LOCAL;
+            break;
+          } else {
+            loc = DAG.Locality.THREAD_LOCAL;
+          }
+        } else if (transform instanceof Window.Assign) {
+          loc = DAG.Locality.THREAD_LOCAL;
+        } else {
+          // cannot chain, if there is any other sink
+          loc = null;
+          break;
+        }
+      }
+    }
+
+    streamMeta.setLocality(loc);
   }
 
+  /**
+   * Return the state backend for the pipeline translation.
+   * @return
+   */
+  public ApexStateBackend getStateBackend() {
+    return new ApexStateInternals.ApexStateBackend();
+  }
+
+  static class InputPortInfo {
+    InputPort port;
+    AppliedPTransform transform;
+
+    public InputPortInfo(InputPort port, AppliedPTransform transform) {
+      this.port = port;
+      this.transform = transform;
+    }
+  }
+
+  static class OutputPortInfo {
+    OutputPort port;
+    AppliedPTransform transform;
+
+    public OutputPortInfo(OutputPort port, AppliedPTransform transform) {
+      this.port = port;
+      this.transform = transform;
+    }
+  }
 }

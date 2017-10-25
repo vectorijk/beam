@@ -19,31 +19,42 @@
 
 from __future__ import absolute_import
 
+import collections
 import operator
 import re
 import unittest
 
 import hamcrest as hc
+from nose.plugins.attrib import attr
 
 import apache_beam as beam
-from apache_beam.test_pipeline import TestPipeline
 import apache_beam.pvalue as pvalue
 import apache_beam.transforms.combiners as combine
-from apache_beam.transforms.display import DisplayData, DisplayDataItem
-from apache_beam.transforms.ptransform import PTransform
-from apache_beam.transforms.util import assert_that, equal_to
 import apache_beam.typehints as typehints
+from apache_beam.io.iobase import Read
+from apache_beam.metrics import Metrics
+from apache_beam.metrics.metric import MetricsFilter
+from apache_beam.options.pipeline_options import TypeOptions
+from apache_beam.testing.test_pipeline import TestPipeline
+from apache_beam.testing.util import assert_that
+from apache_beam.testing.util import equal_to
+from apache_beam.transforms import window
+from apache_beam.transforms.core import _GroupByKeyOnly
+from apache_beam.transforms.display import DisplayData
+from apache_beam.transforms.display import DisplayDataItem
+from apache_beam.transforms.ptransform import PTransform
 from apache_beam.typehints import with_input_types
 from apache_beam.typehints import with_output_types
 from apache_beam.typehints.typehints_test import TypeHintTestCase
-from apache_beam.utils.pipeline_options import TypeOptions
-
+from apache_beam.utils.windowed_value import WindowedValue
 
 # Disable frequent lint warning due to pipe operator for chaining transforms.
 # pylint: disable=expression-not-assigned
 
 
 class PTransformTest(unittest.TestCase):
+  # Enable nose tests running in parallel
+  _multiprocess_can_split_ = True
 
   def assertStartswith(self, msg, prefix):
     self.assertTrue(msg.startswith(prefix),
@@ -55,7 +66,7 @@ class PTransformTest(unittest.TestCase):
 
     pa = TestPipeline()
     res = pa | 'ALabel' >> beam.Create([1, 2])
-    self.assertEqual('AppliedPTransform(ALabel, Create)',
+    self.assertEqual('AppliedPTransform(ALabel/Read, Read)',
                      str(res.producer))
 
     pc = TestPipeline()
@@ -63,7 +74,7 @@ class PTransformTest(unittest.TestCase):
     inputs_tr = res.producer.transform
     inputs_tr.inputs = ('ci',)
     self.assertEqual(
-        """<Create(PTransform) label=[Create] inputs=('ci',)>""",
+        """<Read(PTransform) label=[Read] inputs=('ci',)>""",
         str(inputs_tr))
 
     pd = TestPipeline()
@@ -71,44 +82,20 @@ class PTransformTest(unittest.TestCase):
     side_tr = res.producer.transform
     side_tr.side_inputs = (4,)
     self.assertEqual(
-        '<Create(PTransform) label=[Create] side_inputs=(4,)>',
+        '<Read(PTransform) label=[Read] side_inputs=(4,)>',
         str(side_tr))
 
     inputs_tr.side_inputs = ('cs',)
     self.assertEqual(
-        """<Create(PTransform) label=[Create] """
+        """<Read(PTransform) label=[Read] """
         """inputs=('ci',) side_inputs=('cs',)>""",
         str(inputs_tr))
-
-  def test_parse_label_and_arg(self):
-
-    def fun(*args, **kwargs):
-      return PTransform().parse_label_and_arg(args, kwargs, 'name')
-
-    self.assertEqual(('PTransform', 'value'), fun('value'))
-    self.assertEqual(('PTransform', 'value'), fun(name='value'))
-    self.assertEqual(('label', 'value'), fun('label', 'value'))
-    self.assertEqual(('label', 'value'), fun('label', name='value'))
-    self.assertEqual(('label', 'value'), fun('value', label='label'))
-    self.assertEqual(('label', 'value'), fun(name='value', label='label'))
-
-    self.assertRaises(ValueError, fun)
-    self.assertRaises(ValueError, fun, 0, 'value')
-    self.assertRaises(ValueError, fun, label=0, name='value')
-    self.assertRaises(ValueError, fun, other='value')
-
-    with self.assertRaises(ValueError) as cm:
-      fun(0, name='value')
-    self.assertEqual(
-        cm.exception.message,
-        'PTransform expects a (label, name) or (name) argument list '
-        'instead of args=(0,), kwargs={\'name\': \'value\'}')
 
   def test_do_with_do_fn(self):
     class AddNDoFn(beam.DoFn):
 
-      def process(self, context, addon):
-        return [context.element + addon]
+      def process(self, element, addon):
+        return [element + addon]
 
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create([1, 2, 3])
@@ -119,7 +106,7 @@ class PTransformTest(unittest.TestCase):
   def test_do_with_unconstructed_do_fn(self):
     class MyDoFn(beam.DoFn):
 
-      def process(self, context):
+      def process(self):
         pass
 
     pipeline = TestPipeline()
@@ -180,13 +167,100 @@ class PTransformTest(unittest.TestCase):
                              'is discouraged.')
     self.assertStartswith(cm.exception.message, expected_error_prefix)
 
-  def test_do_with_side_outputs_maintains_unique_name(self):
+  def test_do_with_multiple_outputs_maintains_unique_name(self):
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create([1, 2, 3])
     r1 = pcoll | 'A' >> beam.FlatMap(lambda x: [x + 1]).with_outputs(main='m')
     r2 = pcoll | 'B' >> beam.FlatMap(lambda x: [x + 2]).with_outputs(main='m')
     assert_that(r1.m, equal_to([2, 3, 4]), label='r1')
     assert_that(r2.m, equal_to([3, 4, 5]), label='r2')
+    pipeline.run()
+
+  @attr('ValidatesRunner')
+  def test_read_from_text_metrics(self):
+    from apache_beam.examples.snippets.snippets import CountingSource
+
+    class CounterDoFn(beam.DoFn):
+      def __init__(self):
+        self.received_records = Metrics.counter(self.__class__,
+                                                'receivedRecords')
+
+      def process(self, element):
+        self.received_records.inc()
+
+    pipeline = TestPipeline()
+    (pipeline | Read(CountingSource(100)) | beam.ParDo(CounterDoFn()))
+    res = pipeline.run()
+    res.wait_until_finish()
+    metric_results = res.metrics().query(MetricsFilter()
+                                         .with_name('recordsRead'))
+    outputs_counter = metric_results['counters'][0]
+    self.assertEqual(outputs_counter.key.step, 'Read')
+    self.assertEqual(outputs_counter.key.metric.name, 'recordsRead')
+    self.assertEqual(outputs_counter.committed, 100)
+    self.assertEqual(outputs_counter.attempted, 100)
+
+  @attr('ValidatesRunner')
+  def test_par_do_with_multiple_outputs_and_using_yield(self):
+    class SomeDoFn(beam.DoFn):
+      """A custom DoFn using yield."""
+
+      def process(self, element):
+        yield element
+        if element % 2 == 0:
+          yield pvalue.TaggedOutput('even', element)
+        else:
+          yield pvalue.TaggedOutput('odd', element)
+
+    pipeline = TestPipeline()
+    nums = pipeline | 'Some Numbers' >> beam.Create([1, 2, 3, 4])
+    results = nums | 'ClassifyNumbers' >> beam.ParDo(
+        SomeDoFn()).with_outputs('odd', 'even', main='main')
+    assert_that(results.main, equal_to([1, 2, 3, 4]))
+    assert_that(results.odd, equal_to([1, 3]), label='assert:odd')
+    assert_that(results.even, equal_to([2, 4]), label='assert:even')
+    pipeline.run()
+
+  @attr('ValidatesRunner')
+  def test_par_do_with_multiple_outputs_and_using_return(self):
+    def some_fn(v):
+      if v % 2 == 0:
+        return [v, pvalue.TaggedOutput('even', v)]
+      return [v, pvalue.TaggedOutput('odd', v)]
+
+    pipeline = TestPipeline()
+    nums = pipeline | 'Some Numbers' >> beam.Create([1, 2, 3, 4])
+    results = nums | 'ClassifyNumbers' >> beam.FlatMap(
+        some_fn).with_outputs('odd', 'even', main='main')
+    assert_that(results.main, equal_to([1, 2, 3, 4]))
+    assert_that(results.odd, equal_to([1, 3]), label='assert:odd')
+    assert_that(results.even, equal_to([2, 4]), label='assert:even')
+    pipeline.run()
+
+  @attr('ValidatesRunner')
+  def test_undeclared_outputs(self):
+    pipeline = TestPipeline()
+    nums = pipeline | 'Some Numbers' >> beam.Create([1, 2, 3, 4])
+    results = nums | 'ClassifyNumbers' >> beam.FlatMap(
+        lambda x: [x,
+                   pvalue.TaggedOutput('even' if x % 2 == 0 else 'odd', x)]
+    ).with_outputs()
+    assert_that(results[None], equal_to([1, 2, 3, 4]))
+    assert_that(results.odd, equal_to([1, 3]), label='assert:odd')
+    assert_that(results.even, equal_to([2, 4]), label='assert:even')
+    pipeline.run()
+
+  @attr('ValidatesRunner')
+  def test_multiple_empty_outputs(self):
+    pipeline = TestPipeline()
+    nums = pipeline | 'Some Numbers' >> beam.Create([1, 3, 5])
+    results = nums | 'ClassifyNumbers' >> beam.FlatMap(
+        lambda x: [x,
+                   pvalue.TaggedOutput('even' if x % 2 == 0 else 'odd', x)]
+    ).with_outputs()
+    assert_that(results[None], equal_to([1, 3, 5]))
+    assert_that(results.odd, equal_to([1, 3, 5]), label='assert:odd')
+    assert_that(results.even, equal_to([]), label='assert:even')
     pipeline.run()
 
   def test_do_requires_do_fn_returning_iterable(self):
@@ -205,16 +279,14 @@ class PTransformTest(unittest.TestCase):
     expected_error_prefix = 'FlatMap and ParDo must return an iterable.'
     self.assertStartswith(cm.exception.message, expected_error_prefix)
 
-  def test_do_fn_with_start_finish(self):
+  def test_do_fn_with_finish(self):
     class MyDoFn(beam.DoFn):
-      def start_bundle(self, c):
-        yield 'start'
-
-      def process(self, c):
+      def process(self, element):
         pass
 
-      def finish_bundle(self, c):
-        yield 'finish'
+      def finish_bundle(self):
+        yield WindowedValue('finish', -1, [window.GlobalWindow()])
+
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create([1, 2, 3])
     result = pcoll | 'Do' >> beam.ParDo(MyDoFn())
@@ -222,12 +294,52 @@ class PTransformTest(unittest.TestCase):
     # May have many bundles, but each has a start and finish.
     def  matcher():
       def match(actual):
-        equal_to(['start', 'finish'])(list(set(actual)))
-        equal_to([actual.count('start')])([actual.count('finish')])
+        equal_to(['finish'])(list(set(actual)))
+        equal_to([1])([actual.count('finish')])
       return match
 
     assert_that(result, matcher())
     pipeline.run()
+
+  def test_do_fn_with_start(self):
+    class MyDoFn(beam.DoFn):
+      def __init__(self):
+        self.state = 'init'
+
+      def start_bundle(self):
+        self.state = 'started'
+
+      def process(self, element):
+        if self.state == 'started':
+          yield 'started'
+        self.state = 'process'
+
+    pipeline = TestPipeline()
+    pcoll = pipeline | 'Start' >> beam.Create([1, 2, 3])
+    result = pcoll | 'Do' >> beam.ParDo(MyDoFn())
+
+    # May have many bundles, but each has a start and finish.
+    def  matcher():
+      def match(actual):
+        equal_to(['started'])(list(set(actual)))
+        equal_to([1])([actual.count('started')])
+      return match
+
+    assert_that(result, matcher())
+    pipeline.run()
+
+  def test_do_fn_with_start_error(self):
+    class MyDoFn(beam.DoFn):
+      def start_bundle(self):
+        return [1]
+
+      def process(self, element):
+        pass
+
+    pipeline = TestPipeline()
+    pipeline | 'Start' >> beam.Create([1, 2, 3]) | 'Do' >> beam.ParDo(MyDoFn())
+    with self.assertRaises(RuntimeError):
+      pipeline.run()
 
   def test_filter(self):
     pipeline = TestPipeline()
@@ -320,8 +432,8 @@ class PTransformTest(unittest.TestCase):
 
   def test_group_by_key(self):
     pipeline = TestPipeline()
-    pcoll = pipeline | beam.Create(
-        'start', [(1, 1), (2, 1), (3, 1), (1, 2), (2, 2), (1, 3)])
+    pcoll = pipeline | 'start' >> beam.Create(
+        [(1, 1), (2, 1), (3, 1), (1, 2), (2, 2), (1, 3)])
     result = pcoll | 'Group' >> beam.GroupByKey()
     assert_that(result, equal_to([(1, [1, 2, 3]), (2, [1, 2]), (3, [1])]))
     pipeline.run()
@@ -330,8 +442,8 @@ class PTransformTest(unittest.TestCase):
 
     class SomePartitionFn(beam.PartitionFn):
 
-      def partition_for(self, context, num_partitions, offset):
-        return (context.element % 3) + offset
+      def partition_for(self, element, num_partitions, offset):
+        return (element % 3) + offset
 
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create([0, 1, 2, 3, 4, 5, 6, 7, 8])
@@ -355,8 +467,7 @@ class PTransformTest(unittest.TestCase):
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create([0, 1, 2, 3, 4, 5, 6, 7, 8])
     partitions = (
-        pcoll | beam.Partition(
-            'part',
+        pcoll | 'part' >> beam.Partition(
             lambda e, n, offset: (e % 3) + offset, 4,
             1))
     assert_that(partitions[0], equal_to([]))
@@ -390,6 +501,12 @@ class PTransformTest(unittest.TestCase):
       () | 'PipelineArgMissing' >> beam.Flatten()
     result = () | 'Empty' >> beam.Flatten(pipeline=pipeline)
     assert_that(result, equal_to([]))
+    pipeline.run()
+
+  def test_flatten_same_pcollections(self):
+    pipeline = TestPipeline()
+    pc = pipeline | beam.Create(['a', 'b'])
+    assert_that((pc, pc, pc) | beam.Flatten(), equal_to(['a', 'b'] * 3))
     pipeline.run()
 
   def test_flatten_pcollections_in_iterable(self):
@@ -465,7 +582,7 @@ class PTransformTest(unittest.TestCase):
     pipeline = TestPipeline()
     pcolls = pipeline | 'A' >> beam.Create(['a', 'b', 'f'])
     with self.assertRaises(typehints.TypeCheckError) as cm:
-      pcolls | 'D' >> beam.GroupByKeyOnly()
+      pcolls | 'D' >> _GroupByKeyOnly()
       pipeline.run()
 
     expected_error_prefix = ('Input type hint violation at D: expected '
@@ -476,8 +593,8 @@ class PTransformTest(unittest.TestCase):
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create(
         [(3, 1), (2, 1), (1, 1), (3, 2), (2, 2), (3, 3)])
-    keys = pcoll.apply('keys', beam.Keys())
-    vals = pcoll.apply('vals', beam.Values())
+    keys = pcoll.apply(beam.Keys('keys'))
+    vals = pcoll.apply(beam.Values('vals'))
     assert_that(keys, equal_to([1, 2, 2, 3, 3, 3]), label='assert:keys')
     assert_that(vals, equal_to([1, 1, 1, 2, 2, 3]), label='assert:vals')
     pipeline.run()
@@ -486,7 +603,7 @@ class PTransformTest(unittest.TestCase):
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create(
         [(6, 3), (1, 2), (7, 1), (5, 2), (3, 2)])
-    result = pcoll.apply('swap', beam.KvSwap())
+    result = pcoll.apply(beam.KvSwap(), label='swap')
     assert_that(result, equal_to([(1, 7), (2, 1), (2, 3), (2, 5), (3, 6)]))
     pipeline.run()
 
@@ -494,7 +611,7 @@ class PTransformTest(unittest.TestCase):
     pipeline = TestPipeline()
     pcoll = pipeline | 'Start' >> beam.Create(
         [6, 3, 1, 1, 9, 'pleat', 'pleat', 'kazoo', 'navel'])
-    result = pcoll.apply('nodupes', beam.RemoveDuplicates())
+    result = pcoll.apply(beam.RemoveDuplicates())
     assert_that(result, equal_to([1, 3, 6, 9, 'pleat', 'kazoo', 'navel']))
     pipeline.run()
 
@@ -544,7 +661,7 @@ class PTransformTest(unittest.TestCase):
         keys = reduce(operator.or_, [set(p.keys()) for p in pcoll_dicts])
         res = {}
         for k in keys:
-          res[k] = [p[k] for p in pcoll_dicts if k in p] | beam.Flatten(k)
+          res[k] = [p[k] for p in pcoll_dicts if k in p] | k >> beam.Flatten()
         return res
     res = [{'a': [1, 2, 3]},
            {'a': [4, 5, 6], 'b': ['x', 'y', 'z']},
@@ -553,6 +670,30 @@ class PTransformTest(unittest.TestCase):
     self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8], sorted(res['a']))
     self.assertEqual(['x', 'x', 'y', 'y', 'z'], sorted(res['b']))
     self.assertEqual([], sorted(res['c']))
+
+  def test_named_tuple(self):
+    MinMax = collections.namedtuple('MinMax', ['min', 'max'])
+
+    class MinMaxTransform(PTransform):
+      def expand(self, pcoll):
+        return MinMax(
+            min=pcoll | beam.CombineGlobally(min).without_defaults(),
+            max=pcoll | beam.CombineGlobally(max).without_defaults())
+    res = [1, 2, 4, 8] | MinMaxTransform()
+    self.assertIsInstance(res, MinMax)
+    self.assertEqual(res, MinMax(min=[1], max=[8]))
+
+    flat = res | beam.Flatten()
+    self.assertEqual(sorted(flat), [1, 8])
+
+  def test_tuple_twice(self):
+    class Duplicate(PTransform):
+      def expand(self, pcoll):
+        return pcoll, pcoll
+
+    res1, res2 = [1, 2, 4, 8] | Duplicate()
+    self.assertEqual(sorted(res1), [1, 2, 4, 8])
+    self.assertEqual(sorted(res2), [1, 2, 4, 8])
 
 
 @beam.ptransform_fn
@@ -621,8 +762,7 @@ class PTransformLabelsTest(unittest.TestCase):
   def test_apply_ptransform_using_decorator(self):
     pipeline = TestPipeline()
     pcoll = pipeline | 'PColl' >> beam.Create([1, 2, 3])
-    sample = SamplePTransform('*Sample*')
-    _ = pcoll | sample
+    _ = pcoll | '*Sample*' >> SamplePTransform()
     self.assertTrue('*Sample*' in pipeline.applied_labels)
     self.assertTrue('*Sample*/ToPairs' in pipeline.applied_labels)
     self.assertTrue('*Sample*/Group' in pipeline.applied_labels)
@@ -641,7 +781,7 @@ class PTransformLabelsTest(unittest.TestCase):
   def check_label(self, ptransform, expected_label):
     pipeline = TestPipeline()
     pipeline | 'Start' >> beam.Create([('a', 1)]) | ptransform
-    actual_label = sorted(pipeline.applied_labels - {'Start'})[0]
+    actual_label = sorted(pipeline.applied_labels - {'Start', 'Start/Read'})[0]
     self.assertEqual(expected_label, re.sub(r'\d{3,}', '#', actual_label))
 
   def test_default_labels(self):
@@ -654,10 +794,24 @@ class PTransformLabelsTest(unittest.TestCase):
     self.check_label(beam.CombinePerKey(sum), r'CombinePerKey(sum)')
 
     class MyDoFn(beam.DoFn):
-      def process(self, context):
+      def process(self):
         pass
 
     self.check_label(beam.ParDo(MyDoFn()), r'ParDo(MyDoFn)')
+
+  def test_label_propogation(self):
+    self.check_label('TestMap' >> beam.Map(len), r'TestMap')
+    self.check_label('TestLambda' >> beam.Map(lambda x: x), r'TestLambda')
+    self.check_label('TestFlatMap' >> beam.FlatMap(list), r'TestFlatMap')
+    self.check_label('TestFilter' >> beam.Filter(sum), r'TestFilter')
+    self.check_label('TestCG' >> beam.CombineGlobally(sum), r'TestCG')
+    self.check_label('TestCPK' >> beam.CombinePerKey(sum), r'TestCPK')
+
+    class MyDoFn(beam.DoFn):
+      def process(self):
+        pass
+
+    self.check_label('TestParDo' >> beam.ParDo(MyDoFn()), r'TestParDo')
 
 
 class PTransformTestDisplayData(unittest.TestCase):
@@ -729,8 +883,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     @with_input_types(int, int)
     @with_output_types(typehints.List[int])
     class AddWithFive(beam.DoFn):
-      def process(self, context, five):
-        return [context.element + five]
+      def process(self, element, five):
+        return [element + five]
 
     d = (self.p
          | 'T' >> beam.Create([1, 2, 3]).with_output_types(int)
@@ -743,8 +897,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     @with_input_types(str, str)
     @with_output_types(typehints.List[str])
     class ToUpperCaseWithPrefix(beam.DoFn):
-      def process(self, context, prefix):
-        return [prefix + context.element.upper()]
+      def process(self, element, prefix):
+        return [prefix + element.upper()]
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -752,17 +906,17 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
        | 'Upper' >> beam.ParDo(ToUpperCaseWithPrefix(), 'hello'))
 
     self.assertEqual("Type hint violation for 'Upper': "
-                     "requires <type 'str'> but got <type 'int'> for context",
+                     "requires <type 'str'> but got <type 'int'> for element",
                      e.exception.message)
 
   def test_do_fn_pipeline_runtime_type_check_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     @with_input_types(int, int)
     @with_output_types(int)
     class AddWithNum(beam.DoFn):
-      def process(self, context, num):
-        return [context.element + num]
+      def process(self, element, num):
+        return [element + num]
 
     d = (self.p
          | 'T' >> beam.Create([1, 2, 3]).with_output_types(int)
@@ -772,13 +926,13 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_do_fn_pipeline_runtime_type_check_violated(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     @with_input_types(int, int)
     @with_output_types(typehints.List[int])
     class AddWithNum(beam.DoFn):
-      def process(self, context, num):
-        return [context.element + num]
+      def process(self, element, num):
+        return [element + num]
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -787,7 +941,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
       self.p.run()
 
     self.assertEqual("Type hint violation for 'Add': "
-                     "requires <type 'int'> but got <type 'str'> for context",
+                     "requires <type 'int'> but got <type 'str'> for element",
                      e.exception.message)
 
   def test_pardo_does_not_type_check_using_type_hint_decorators(self):
@@ -898,8 +1052,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
 
     # If this type-checks than no error should be raised.
     d = (self.p
-         | 'bools' >> beam.Create([True, False, True]).with_output_types(bool)
-         | 'to_ints' >> beam.Map(bool_to_int))
+         | 'Bools' >> beam.Create([True, False, True]).with_output_types(bool)
+         | 'ToInts' >> beam.Map(bool_to_int))
     assert_that(d, equal_to([1, 0, 1]))
     self.p.run()
 
@@ -960,7 +1114,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
          | 'Str' >> beam.Create(['t', 'e', 's', 't']).with_output_types(str)
          | ('Pair' >> beam.Map(lambda x: (x, ord(x)))
             .with_output_types(typehints.KV[str, str]))
-         | beam.GroupByKeyOnly())
+         | _GroupByKeyOnly())
 
     # Output type should correctly be deduced.
     # GBK-only should deduce that KV[A, B] is turned into KV[A, Iterable[B]].
@@ -984,7 +1138,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
        | beam.Create([1, 2, 3]).with_output_types(int)
-       | 'F' >> beam.GroupByKeyOnly())
+       | 'F' >> _GroupByKeyOnly())
 
     self.assertEqual("Input type hint violation at F: "
                      "expected Tuple[TypeVariable[K], TypeVariable[V]], "
@@ -996,7 +1150,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     # aliased to Tuple[int, str].
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
-       | (beam.Create(range(5))
+       | (beam.Create([[1], [2]])
           .with_output_types(typehints.Iterable[int]))
        | 'T' >> beam.GroupByKey())
 
@@ -1006,7 +1160,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
                      e.exception.message)
 
   def test_pipeline_checking_pardo_insufficient_type_information(self):
-    self.p.options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
+    self.p._options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
 
     # Type checking is enabled, but 'Create' doesn't pass on any relevant type
     # information to the ParDo.
@@ -1020,14 +1174,14 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
                      e.exception.message)
 
   def test_pipeline_checking_gbk_insufficient_type_information(self):
-    self.p.options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
+    self.p._options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
     # Type checking is enabled, but 'Map' doesn't pass on any relevant type
     # information to GBK-only.
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
        | 'Nums' >> beam.Create(range(5)).with_output_types(int)
        | 'ModDup' >> beam.Map(lambda x: (x % 2, x))
-       | beam.GroupByKeyOnly())
+       | _GroupByKeyOnly())
 
     self.assertEqual('Pipeline type checking is enabled, however no output '
                      'type-hint was found for the PTransform '
@@ -1035,7 +1189,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
                      e.exception.message)
 
   def test_disable_pipeline_type_check(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     # The pipeline below should raise a TypeError, however pipeline type
     # checking was disabled above.
@@ -1045,8 +1199,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
      .with_input_types(str).with_output_types(str))
 
   def test_run_time_type_checking_enabled_type_violation(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     @with_output_types(str)
     @with_input_types(x=int)
@@ -1069,8 +1223,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "instead found some_string, an instance of <type 'str'>.")
 
   def test_run_time_type_checking_enabled_types_satisfied(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     @with_output_types(typehints.KV[int, str])
     @with_input_types(x=str)
@@ -1091,8 +1245,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_pipeline_checking_satisfied_but_run_time_types_violate(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     @with_output_types(typehints.KV[bool, int])
     @with_input_types(a=int)
@@ -1121,7 +1275,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "instead received an instance of type int.")
 
   def test_pipeline_checking_satisfied_run_time_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     @with_output_types(typehints.KV[bool, int])
     @with_input_types(a=int)
@@ -1139,8 +1293,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_pipeline_runtime_checking_violation_simple_type_input(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     # The type-hinted applied via the 'with_input_types()' method indicates the
     # ParDo should receive an instance of type 'str', however an 'int' will be
@@ -1160,8 +1314,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "instead found 1, an instance of <type 'int'>.")
 
   def test_pipeline_runtime_checking_violation_composite_type_input(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1179,8 +1333,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "instead found 3.0, an instance of <type 'float'>.")
 
   def test_pipeline_runtime_checking_violation_simple_type_output(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     # The type-hinted applied via the 'returns()' method indicates the ParDo
     # should output an instance of type 'int', however a 'float' will be
@@ -1205,8 +1359,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "an instance of type <type 'float'>.")
 
   def test_pipeline_runtime_checking_violation_composite_type_output(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     # The type-hinted applied via the 'returns()' method indicates the ParDo
     # should return an instance of type: Tuple[float, int]. However, an instance
@@ -1228,8 +1382,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "an instance of 'float' was received.")
 
   def test_pipline_runtime_checking_violation_with_side_inputs_decorator(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     @with_output_types(int)
     @with_input_types(a=int, b=int)
@@ -1248,8 +1402,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "instead found 1.0, an instance of <type 'float'>.")
 
   def test_pipline_runtime_checking_violation_with_side_inputs_via_method(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1318,7 +1472,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_combine_runtime_type_check_satisfied_using_decorators(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
 
     @with_output_types(int)
     @with_input_types(ints=typehints.Iterable[int])
@@ -1333,8 +1487,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_combine_runtime_type_check_violation_using_decorators(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     # Combine fn is returning the incorrect type
     @with_output_types(int)
@@ -1351,7 +1505,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.assertStartswith(
         e.exception.message,
         "Runtime type violation detected within "
-        "ParDo(Mul/CombinePerKey/Combine/ParDo(CombineValuesDoFn)): "
+        "ParDo(Mul/CombinePerKey/LiftedCombinePerKey/ParDo(FinishCombine)): "
         "Tuple[TypeVariable[K], int] hint type-constraint violated. "
         "The type of element #1 in the passed tuple is incorrect. "
         "Expected an instance of type int, "
@@ -1371,8 +1525,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_combine_runtime_type_check_using_methods(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create(range(5)).with_output_types(int)
@@ -1394,8 +1548,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
                      e.exception.message)
 
   def test_combine_runtime_type_check_violation_using_methods(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1413,7 +1567,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
         "instead found 0, an instance of <type 'int'>.")
 
   def test_combine_insufficient_type_hint_information(self):
-    self.p.options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
+    self.p._options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1424,7 +1578,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.assertEqual(
         'Pipeline type checking is enabled, '
         'however no output type-hint was found for the PTransform '
-        'ParDo(SortJoin/CombinePerKey/Combine/ParDo(CombineValuesDoFn))',
+        'ParDo('
+        'SortJoin/CombinePerKey/LiftedCombinePerKey/ParDo(FinishCombine))',
         e.exception.message)
 
   def test_mean_globally_pipeline_checking_satisfied(self):
@@ -1442,14 +1597,14 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
        | 'C' >> beam.Create(['test']).with_output_types(str)
        | 'Mean' >> combine.Mean.Globally())
 
-    self.assertEqual("Type hint violation for 'ParDo(CombineValuesDoFn)': "
-                     "requires Tuple[TypeVariable[K], "
-                     "Iterable[Union[float, int, long]]] "
-                     "but got Tuple[None, Iterable[str]] for p_context",
-                     e.exception.message)
+    self.assertEqual(
+        "Type hint violation for 'ParDo(PartialGroupByKeyCombiningValues)': "
+        "requires Tuple[TypeVariable[K], Union[float, int, long]] "
+        "but got Tuple[None, str] for element",
+        e.exception.message)
 
   def test_mean_globally_runtime_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | 'C' >> beam.Create(range(5)).with_output_types(int)
@@ -1460,8 +1615,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_mean_globally_runtime_checking_violated(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1499,14 +1654,14 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
        | 'EvenMean' >> combine.Mean.PerKey())
       self.p.run()
 
-    self.assertEqual("Type hint violation for 'ParDo(CombineValuesDoFn)': "
-                     "requires Tuple[TypeVariable[K], "
-                     "Iterable[Union[float, int, long]]] "
-                     "but got Tuple[str, Iterable[str]] for p_context",
-                     e.exception.message)
+    self.assertEqual(
+        "Type hint violation for 'ParDo(PartialGroupByKeyCombiningValues)': "
+        "requires Tuple[TypeVariable[K], Union[float, int, long]] "
+        "but got Tuple[str, str] for element",
+        e.exception.message)
 
   def test_mean_per_key_runtime_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create(range(5)).with_output_types(int)
@@ -1519,8 +1674,8 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_mean_per_key_runtime_checking_violated(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1533,18 +1688,15 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.assertStartswith(
         e.exception.message,
         "Runtime type violation detected within "
-        "ParDo(OddMean/CombinePerKey(MeanCombineFn)/"
-        "Combine/ParDo(CombineValuesDoFn)): "
-        "Type-hint for argument: 'p_context' violated: "
-        "Tuple[TypeVariable[K], Iterable[Union[float, int, long]]]"
+        "ParDo(OddMean/CombinePerKey(MeanCombineFn)/LiftedCombinePerKey/"
+        "ParDo(PartialGroupByKeyCombiningValues)): "
+        "Type-hint for argument: 'element' violated: "
+        "Tuple[TypeVariable[K], Union[float, int, long]]"
         " hint type-constraint violated. "
         "The type of element #1 in the passed tuple is incorrect. "
-        "Iterable[Union[float, int, long]] "
-        "hint type-constraint violated. The type of element #0 "
-        "in the passed Iterable is incorrect: "
         "Union[float, int, long] type-constraint violated. "
-        "Expected an instance of one of: "
-        "('float', 'int', 'long'), received str instead.")
+        "Expected an instance of one of: ('float', 'int', 'long'), "
+        "received str instead.")
 
   def test_count_globally_pipeline_type_checking_satisfied(self):
     d = (self.p
@@ -1556,7 +1708,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_count_globally_runtime_type_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | 'P' >> beam.Create(range(5)).with_output_types(int)
@@ -1583,13 +1735,14 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
        | beam.Create(range(5)).with_output_types(int)
        | 'CountInt' >> combine.Count.PerKey())
 
-    self.assertEqual("Input type hint violation at GroupByKey: "
-                     "expected Tuple[TypeVariable[K], TypeVariable[V]], "
-                     "got <type 'int'>",
-                     e.exception.message)
+    self.assertEqual(
+        "Type hint violation for 'ParDo(PartialGroupByKeyCombiningValues)': "
+        "requires Tuple[TypeVariable[K], Any] "
+        "but got <type 'int'> for element",
+        e.exception.message)
 
   def test_count_perkey_runtime_type_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create(['t', 'e', 's', 't']).with_output_types(str)
@@ -1611,7 +1764,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_count_perelement_pipeline_type_checking_violated(self):
-    self.p.options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
+    self.p._options.view_as(TypeOptions).type_check_strictness = 'ALL_REQUIRED'
 
     with self.assertRaises(typehints.TypeCheckError) as e:
       (self.p
@@ -1624,7 +1777,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
                      e.exception.message)
 
   def test_count_perelement_runtime_type_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create([True, True, False, True, True])
@@ -1646,7 +1799,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_top_of_runtime_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create(list('testing')).with_output_types(str)
@@ -1663,10 +1816,11 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
        | 'Num + 1' >> beam.Map(lambda x: x + 1).with_output_types(int)
        | 'TopMod' >> combine.Top.PerKey(1, lambda a, b: a < b))
 
-    self.assertEqual("Input type hint violation at GroupByKey: "
-                     "expected Tuple[TypeVariable[K], TypeVariable[V]], "
-                     "got <type 'int'>",
-                     e.exception.message)
+    self.assertEqual(
+        "Type hint violation for 'ParDo(PartialGroupByKeyCombiningValues)': "
+        "requires Tuple[TypeVariable[K], TypeVariable[T]] "
+        "but got <type 'int'> for element",
+        e.exception.message)
 
   def test_per_key_pipeline_checking_satisfied(self):
     d = (self.p
@@ -1681,7 +1835,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_per_key_runtime_checking_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create(range(21))
@@ -1709,7 +1863,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_sample_globally_runtime_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create([2, 2, 3, 3]).with_output_types(int)
@@ -1742,7 +1896,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_sample_per_key_runtime_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | (beam.Create([(1, 2), (1, 2), (2, 3), (2, 3)])
@@ -1775,7 +1929,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_to_list_runtime_check_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | beam.Create(list('test')).with_output_types(str)
@@ -1796,11 +1950,12 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
        | beam.Create([1, 2, 3, 4]).with_output_types(int)
        | combine.ToDict())
 
-    self.assertEqual("Type hint violation for 'ParDo(CombineValuesDoFn)': "
-                     "requires Tuple[TypeVariable[K], "
-                     "Iterable[Tuple[TypeVariable[K], TypeVariable[V]]]] "
-                     "but got Tuple[None, Iterable[int]] for p_context",
-                     e.exception.message)
+    self.assertEqual(
+        "Type hint violation for 'ParDo(PartialGroupByKeyCombiningValues)': "
+        "requires "
+        "Tuple[TypeVariable[K], Tuple[TypeVariable[K], TypeVariable[V]]] "
+        "but got Tuple[None, int] for element",
+        e.exception.message)
 
   def test_to_dict_pipeline_check_satisfied(self):
     d = (self.p
@@ -1813,7 +1968,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_to_dict_runtime_check_satisfied(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     d = (self.p
          | (beam.Create([('1', 2), ('3', 4)])
@@ -1825,7 +1980,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
     self.p.run()
 
   def test_runtime_type_check_python_type_error(self):
-    self.p.options.view_as(TypeOptions).runtime_type_check = True
+    self.p._options.view_as(TypeOptions).runtime_type_check = True
 
     with self.assertRaises(TypeError) as e:
       (self.p
@@ -1849,7 +2004,7 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
   def test_gbk_type_inference(self):
     self.assertEqual(
         typehints.Tuple[str, typehints.Iterable[int]],
-        beam.core.GroupByKeyOnly().infer_output_type(typehints.KV[str, int]))
+        _GroupByKeyOnly().infer_output_type(typehints.KV[str, int]))
 
   def test_pipeline_inference(self):
     created = self.p | beam.Create(['a', 'b', 'c'])
@@ -1873,11 +2028,11 @@ class PTransformTypeCheckTestCase(TypeHintTestCase):
                      e.exception.message)
 
   def test_type_inference_command_line_flag_toggle(self):
-    self.p.options.view_as(TypeOptions).pipeline_type_check = False
+    self.p._options.view_as(TypeOptions).pipeline_type_check = False
     x = self.p | 'C1' >> beam.Create([1, 2, 3, 4])
     self.assertIsNone(x.element_type)
 
-    self.p.options.view_as(TypeOptions).pipeline_type_check = True
+    self.p._options.view_as(TypeOptions).pipeline_type_check = True
     x = self.p | 'C2' >> beam.Create([1, 2, 3, 4])
     self.assertEqual(int, x.element_type)
 

@@ -23,13 +23,15 @@ import unittest
 
 import dill
 
-import coders
 import observable
+from apache_beam.coders import proto2_coder_test_messages_pb2 as test_message
+from apache_beam.coders import coders
+from apache_beam.runners import pipeline_context
 from apache_beam.transforms import window
+from apache_beam.transforms.window import GlobalWindow
 from apache_beam.utils import timestamp
 from apache_beam.utils import windowed_value
-
-from apache_beam.coders import proto2_coder_test_messages_pb2 as test_message
+from apache_beam.utils.timestamp import MIN_TIMESTAMP
 
 
 # Defined out of line for picklability.
@@ -61,8 +63,7 @@ class CodersTest(unittest.TestCase):
     standard -= set([coders.Coder,
                      coders.FastCoder,
                      coders.ProtoCoder,
-                     coders.ToStringCoder,
-                     coders.WindowCoder])
+                     coders.ToStringCoder])
     assert not standard - cls.seen, standard - cls.seen
     assert not standard - cls.seen_nested, standard - cls.seen_nested
 
@@ -89,7 +90,8 @@ class CodersTest(unittest.TestCase):
       self.assertEqual(coder.get_impl().get_estimated_size_and_observables(v),
                        (coder.get_impl().estimate_size(v), []))
     copy1 = dill.loads(dill.dumps(coder))
-    copy2 = dill.loads(dill.dumps(coder))
+    context = pipeline_context.PipelineContext()
+    copy2 = coders.Coder.from_runner_api(coder.to_runner_api(context), context)
     for v in values:
       self.assertEqual(v, copy1.decode(copy2.encode(v)))
       if coder.is_deterministic():
@@ -166,6 +168,15 @@ class CodersTest(unittest.TestCase):
     self.check_coder(coders.TupleCoder((coders.SingletonCoder(a),
                                         coders.SingletonCoder(b))), (a, b))
 
+  def test_interval_window_coder(self):
+    self.check_coder(coders.IntervalWindowCoder(),
+                     *[window.IntervalWindow(x, y)
+                       for x in [-2**52, 0, 2**52]
+                       for y in range(-100, 100)])
+    self.check_coder(
+        coders.TupleCoder((coders.IntervalWindowCoder(),)),
+        (window.IntervalWindow(0, 10),))
+
   def test_timestamp_coder(self):
     self.check_coder(coders.TimestampCoder(),
                      *[timestamp.Timestamp(micros=x) for x in range(-100, 100)])
@@ -193,7 +204,7 @@ class CodersTest(unittest.TestCase):
         kv_coder.as_cloud_object())
     # Test binary representation
     self.assertEqual(
-        '\x04\x03abc',
+        '\x04abc',
         kv_coder.encode((4, 'abc')))
     # Test unnested
     self.check_coder(
@@ -242,6 +253,26 @@ class CodersTest(unittest.TestCase):
                            coders.IterableCoder(coders.VarIntCoder()))),
         (1, [1, 2, 3]))
 
+  def test_iterable_coder_unknown_length(self):
+    # Empty
+    self._test_iterable_coder_of_unknown_length(0)
+    # Single element
+    self._test_iterable_coder_of_unknown_length(1)
+    # Multiple elements
+    self._test_iterable_coder_of_unknown_length(100)
+    # Multiple elements with underlying stream buffer overflow.
+    self._test_iterable_coder_of_unknown_length(80000)
+
+  def _test_iterable_coder_of_unknown_length(self, count):
+    def iter_generator(count):
+      for i in range(count):
+        yield i
+
+    iterable_coder = coders.IterableCoder(coders.VarIntCoder())
+    self.assertItemsEqual(list(iter_generator(count)),
+                          iterable_coder.decode(
+                              iterable_coder.encode(iter_generator(count))))
+
   def test_windowed_value_coder(self):
     coder = coders.WindowedValueCoder(coders.VarIntCoder(),
                                       coders.GlobalWindowCoder())
@@ -257,13 +288,26 @@ class CodersTest(unittest.TestCase):
         },
         coder.as_cloud_object())
     # Test binary representation
-    self.assertEqual('\x01\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01',
+    self.assertEqual('\x7f\xdf;dZ\x1c\xac\t\x00\x00\x00\x01\x0f\x01',
                      coder.encode(window.GlobalWindows.windowed_value(1)))
+
+    # Test decoding large timestamp
+    self.assertEqual(
+        coder.decode('\x7f\xdf;dZ\x1c\xac\x08\x00\x00\x00\x01\x0f\x00'),
+        windowed_value.create(0, MIN_TIMESTAMP.micros, (GlobalWindow(),)))
+
     # Test unnested
     self.check_coder(
         coders.WindowedValueCoder(coders.VarIntCoder()),
         windowed_value.WindowedValue(3, -100, ()),
         windowed_value.WindowedValue(-1, 100, (1, 2, 3)))
+
+    # Test Global Window
+    self.check_coder(
+        coders.WindowedValueCoder(coders.VarIntCoder(),
+                                  coders.GlobalWindowCoder()),
+        window.GlobalWindows.windowed_value(1))
+
     # Test nested
     self.check_coder(
         coders.TupleCoder((

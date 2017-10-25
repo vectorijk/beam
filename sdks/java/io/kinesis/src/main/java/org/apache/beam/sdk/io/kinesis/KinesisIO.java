@@ -17,35 +17,41 @@
  */
 package org.apache.beam.sdk.io.kinesis;
 
-
-import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkArgument;
 
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.internal.StaticCredentialsProvider;
 import com.amazonaws.regions.Regions;
+import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
+import com.amazonaws.services.cloudwatch.AmazonCloudWatchClient;
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.AmazonKinesisClient;
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream;
+import com.google.auto.value.AutoValue;
+
+import javax.annotation.Nullable;
+
+import org.apache.beam.sdk.annotations.Experimental;
+import org.apache.beam.sdk.io.BoundedReadFromUnboundedSource;
 import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.values.PBegin;
+import org.apache.beam.sdk.values.PCollection;
+import org.joda.time.Duration;
 import org.joda.time.Instant;
 
 /**
  * {@link PTransform}s for reading from
  * <a href="https://aws.amazon.com/kinesis/">Kinesis</a> streams.
  *
- * <h3>Usage</h3>
- *
- * <p>Main class you're going to operate is called {@link KinesisIO}.
- * It follows the usage conventions laid out by other *IO classes like
- * BigQueryIO or PubsubIOLet's see how you can set up a simple Pipeline, which reads from Kinesis:
+ * <p>Example usage:
  *
  * <pre>{@code
- * p.
- *   apply(KinesisIO.Read.
- *     from("streamName", InitialPositionInStream.LATEST).
- *     using("AWS_KEY", _"AWS_SECRET", STREAM_REGION).
- *     apply( ... ) // other transformations
+ * p.apply(KinesisIO.read()
+ *     .withStreamName("streamName")
+ *     .withInitialPositionInStream(InitialPositionInStream.LATEST)
+ *     .withAWSClientsProvider("AWS_KEY", _"AWS_SECRET", STREAM_REGION)
+ *  .apply( ... ) // other transformations
  * }</pre>
  *
  * <p>As you can see you need to provide 3 things:
@@ -57,131 +63,229 @@ import org.joda.time.Instant;
  *     <li>{@link InitialPositionInStream#TRIM_HORIZON} - reading will begin at
  *        the very beginning of the stream</li>
  *   </ul></li>
- *   <li>data used to initialize {@link AmazonKinesis} client:
+ *   <li>data used to initialize {@link AmazonKinesis} and {@link AmazonCloudWatch} clients:
  *   <ul>
  *     <li>credentials (aws key, aws secret)</li>
  *    <li>region where the stream is located</li>
  *   </ul></li>
  * </ul>
  *
- * <p>In case when you want to set up {@link AmazonKinesis} client by your own
- * (for example if you're using more sophisticated authorization methods like Amazon STS, etc.)
- * you can do it by implementing {@link KinesisClientProvider} class:
+ * <p>In case when you want to set up {@link AmazonKinesis} or {@link AmazonCloudWatch} client by
+ * your own (for example if you're using more sophisticated authorization methods like Amazon
+ * STS, etc.) you can do it by implementing {@link AWSClientsProvider} class:
  *
  * <pre>{@code
- * public class MyCustomKinesisClientProvider implements KinesisClientProvider {
+ * public class MyCustomKinesisClientProvider implements AWSClientsProvider {
  *   {@literal @}Override
- *   public AmazonKinesis get() {
+ *   public AmazonKinesis getKinesisClient() {
  *     // set up your client here
  *   }
+ *
+ *   public AmazonCloudWatch getCloudWatchClient() {
+ *     // set up your client here
+ *   }
+ *
  * }
  * }</pre>
  *
  * <p>Usage is pretty straightforward:
  *
  * <pre>{@code
- * p.
- *   apply(KinesisIO.Read.
- *    from("streamName", InitialPositionInStream.LATEST).
- *    using(MyCustomKinesisClientProvider()).
- *    apply( ... ) // other transformations
+ * p.apply(KinesisIO.read()
+ *    .withStreamName("streamName")
+ *    .withInitialPositionInStream(InitialPositionInStream.LATEST)
+ *    .withAWSClientsProvider(new MyCustomKinesisClientProvider())
+ *  .apply( ... ) // other transformations
  * }</pre>
  *
  * <p>There’s also possibility to start reading using arbitrary point in time -
  * in this case you need to provide {@link Instant} object:
  *
  * <pre>{@code
- * p.
- *   apply(KinesisIO.Read.
- *     from("streamName", instant).
- *     using(MyCustomKinesisClientProvider()).
- *     apply( ... ) // other transformations
+ * p.apply(KinesisIO.read()
+ *     .withStreamName("streamName")
+ *     .withInitialTimestampInStream(instant)
+ *     .withAWSClientsProvider(new MyCustomKinesisClientProvider())
+ *  .apply( ... ) // other transformations
  * }</pre>
  *
  */
+@Experimental(Experimental.Kind.SOURCE_SINK)
 public final class KinesisIO {
-    /**
-     * A {@link PTransform} that reads from a Kinesis stream.
-     */
-    public static final class Read {
 
-        private final String streamName;
-        private final StartingPoint initialPosition;
+  /** Returns a new {@link Read} transform for reading from Kinesis. */
+  public static Read read() {
+    return new AutoValue_KinesisIO_Read.Builder()
+        .setMaxNumRecords(-1)
+        .setUpToDateThreshold(Duration.ZERO)
+        .build();
+  }
 
-        private Read(String streamName, StartingPoint initialPosition) {
-            this.streamName = checkNotNull(streamName, "streamName");
-            this.initialPosition = checkNotNull(initialPosition, "initialPosition");
-        }
+  /** Implementation of {@link #read}. */
+  @AutoValue
+  public abstract static class Read extends PTransform<PBegin, PCollection<KinesisRecord>> {
 
-        /**
-         * Specify reading from streamName at some initial position.
-         */
-        public static Read from(String streamName, InitialPositionInStream initialPosition) {
-            return new Read(streamName, new StartingPoint(
-                    checkNotNull(initialPosition, "initialPosition")));
-        }
+    @Nullable
+    abstract String getStreamName();
 
-        /**
-         * Specify reading from streamName beginning at given {@link Instant}.
-         * This {@link Instant} must be in the past, i.e. before {@link Instant#now()}.
-         */
-        public static Read from(String streamName, Instant initialTimestamp) {
-            return new Read(streamName, new StartingPoint(
-                    checkNotNull(initialTimestamp, "initialTimestamp")));
-        }
+    @Nullable
+    abstract StartingPoint getInitialPosition();
 
-        /**
-         * Allows to specify custom {@link KinesisClientProvider}.
-         * {@link KinesisClientProvider} provides {@link AmazonKinesis} instances which are later
-         * used for communication with Kinesis.
-         * You should use this method if {@link Read#using(String, String, Regions)} does not
-         * suite your needs.
-         */
-        public org.apache.beam.sdk.io.Read.Unbounded<KinesisRecord> using
-        (KinesisClientProvider kinesisClientProvider) {
-            return org.apache.beam.sdk.io.Read.from(
-                    new KinesisSource(kinesisClientProvider, streamName,
-                            initialPosition));
-        }
+    @Nullable
+    abstract AWSClientsProvider getAWSClientsProvider();
 
-        /**
-         * Specify credential details and region to be used to read from Kinesis.
-         * If you need more sophisticated credential protocol, then you should look at
-         * {@link Read#using(KinesisClientProvider)}.
-         */
-        public org.apache.beam.sdk.io.Read.Unbounded<KinesisRecord> using(String awsAccessKey,
-                                                                          String awsSecretKey,
-                                                                          Regions region) {
-            return using(new BasicKinesisProvider(awsAccessKey, awsSecretKey, region));
-        }
+    abstract int getMaxNumRecords();
 
-        private static final class BasicKinesisProvider implements KinesisClientProvider {
+    @Nullable
+    abstract Duration getMaxReadTime();
 
-            private final String accessKey;
-            private final String secretKey;
-            private final Regions region;
+    abstract Duration getUpToDateThreshold();
 
-            private BasicKinesisProvider(String accessKey, String secretKey, Regions region) {
-                this.accessKey = checkNotNull(accessKey, "accessKey");
-                this.secretKey = checkNotNull(secretKey, "secretKey");
-                this.region = checkNotNull(region, "region");
-            }
+    abstract Builder toBuilder();
 
+    @AutoValue.Builder
+    abstract static class Builder {
 
-            private AWSCredentialsProvider getCredentialsProvider() {
-                return new StaticCredentialsProvider(new BasicAWSCredentials(
-                        accessKey,
-                        secretKey
-                ));
+      abstract Builder setStreamName(String streamName);
 
-            }
+      abstract Builder setInitialPosition(StartingPoint startingPoint);
 
-            @Override
-            public AmazonKinesis get() {
-                AmazonKinesisClient client = new AmazonKinesisClient(getCredentialsProvider());
-                client.withRegion(region);
-                return client;
-            }
-        }
+      abstract Builder setAWSClientsProvider(AWSClientsProvider clientProvider);
+
+      abstract Builder setMaxNumRecords(int maxNumRecords);
+
+      abstract Builder setMaxReadTime(Duration maxReadTime);
+
+      abstract Builder setUpToDateThreshold(Duration upToDateThreshold);
+
+      abstract Read build();
     }
+
+    /**
+     * Specify reading from streamName.
+     */
+    public Read withStreamName(String streamName) {
+      return toBuilder().setStreamName(streamName).build();
+    }
+
+    /**
+     * Specify reading from some initial position in stream.
+     */
+    public Read withInitialPositionInStream(InitialPositionInStream initialPosition) {
+      return toBuilder()
+          .setInitialPosition(new StartingPoint(initialPosition))
+          .build();
+    }
+
+    /**
+     * Specify reading beginning at given {@link Instant}.
+     * This {@link Instant} must be in the past, i.e. before {@link Instant#now()}.
+     */
+    public Read withInitialTimestampInStream(Instant initialTimestamp) {
+      return toBuilder()
+          .setInitialPosition(new StartingPoint(initialTimestamp))
+          .build();
+    }
+
+    /**
+     * Allows to specify custom {@link AWSClientsProvider}.
+     * {@link AWSClientsProvider} provides {@link AmazonKinesis} and {@link AmazonCloudWatch}
+     * instances which are later used for communication with Kinesis.
+     * You should use this method if {@link Read#withAWSClientsProvider(String, String, Regions)}
+     * does not suit your needs.
+     */
+    public Read withAWSClientsProvider(AWSClientsProvider awsClientsProvider) {
+      return toBuilder().setAWSClientsProvider(awsClientsProvider).build();
+    }
+
+    /**
+     * Specify credential details and region to be used to read from Kinesis.
+     * If you need more sophisticated credential protocol, then you should look at
+     * {@link Read#withAWSClientsProvider(AWSClientsProvider)}.
+     */
+    public Read withAWSClientsProvider(String awsAccessKey, String awsSecretKey, Regions region) {
+      return withAWSClientsProvider(new BasicKinesisProvider(awsAccessKey, awsSecretKey, region));
+    }
+
+    /** Specifies to read at most a given number of records. */
+    public Read withMaxNumRecords(int maxNumRecords) {
+      checkArgument(
+          maxNumRecords > 0, "maxNumRecords must be positive, but was: %s", maxNumRecords);
+      return toBuilder().setMaxNumRecords(maxNumRecords).build();
+    }
+
+    /** Specifies to read at most a given number of records. */
+    public Read withMaxReadTime(Duration maxReadTime) {
+      checkArgument(maxReadTime != null, "maxReadTime can not be null");
+      return toBuilder().setMaxReadTime(maxReadTime).build();
+    }
+
+    /**
+     * Specifies how late records consumed by this source can be to still be considered on time.
+     * When this limit is exceeded the actual backlog size will be evaluated and the runner might
+     * decide to scale the amount of resources allocated to the pipeline in order to
+     * speed up ingestion.
+     */
+    public Read withUpToDateThreshold(Duration upToDateThreshold) {
+      checkArgument(upToDateThreshold != null, "upToDateThreshold can not be null");
+      return toBuilder().setUpToDateThreshold(upToDateThreshold).build();
+    }
+
+    @Override
+    public PCollection<KinesisRecord> expand(PBegin input) {
+      org.apache.beam.sdk.io.Read.Unbounded<KinesisRecord> read =
+          org.apache.beam.sdk.io.Read.from(
+              new KinesisSource(getAWSClientsProvider(), getStreamName(),
+                  getInitialPosition(), getUpToDateThreshold()));
+      if (getMaxNumRecords() > 0) {
+        BoundedReadFromUnboundedSource<KinesisRecord> bounded =
+            read.withMaxNumRecords(getMaxNumRecords());
+        return getMaxReadTime() == null
+            ? input.apply(bounded)
+            : input.apply(bounded.withMaxReadTime(getMaxReadTime()));
+      } else {
+        return getMaxReadTime() == null
+            ? input.apply(read)
+            : input.apply(read.withMaxReadTime(getMaxReadTime()));
+      }
+    }
+
+    private static final class BasicKinesisProvider implements AWSClientsProvider {
+
+      private final String accessKey;
+      private final String secretKey;
+      private final Regions region;
+
+      private BasicKinesisProvider(String accessKey, String secretKey, Regions region) {
+        checkArgument(accessKey != null, "accessKey can not be null");
+        checkArgument(secretKey != null, "secretKey can not be null");
+        checkArgument(region != null, "region can not be null");
+        this.accessKey = accessKey;
+        this.secretKey = secretKey;
+        this.region = region;
+      }
+
+      private AWSCredentialsProvider getCredentialsProvider() {
+        return new StaticCredentialsProvider(new BasicAWSCredentials(
+            accessKey,
+            secretKey
+        ));
+
+      }
+
+      @Override
+      public AmazonKinesis getKinesisClient() {
+        AmazonKinesisClient client = new AmazonKinesisClient(getCredentialsProvider());
+        client.withRegion(region);
+        return client;
+      }
+
+      @Override
+      public AmazonCloudWatch getCloudWatchClient() {
+        AmazonCloudWatchClient client = new AmazonCloudWatchClient(getCredentialsProvider());
+        client.withRegion(region);
+        return client;
+      }
+    }
+  }
 }

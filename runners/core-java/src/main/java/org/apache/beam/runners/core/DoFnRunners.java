@@ -17,20 +17,19 @@
  */
 package org.apache.beam.runners.core;
 
+import java.util.Collection;
 import java.util.List;
-import org.apache.beam.runners.core.DoFnRunner.ReduceFnExecutor;
-import org.apache.beam.runners.core.ExecutionContext.StepContext;
-import org.apache.beam.runners.core.GroupByKeyViaGroupByKeyOnly.GroupAlsoByWindow;
+import org.apache.beam.runners.core.SplittableParDoViaKeyedWorkItems.ProcessFn;
+import org.apache.beam.runners.core.StatefulDoFnRunner.CleanupTimer;
+import org.apache.beam.runners.core.StatefulDoFnRunner.StateCleaner;
 import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.sdk.transforms.Aggregator;
 import org.apache.beam.sdk.transforms.DoFn;
-import org.apache.beam.sdk.transforms.OldDoFn;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
-import org.apache.beam.sdk.util.SideInputReader;
 import org.apache.beam.sdk.util.WindowedValue;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.values.KV;
+import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.sdk.values.WindowingStrategy;
 
 /**
  * Static utility methods that provide {@link DoFnRunner} implementations.
@@ -53,15 +52,14 @@ public class DoFnRunners {
    * compressed {@link WindowedValue}. It is the responsibility of the runner to perform any key
    * partitioning needed, etc.
    */
-  static <InputT, OutputT> DoFnRunner<InputT, OutputT> simpleRunner(
+  public static <InputT, OutputT> DoFnRunner<InputT, OutputT> simpleRunner(
       PipelineOptions options,
       DoFn<InputT, OutputT> fn,
       SideInputReader sideInputReader,
       OutputManager outputManager,
       TupleTag<OutputT> mainOutputTag,
-      List<TupleTag<?>> sideOutputTags,
+      List<TupleTag<?>> additionalOutputTags,
       StepContext stepContext,
-      AggregatorFactory aggregatorFactory,
       WindowingStrategy<?, ?> windowingStrategy) {
     return new SimpleDoFnRunner<>(
         options,
@@ -69,187 +67,70 @@ public class DoFnRunners {
         sideInputReader,
         outputManager,
         mainOutputTag,
-        sideOutputTags,
+        additionalOutputTags,
         stepContext,
-        aggregatorFactory,
-        windowingStrategy);
-  }
-
-  /**
-   * Returns a basic implementation of {@link DoFnRunner} that works for most {@link OldDoFn DoFns}.
-   *
-   * <p>It invokes {@link OldDoFn#processElement} for each input.
-   */
-  public static <InputT, OutputT> DoFnRunner<InputT, OutputT> simpleRunner(
-      PipelineOptions options,
-      OldDoFn<InputT, OutputT> fn,
-      SideInputReader sideInputReader,
-      OutputManager outputManager,
-      TupleTag<OutputT> mainOutputTag,
-      List<TupleTag<?>> sideOutputTags,
-      StepContext stepContext,
-      AggregatorFactory aggregatorFactory,
-      WindowingStrategy<?, ?> windowingStrategy) {
-    return new SimpleOldDoFnRunner<>(
-        options,
-        fn,
-        sideInputReader,
-        outputManager,
-        mainOutputTag,
-        sideOutputTags,
-        stepContext,
-        aggregatorFactory,
         windowingStrategy);
   }
 
   /**
    * Returns an implementation of {@link DoFnRunner} that handles late data dropping.
    *
-   * <p>It drops elements from expired windows before they reach the underlying {@link OldDoFn}.
+   * <p>It drops elements from expired windows before they reach the underlying {@link DoFn}.
    */
   public static <K, InputT, OutputT, W extends BoundedWindow>
       DoFnRunner<KeyedWorkItem<K, InputT>, KV<K, OutputT>> lateDataDroppingRunner(
           DoFnRunner<KeyedWorkItem<K, InputT>, KV<K, OutputT>> wrappedRunner,
           StepContext stepContext,
-          WindowingStrategy<?, W> windowingStrategy,
-          Aggregator<Long, Long> droppedDueToLatenessAggregator) {
+          WindowingStrategy<?, W> windowingStrategy) {
     return new LateDataDroppingDoFnRunner<>(
         wrappedRunner,
         windowingStrategy,
-        stepContext.timerInternals(),
-        droppedDueToLatenessAggregator);
+        stepContext.timerInternals());
   }
 
   /**
-   * Creates a {@link DoFnRunner} for the provided {@link DoFn}.
+   * Returns an implementation of {@link DoFnRunner} that handles
+   * late data dropping and garbage collection for stateful {@link DoFn DoFns}.
+   *
+   * <p>It registers a timer by TimeInternals, and clean all states by StateInternals.
    */
-  public static <InputT, OutputT> DoFnRunner<InputT, OutputT> createDefault(
-      PipelineOptions options,
-      DoFn<InputT, OutputT> doFn,
-      SideInputReader sideInputReader,
-      OutputManager outputManager,
-      TupleTag<OutputT> mainOutputTag,
-      List<TupleTag<?>> sideOutputTags,
-      StepContext stepContext,
-      AggregatorFactory aggregatorFactory,
-      WindowingStrategy<?, ?> windowingStrategy) {
-
-    // Unlike for OldDoFn, there is no ReduceFnExecutor that is a new DoFn,
-    // and window-exploded processing is achieved within the simple runner
-    return simpleRunner(
-        options,
-        doFn,
-        sideInputReader,
-        outputManager,
-        mainOutputTag,
-        sideOutputTags,
-        stepContext,
-        aggregatorFactory,
-        windowingStrategy);
+  public static <InputT, OutputT, W extends BoundedWindow>
+      DoFnRunner<InputT, OutputT> defaultStatefulDoFnRunner(
+          DoFn<InputT, OutputT> fn,
+          DoFnRunner<InputT, OutputT> doFnRunner,
+          WindowingStrategy<?, ?> windowingStrategy,
+          CleanupTimer cleanupTimer,
+          StateCleaner<W> stateCleaner) {
+    return new StatefulDoFnRunner<>(
+        doFnRunner,
+        windowingStrategy,
+        cleanupTimer,
+        stateCleaner);
   }
 
-  /**
-   * Creates a {@link DoFnRunner} for the provided {@link OldDoFn}.
-   *
-   * <p>In particular, if the {@link OldDoFn} is a {@link ReduceFnExecutor}, a specialized
-   * implementation detail of streaming {@link GroupAlsoByWindow}, then it will create a special
-   * runner that operates on {@link KeyedWorkItem KeyedWorkItems}, drops late data and counts
-   * dropped elements.
-   *
-   * @deprecated please port uses of {@link OldDoFn} to use {@link DoFn}
-   */
-  @Deprecated
-  public static <InputT, OutputT> DoFnRunner<InputT, OutputT> createDefault(
+  public static <InputT, OutputT, RestrictionT>
+  ProcessFnRunner<InputT, OutputT, RestrictionT>
+  newProcessFnRunner(
+      ProcessFn<InputT, OutputT, RestrictionT, ?> fn,
       PipelineOptions options,
-      OldDoFn<InputT, OutputT> doFn,
-      SideInputReader sideInputReader,
+      Collection<PCollectionView<?>> views,
+      ReadyCheckingSideInputReader sideInputReader,
       OutputManager outputManager,
       TupleTag<OutputT> mainOutputTag,
-      List<TupleTag<?>> sideOutputTags,
+      List<TupleTag<?>> additionalOutputTags,
       StepContext stepContext,
-      AggregatorFactory aggregatorFactory,
       WindowingStrategy<?, ?> windowingStrategy) {
-
-    DoFnRunner<InputT, OutputT> doFnRunner = simpleRunner(
-        options,
-        doFn,
-        sideInputReader,
-        outputManager,
-        mainOutputTag,
-        sideOutputTags,
-        stepContext,
-        aggregatorFactory,
-        windowingStrategy);
-
-    if (!(doFn instanceof ReduceFnExecutor)) {
-      return doFnRunner;
-    } else {
-      // When a DoFn is a ReduceFnExecutor, we know it has to have an aggregator for dropped
-      // elements and we also learn that for some K and V,
-      //   InputT = KeyedWorkItem<K, V>
-      //   OutputT = KV<K, V>
-
-      Aggregator<Long, Long> droppedDueToLatenessAggregator =
-          ((ReduceFnExecutor<?, ?, ?, ?>) doFn).getDroppedDueToLatenessAggregator();
-
-      @SuppressWarnings({"unchecked", "cast", "rawtypes"})
-      DoFnRunner<InputT, OutputT> runner = (DoFnRunner<InputT, OutputT>) lateDataDroppingRunner(
-          (DoFnRunner) doFnRunner,
-          stepContext,
-          (WindowingStrategy) windowingStrategy,
-          droppedDueToLatenessAggregator);
-
-      return runner;
-    }
-  }
-
-  /**
-   * Creates the right kind of {@link DoFnRunner} for an object that can be either a {@link DoFn} or
-   * {@link OldDoFn}. This can be used so that the client need not explicitly reference either such
-   * class, but merely deserialize a payload and pass it to this method.
-   *
-   * @deprecated for migration purposes only for services where users may still submit either {@link
-   *     OldDoFn} or {@link DoFn}. If you know that you have a {@link DoFn} then you should use the
-   *     variant for that instead.
-   */
-  @Deprecated
-  public static <InputT, OutputT> DoFnRunner<InputT, OutputT> createDefault(
-      PipelineOptions options,
-      Object deserializedFn,
-      SideInputReader sideInputReader,
-      OutputManager outputManager,
-      TupleTag<OutputT> mainOutputTag,
-      List<TupleTag<?>> sideOutputTags,
-      StepContext stepContext,
-      AggregatorFactory aggregatorFactory,
-      WindowingStrategy<?, ?> windowingStrategy) {
-    if (deserializedFn instanceof DoFn) {
-      return createDefault(
-          options,
-          (DoFn) deserializedFn,
-          sideInputReader,
-          outputManager,
-          mainOutputTag,
-          sideOutputTags,
-          stepContext,
-          aggregatorFactory,
-          windowingStrategy);
-    } else if (deserializedFn instanceof OldDoFn) {
-      return createDefault(
-          options,
-          (OldDoFn) deserializedFn,
-          sideInputReader,
-          outputManager,
-          mainOutputTag,
-          sideOutputTags,
-          stepContext,
-          aggregatorFactory,
-          windowingStrategy);
-    } else {
-      throw new IllegalArgumentException(String.format("Cannot create %s for %s of class %s",
-          DoFnRunner.class.getSimpleName(),
-          deserializedFn,
-          deserializedFn.getClass()));
-    }
+    return new ProcessFnRunner<>(
+        simpleRunner(
+            options,
+            fn,
+            sideInputReader,
+            outputManager,
+            mainOutputTag,
+            additionalOutputTags,
+            stepContext,
+            windowingStrategy),
+        views,
+        sideInputReader);
   }
 }

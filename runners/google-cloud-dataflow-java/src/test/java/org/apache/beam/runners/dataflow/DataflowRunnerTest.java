@@ -17,22 +17,24 @@
  */
 package org.apache.beam.runners.dataflow;
 
-import static org.apache.beam.sdk.util.WindowedValue.valueInGlobalWindow;
+import static org.apache.beam.runners.dataflow.DataflowRunner.getContainerImageForJob;
 import static org.hamcrest.Matchers.both;
-import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
-import static org.hamcrest.collection.IsIterableContainingInOrder.contains;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyInt;
+import static org.mockito.Matchers.anyListOf;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Matchers.isA;
@@ -45,9 +47,10 @@ import com.google.api.services.dataflow.model.Job;
 import com.google.api.services.dataflow.model.ListJobsResponse;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.Serializable;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.channels.FileChannel;
@@ -59,64 +62,68 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
-import org.apache.beam.runners.dataflow.DataflowRunner.BatchViewAsList;
-import org.apache.beam.runners.dataflow.DataflowRunner.BatchViewAsMap;
-import org.apache.beam.runners.dataflow.DataflowRunner.BatchViewAsMultimap;
-import org.apache.beam.runners.dataflow.DataflowRunner.BatchViewAsSingleton;
-import org.apache.beam.runners.dataflow.DataflowRunner.TransformedMap;
-import org.apache.beam.runners.dataflow.internal.IsmFormat;
-import org.apache.beam.runners.dataflow.internal.IsmFormat.IsmRecord;
-import org.apache.beam.runners.dataflow.internal.IsmFormat.IsmRecordCoder;
-import org.apache.beam.runners.dataflow.internal.IsmFormat.MetadataKeyCoder;
+import javax.annotation.Nullable;
+import org.apache.beam.runners.dataflow.DataflowRunner.StreamingShardedWriteFactory;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineDebugOptions;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
+import org.apache.beam.runners.dataflow.options.DataflowPipelineWorkerPoolOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.Pipeline.PipelineVisitor;
 import org.apache.beam.sdk.coders.BigEndianIntegerCoder;
-import org.apache.beam.sdk.coders.BigEndianLongCoder;
-import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.coders.VarLongCoder;
-import org.apache.beam.sdk.io.Read;
+import org.apache.beam.sdk.coders.VoidCoder;
+import org.apache.beam.sdk.extensions.gcp.auth.NoopCredentialFactory;
+import org.apache.beam.sdk.extensions.gcp.auth.TestCredential;
+import org.apache.beam.sdk.extensions.gcp.storage.NoopPathValidator;
+import org.apache.beam.sdk.io.DynamicFileDestinations;
+import org.apache.beam.sdk.io.FileBasedSink;
+import org.apache.beam.sdk.io.FileSystems;
 import org.apache.beam.sdk.io.TextIO;
+import org.apache.beam.sdk.io.WriteFiles;
+import org.apache.beam.sdk.io.WriteFilesResult;
+import org.apache.beam.sdk.io.fs.ResourceId;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptions.CheckEnabled;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.options.StreamingOptions;
 import org.apache.beam.sdk.options.ValueProvider;
+import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
+import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.runners.TransformHierarchy;
-import org.apache.beam.sdk.runners.dataflow.TestCountingSource;
+import org.apache.beam.sdk.runners.TransformHierarchy.Node;
+import org.apache.beam.sdk.state.MapState;
+import org.apache.beam.sdk.state.SetState;
+import org.apache.beam.sdk.state.StateSpec;
+import org.apache.beam.sdk.state.StateSpecs;
+import org.apache.beam.sdk.state.ValueState;
 import org.apache.beam.sdk.testing.ExpectedLogs;
 import org.apache.beam.sdk.testing.TestPipeline;
 import org.apache.beam.sdk.transforms.Create;
-import org.apache.beam.sdk.transforms.DoFnTester;
+import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.PTransform;
-import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
-import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.SerializableFunctions;
+import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
-import org.apache.beam.sdk.util.CoderUtils;
+import org.apache.beam.sdk.transforms.windowing.Sessions;
+import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.util.GcsUtil;
-import org.apache.beam.sdk.util.NoopCredentialFactory;
-import org.apache.beam.sdk.util.NoopPathValidator;
-import org.apache.beam.sdk.util.ReleaseInfo;
-import org.apache.beam.sdk.util.TestCredential;
-import org.apache.beam.sdk.util.WindowedValue;
-import org.apache.beam.sdk.util.WindowedValue.FullWindowedValueCoder;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.util.gcsfs.GcsPath;
 import org.apache.beam.sdk.values.KV;
-import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TimestampedValue;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.sdk.values.WindowingStrategy;
 import org.hamcrest.Description;
 import org.hamcrest.Matchers;
 import org.hamcrest.TypeSafeMatcher;
+import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.internal.matchers.ThrowableMessageMatcher;
 import org.junit.rules.ExpectedException;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
@@ -128,9 +135,11 @@ import org.mockito.stubbing.Answer;
 
 /**
  * Tests for the {@link DataflowRunner}.
+ *
+ * <p>Implements {@link Serializable} because it is caught in closures.
  */
 @RunWith(JUnit4.class)
-public class DataflowRunnerTest {
+public class DataflowRunnerTest implements Serializable {
 
   private static final String VALID_STAGING_BUCKET = "gs://valid-bucket/staging";
   private static final String VALID_TEMP_BUCKET = "gs://valid-bucket/temp";
@@ -138,16 +147,14 @@ public class DataflowRunnerTest {
   private static final String NON_EXISTENT_BUCKET = "gs://non-existent-bucket/location";
 
   private static final String PROJECT_ID = "some-project";
+  private static final String REGION_ID = "some-region-1";
 
-  @Rule
-  public TemporaryFolder tmpFolder = new TemporaryFolder();
-  @Rule
-  public ExpectedException thrown = ExpectedException.none();
-  @Rule
-  public ExpectedLogs expectedLogs = ExpectedLogs.none(DataflowRunner.class);
+  @Rule public transient TemporaryFolder tmpFolder = new TemporaryFolder();
+  @Rule public transient ExpectedException thrown = ExpectedException.none();
+  @Rule public transient ExpectedLogs expectedLogs = ExpectedLogs.none(DataflowRunner.class);
 
-  private Dataflow.Projects.Jobs mockJobs;
-  private GcsUtil mockGcsUtil;
+  private transient Dataflow.Projects.Locations.Jobs mockJobs;
+  private transient GcsUtil mockGcsUtil;
 
   // Asserts that the given Job has all expected fields set.
   private static void assertValidJob(Job job) {
@@ -168,7 +175,6 @@ public class DataflowRunnerTest {
                 StandardOpenOption.CREATE, StandardOpenOption.DELETE_ON_CLOSE);
           }
         });
-    when(mockGcsUtil.isGcsPatternSupported(anyString())).thenReturn(true);
     when(mockGcsUtil.expand(any(GcsPath.class))).then(new Answer<List<GcsPath>>() {
       @Override
       public List<GcsPath> answer(InvocationOnMock invocation) throws Throwable {
@@ -176,8 +182,9 @@ public class DataflowRunnerTest {
       }
     });
     when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(VALID_STAGING_BUCKET))).thenReturn(true);
+    when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(VALID_STAGING_BUCKET))).thenReturn(true);
     when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(VALID_TEMP_BUCKET))).thenReturn(true);
-    when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(VALID_TEMP_BUCKET + "/staging"))).
+    when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(VALID_TEMP_BUCKET + "/staging/"))).
         thenReturn(true);
     when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(VALID_PROFILE_BUCKET))).thenReturn(true);
     when(mockGcsUtil.bucketAccessible(GcsPath.fromUri(NON_EXISTENT_BUCKET))).thenReturn(false);
@@ -185,7 +192,7 @@ public class DataflowRunnerTest {
     // The dataflow pipeline attempts to output to this location.
     when(mockGcsUtil.bucketAccessible(GcsPath.fromUri("gs://bucket/object"))).thenReturn(true);
 
-    mockJobs = mock(Dataflow.Projects.Jobs.class);
+    mockJobs = mock(Dataflow.Projects.Locations.Jobs.class);
   }
 
   private Pipeline buildDataflowPipeline(DataflowPipelineOptions options) {
@@ -193,8 +200,11 @@ public class DataflowRunnerTest {
     options.setRunner(DataflowRunner.class);
     Pipeline p = Pipeline.create(options);
 
-    p.apply("ReadMyFile", TextIO.Read.from("gs://bucket/object"))
-        .apply("WriteMyFile", TextIO.Write.to("gs://bucket/object"));
+    p.apply("ReadMyFile", TextIO.read().from("gs://bucket/object"))
+        .apply("WriteMyFile", TextIO.write().to("gs://bucket/object"));
+
+    // Enable the FileSystems API to know about gs:// URIs in this test.
+    FileSystems.setDefaultPipelineOptions(options);
 
     return p;
   }
@@ -202,14 +212,17 @@ public class DataflowRunnerTest {
   private Dataflow buildMockDataflow() throws IOException {
     Dataflow mockDataflowClient = mock(Dataflow.class);
     Dataflow.Projects mockProjects = mock(Dataflow.Projects.class);
-    Dataflow.Projects.Jobs.Create mockRequest =
-        mock(Dataflow.Projects.Jobs.Create.class);
-    Dataflow.Projects.Jobs.List mockList = mock(Dataflow.Projects.Jobs.List.class);
+    Dataflow.Projects.Locations mockLocations = mock(Dataflow.Projects.Locations.class);
+    Dataflow.Projects.Locations.Jobs.Create mockRequest =
+        mock(Dataflow.Projects.Locations.Jobs.Create.class);
+    Dataflow.Projects.Locations.Jobs.List mockList = mock(
+        Dataflow.Projects.Locations.Jobs.List.class);
 
     when(mockDataflowClient.projects()).thenReturn(mockProjects);
-    when(mockProjects.jobs()).thenReturn(mockJobs);
-    when(mockJobs.create(eq(PROJECT_ID), isA(Job.class))).thenReturn(mockRequest);
-    when(mockJobs.list(eq(PROJECT_ID))).thenReturn(mockList);
+    when(mockProjects.locations()).thenReturn(mockLocations);
+    when(mockLocations.jobs()).thenReturn(mockJobs);
+    when(mockJobs.create(eq(PROJECT_ID), eq(REGION_ID), isA(Job.class))).thenReturn(mockRequest);
+    when(mockJobs.list(eq(PROJECT_ID), eq(REGION_ID))).thenReturn(mockList);
     when(mockList.setPageToken(anyString())).thenReturn(mockList);
     when(mockList.execute())
         .thenReturn(
@@ -238,7 +251,6 @@ public class DataflowRunnerTest {
                 StandardOpenOption.CREATE, StandardOpenOption.DELETE_ON_CLOSE);
           }
         });
-    when(mockGcsUtil.isGcsPatternSupported(anyString())).thenReturn(true);
     when(mockGcsUtil.expand(any(GcsPath.class))).then(new Answer<List<GcsPath>>() {
       @Override
       public List<GcsPath> answer(InvocationOnMock invocation) throws Throwable {
@@ -253,11 +265,16 @@ public class DataflowRunnerTest {
     options.setRunner(DataflowRunner.class);
     options.setProject(PROJECT_ID);
     options.setTempLocation(VALID_TEMP_BUCKET);
+    options.setRegion(REGION_ID);
     // Set FILES_PROPERTY to empty to prevent a default value calculated from classpath.
     options.setFilesToStage(new LinkedList<String>());
     options.setDataflowClient(buildMockDataflow());
     options.setGcsUtil(mockGcsUtil);
     options.setGcpCredential(new TestCredential());
+
+    // Configure the FileSystem registrar to use these options.
+    FileSystems.setDefaultPipelineOptions(options);
+
     return options;
   }
 
@@ -271,7 +288,7 @@ public class DataflowRunnerTest {
     };
 
     try {
-      TestPipeline.fromOptions(PipelineOptionsFactory.fromArgs(args).create());
+      Pipeline.create(PipelineOptionsFactory.fromArgs(args).create()).run();
       fail();
     } catch (RuntimeException e) {
       assertThat(
@@ -290,7 +307,7 @@ public class DataflowRunnerTest {
     };
 
     try {
-      TestPipeline.fromOptions(PipelineOptionsFactory.fromArgs(args).create());
+      Pipeline.create(PipelineOptionsFactory.fromArgs(args).create()).run();
       fail();
     } catch (RuntimeException e) {
       assertThat(
@@ -324,6 +341,18 @@ public class DataflowRunnerTest {
   }
 
   @Test
+  public void testFromOptionsUserAgentFromPipelineInfo() throws Exception {
+    DataflowPipelineOptions options = buildPipelineOptions();
+    DataflowRunner.fromOptions(options);
+
+    String expectedName = DataflowRunnerInfo.getDataflowRunnerInfo().getName().replace(" ", "_");
+    assertThat(options.getUserAgent(), containsString(expectedName));
+
+    String expectedVersion = DataflowRunnerInfo.getDataflowRunnerInfo().getVersion();
+    assertThat(options.getUserAgent(), containsString(expectedVersion));
+  }
+
+  @Test
   public void testRun() throws IOException {
     DataflowPipelineOptions options = buildPipelineOptions();
     Pipeline p = buildDataflowPipeline(options);
@@ -331,7 +360,7 @@ public class DataflowRunnerTest {
     assertEquals("newid", job.getJobId());
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
   }
 
@@ -350,16 +379,38 @@ public class DataflowRunnerTest {
     RuntimeTestOptions options = dataflowOptions.as(RuntimeTestOptions.class);
     Pipeline p = buildDataflowPipeline(dataflowOptions);
     p
-        .apply(TextIO.Read.from(options.getInput()).withoutValidation())
-        .apply(TextIO.Write.to(options.getOutput()).withoutValidation());
+        .apply(TextIO.read().from(options.getInput()))
+        .apply(TextIO.write().to(options.getOutput()));
+  }
+
+  /**
+   * Tests that all reads are consumed by at least one {@link PTransform}.
+   */
+  @Test
+  public void testUnconsumedReads() throws IOException {
+    DataflowPipelineOptions dataflowOptions = buildPipelineOptions();
+    RuntimeTestOptions options = dataflowOptions.as(RuntimeTestOptions.class);
+    Pipeline p = buildDataflowPipeline(dataflowOptions);
+    PCollection<String> unconsumed = p.apply(TextIO.read().from(options.getInput()));
+    DataflowRunner.fromOptions(dataflowOptions).replaceTransforms(p);
+    final AtomicBoolean unconsumedSeenAsInput = new AtomicBoolean();
+    p.traverseTopologically(new PipelineVisitor.Defaults() {
+      @Override
+      public void visitPrimitiveTransform(Node node) {
+        unconsumedSeenAsInput.set(true);
+      }
+    });
+    assertThat(unconsumedSeenAsInput.get(), is(true));
   }
 
   @Test
   public void testRunReturnDifferentRequestId() throws IOException {
     DataflowPipelineOptions options = buildPipelineOptions();
     Dataflow mockDataflowClient = options.getDataflowClient();
-    Dataflow.Projects.Jobs.Create mockRequest = mock(Dataflow.Projects.Jobs.Create.class);
-    when(mockDataflowClient.projects().jobs().create(eq(PROJECT_ID), any(Job.class)))
+    Dataflow.Projects.Locations.Jobs.Create mockRequest = mock(
+        Dataflow.Projects.Locations.Jobs.Create.class);
+    when(mockDataflowClient.projects().locations().jobs()
+        .create(eq(PROJECT_ID), eq(REGION_ID), any(Job.class)))
         .thenReturn(mockRequest);
     Job resultJob = new Job();
     resultJob.setId("newid");
@@ -374,7 +425,7 @@ public class DataflowRunnerTest {
     } catch (DataflowJobAlreadyExistsException expected) {
       assertThat(expected.getMessage(),
           containsString("If you want to submit a second job, try again by setting a "
-            + "different name using --jobName."));
+              + "different name using --jobName."));
       assertEquals(expected.getJob().getJobId(), resultJob.getId());
     }
   }
@@ -389,7 +440,7 @@ public class DataflowRunnerTest {
     assertEquals("newid", job.getJobId());
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
   }
 
@@ -411,8 +462,10 @@ public class DataflowRunnerTest {
     options.setUpdate(true);
     options.setJobName("oldJobName");
     Dataflow mockDataflowClient = options.getDataflowClient();
-    Dataflow.Projects.Jobs.Create mockRequest = mock(Dataflow.Projects.Jobs.Create.class);
-    when(mockDataflowClient.projects().jobs().create(eq(PROJECT_ID), any(Job.class)))
+    Dataflow.Projects.Locations.Jobs.Create mockRequest = mock(
+        Dataflow.Projects.Locations.Jobs.Create.class);
+    when(mockDataflowClient.projects().locations().jobs()
+        .create(eq(PROJECT_ID), eq(REGION_ID), any(Job.class)))
         .thenReturn(mockRequest);
     final Job resultJob = new Job();
     resultJob.setId("newid");
@@ -441,8 +494,7 @@ public class DataflowRunnerTest {
 
   @Test
   public void testRunWithFiles() throws IOException {
-    // Test that the function DataflowRunner.stageFiles works as
-    // expected.
+    // Test that the function DataflowRunner.stageFiles works as expected.
     final String cloudDataflowDataset = "somedataset";
 
     // Create some temporary files.
@@ -453,6 +505,10 @@ public class DataflowRunnerTest {
 
     String overridePackageName = "alias.txt";
 
+    when(mockGcsUtil.getObjects(anyListOf(GcsPath.class)))
+        .thenReturn(ImmutableList.of(GcsUtil.StorageObjectOrIOException.create(
+            new FileNotFoundException("some/path"))));
+
     DataflowPipelineOptions options = PipelineOptionsFactory.as(DataflowPipelineOptions.class);
     options.setFilesToStage(ImmutableList.of(
         temp1.getAbsolutePath(),
@@ -461,10 +517,21 @@ public class DataflowRunnerTest {
     options.setTempLocation(VALID_TEMP_BUCKET);
     options.setTempDatasetId(cloudDataflowDataset);
     options.setProject(PROJECT_ID);
+    options.setRegion(REGION_ID);
     options.setJobName("job");
     options.setDataflowClient(buildMockDataflow());
     options.setGcsUtil(mockGcsUtil);
     options.setGcpCredential(new TestCredential());
+
+    when(mockGcsUtil.create(any(GcsPath.class), anyString(), anyInt()))
+        .then(new Answer<SeekableByteChannel>() {
+          @Override
+          public SeekableByteChannel answer(InvocationOnMock invocation) throws Throwable {
+            return FileChannel.open(
+                Files.createTempFile("channel-", ".tmp"),
+                StandardOpenOption.CREATE, StandardOpenOption.DELETE_ON_CLOSE);
+          }
+        });
 
     Pipeline p = buildDataflowPipeline(options);
 
@@ -472,7 +539,7 @@ public class DataflowRunnerTest {
     assertEquals("newid", job.getJobId());
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     Job workflowJob = jobCaptor.getValue();
     assertValidJob(workflowJob);
 
@@ -493,10 +560,10 @@ public class DataflowRunnerTest {
         cloudDataflowDataset,
         workflowJob.getEnvironment().getDataset());
     assertEquals(
-        ReleaseInfo.getReleaseInfo().getName(),
+        DataflowRunnerInfo.getDataflowRunnerInfo().getName(),
         workflowJob.getEnvironment().getUserAgent().get("name"));
     assertEquals(
-        ReleaseInfo.getReleaseInfo().getVersion(),
+        DataflowRunnerInfo.getDataflowRunnerInfo().getVersion(),
         workflowJob.getEnvironment().getUserAgent().get("version"));
   }
 
@@ -512,7 +579,7 @@ public class DataflowRunnerTest {
   public void detectClassPathResourceWithFileResources() throws Exception {
     File file = tmpFolder.newFile("file");
     File file2 = tmpFolder.newFile("file2");
-    URLClassLoader classLoader = new URLClassLoader(new URL[]{
+    URLClassLoader classLoader = new URLClassLoader(new URL[] {
         file.toURI().toURL(),
         file2.toURI().toURL()
     });
@@ -533,7 +600,7 @@ public class DataflowRunnerTest {
   @Test
   public void detectClassPathResourceWithNonFileResources() throws Exception {
     String url = "http://www.google.com/all-the-secrets.jar";
-    URLClassLoader classLoader = new URLClassLoader(new URL[]{
+    URLClassLoader classLoader = new URLClassLoader(new URL[] {
         new URL(url)
     });
     thrown.expect(IllegalArgumentException.class);
@@ -558,58 +625,6 @@ public class DataflowRunnerTest {
   }
 
   @Test
-  public void testNonGcsFilePathInReadFailure() throws IOException {
-    Pipeline p = buildDataflowPipeline(buildPipelineOptions());
-    p.apply("ReadMyNonGcsFile", TextIO.Read.from(tmpFolder.newFile().getPath()));
-
-    thrown.expectCause(Matchers.allOf(
-        instanceOf(IllegalArgumentException.class),
-        ThrowableMessageMatcher.hasMessage(
-            containsString("Expected a valid 'gs://' path but was given"))));
-    p.run();
-
-    ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
-    assertValidJob(jobCaptor.getValue());
-  }
-
-  @Test
-  public void testNonGcsFilePathInWriteFailure() throws IOException {
-    Pipeline p = buildDataflowPipeline(buildPipelineOptions());
-
-    PCollection<String> pc = p.apply("ReadMyGcsFile", TextIO.Read.from("gs://bucket/object"));
-
-    thrown.expect(IllegalArgumentException.class);
-    thrown.expectMessage(containsString("Expected a valid 'gs://' path but was given"));
-    pc.apply("WriteMyNonGcsFile", TextIO.Write.to("/tmp/file"));
-  }
-
-  @Test
-  public void testMultiSlashGcsFileReadPath() throws IOException {
-    Pipeline p = buildDataflowPipeline(buildPipelineOptions());
-    p.apply("ReadInvalidGcsFile", TextIO.Read.from("gs://bucket/tmp//file"));
-
-    thrown.expectCause(Matchers.allOf(
-        instanceOf(IllegalArgumentException.class),
-        ThrowableMessageMatcher.hasMessage(containsString("consecutive slashes"))));
-    p.run();
-
-    ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
-    assertValidJob(jobCaptor.getValue());
-  }
-
-  @Test
-  public void testMultiSlashGcsFileWritePath() throws IOException {
-    Pipeline p = buildDataflowPipeline(buildPipelineOptions());
-    PCollection<String> pc = p.apply("ReadMyGcsFile", TextIO.Read.from("gs://bucket/object"));
-
-    thrown.expect(IllegalArgumentException.class);
-    thrown.expectMessage("consecutive slashes");
-    pc.apply("WriteInvalidGcsFile", TextIO.Write.to("gs://bucket/tmp//file"));
-  }
-
-  @Test
   public void testInvalidGcpTempLocation() throws IOException {
     DataflowPipelineOptions options = buildPipelineOptions();
     options.setGcpTempLocation("file://temp/location");
@@ -619,7 +634,7 @@ public class DataflowRunnerTest {
     DataflowRunner.fromOptions(options);
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
   }
 
@@ -684,7 +699,7 @@ public class DataflowRunnerTest {
     DataflowRunner.fromOptions(options);
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
   }
 
@@ -699,7 +714,7 @@ public class DataflowRunnerTest {
     DataflowRunner.fromOptions(options);
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
   }
 
@@ -714,9 +729,9 @@ public class DataflowRunnerTest {
     DataflowRunner.fromOptions(options);
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
-   }
+  }
 
   @Test
   public void testNoProjectFails() {
@@ -795,6 +810,7 @@ public class DataflowRunnerTest {
   @Test
   public void testInvalidNumberOfWorkerHarnessThreads() throws IOException {
     DataflowPipelineOptions options = PipelineOptionsFactory.as(DataflowPipelineOptions.class);
+    FileSystems.setDefaultPipelineOptions(options);
     options.setRunner(DataflowRunner.class);
     options.setProject("foo-12345");
 
@@ -845,7 +861,6 @@ public class DataflowRunnerTest {
 
     DataflowRunner.fromOptions(options);
   }
-
 
   @Test
   public void testValidProfileLocation() throws IOException {
@@ -909,7 +924,13 @@ public class DataflowRunnerTest {
     DataflowPipelineOptions streamingOptions = buildPipelineOptions();
     streamingOptions.setStreaming(true);
     streamingOptions.setRunner(DataflowRunner.class);
-    Pipeline.create(streamingOptions);
+    Pipeline p = Pipeline.create(streamingOptions);
+
+    // Instantiation of a runner prior to run() currently has a side effect of mutating the options.
+    // This could be tested by DataflowRunner.fromOptions(streamingOptions) but would not ensure
+    // that the pipeline itself had the expected options set.
+    p.run();
+
     assertEquals(
         DataflowRunner.GCS_UPLOAD_BUFFER_SIZE_BYTES_DEFAULT,
         streamingOptions.getGcsUploadBufferSizeBytes().intValue());
@@ -942,15 +963,11 @@ public class DataflowRunnerTest {
 
     @Override
     public PCollection<Integer> expand(PCollection<Integer> input) {
-      return PCollection.<Integer>createPrimitiveOutputInternal(
+      return PCollection.createPrimitiveOutputInternal(
           input.getPipeline(),
           WindowingStrategy.globalDefault(),
-          input.isBounded());
-    }
-
-    @Override
-    protected Coder<?> getDefaultOutputCoder(PCollection<Integer> input) {
-      return input.getCoder();
+          input.isBounded(),
+          input.getCoder());
     }
   }
 
@@ -960,16 +977,16 @@ public class DataflowRunnerTest {
     Pipeline p = Pipeline.create(options);
 
     p.apply(Create.of(Arrays.asList(1, 2, 3)))
-     .apply(new TestTransform());
+        .apply(new TestTransform());
 
     thrown.expect(IllegalStateException.class);
     thrown.expectMessage(Matchers.containsString("no translator registered"));
     DataflowPipelineTranslator.fromOptions(options)
         .translate(
-            p, (DataflowRunner) p.getRunner(), Collections.<DataflowPackage>emptyList());
+            p, DataflowRunner.fromOptions(options), Collections.<DataflowPackage>emptyList());
 
     ArgumentCaptor<Job> jobCaptor = ArgumentCaptor.forClass(Job.class);
-    Mockito.verify(mockJobs).create(eq(PROJECT_ID), jobCaptor.capture());
+    Mockito.verify(mockJobs).create(eq(PROJECT_ID), eq(REGION_ID), jobCaptor.capture());
     assertValidJob(jobCaptor.getValue());
   }
 
@@ -988,24 +1005,89 @@ public class DataflowRunnerTest {
 
     DataflowPipelineTranslator.registerTransformTranslator(
         TestTransform.class,
-        new DataflowPipelineTranslator.TransformTranslator<TestTransform>() {
+        new TransformTranslator<TestTransform>() {
           @SuppressWarnings("unchecked")
           @Override
           public void translate(
               TestTransform transform,
-              DataflowPipelineTranslator.TranslationContext context) {
+              TranslationContext context) {
             transform.translated = true;
 
             // Note: This is about the minimum needed to fake out a
             // translation. This obviously isn't a real translation.
-            context.addStep(transform, "TestTranslate");
-            context.addOutput(context.getOutput(transform));
+            StepTranslationContext stepContext = context.addStep(transform, "TestTranslate");
+            stepContext.addOutput(context.getOutput(transform));
           }
         });
 
     translator.translate(
-        p, (DataflowRunner) p.getRunner(), Collections.<DataflowPackage>emptyList());
+        p, DataflowRunner.fromOptions(options), Collections.<DataflowPackage>emptyList());
     assertTrue(transform.translated);
+  }
+
+  private void verifyMapStateUnsupported(PipelineOptions options) throws Exception {
+    Pipeline p = Pipeline.create(options);
+    p.apply(Create.of(KV.of(13, 42)))
+        .apply(
+            ParDo.of(
+                new DoFn<KV<Integer, Integer>, Void>() {
+                  @StateId("fizzle")
+                  private final StateSpec<MapState<Void, Void>> voidState = StateSpecs.map();
+
+                  @ProcessElement
+                  public void process() {}
+                }));
+
+    thrown.expectMessage("MapState");
+    thrown.expect(UnsupportedOperationException.class);
+    p.run();
+  }
+
+  @Test
+  public void testMapStateUnsupportedInBatch() throws Exception {
+    PipelineOptions options = buildPipelineOptions();
+    options.as(StreamingOptions.class).setStreaming(false);
+    verifyMapStateUnsupported(options);
+  }
+
+  @Test
+  public void testMapStateUnsupportedInStreaming() throws Exception {
+    PipelineOptions options = buildPipelineOptions();
+    options.as(StreamingOptions.class).setStreaming(true);
+    verifyMapStateUnsupported(options);
+  }
+
+  private void verifySetStateUnsupported(PipelineOptions options) throws Exception {
+    Pipeline p = Pipeline.create(options);
+    p.apply(Create.of(KV.of(13, 42)))
+        .apply(
+            ParDo.of(
+                new DoFn<KV<Integer, Integer>, Void>() {
+                  @StateId("fizzle")
+                  private final StateSpec<SetState<Void>> voidState = StateSpecs.set();
+
+                  @ProcessElement
+                  public void process() {}
+                }));
+
+    thrown.expectMessage("SetState");
+    thrown.expect(UnsupportedOperationException.class);
+    p.run();
+  }
+
+  @Test
+  public void testSetStateUnsupportedInBatch() throws Exception {
+    PipelineOptions options = buildPipelineOptions();
+    options.as(StreamingOptions.class).setStreaming(false);
+    Pipeline p = Pipeline.create(options);
+    verifySetStateUnsupported(options);
+  }
+
+  @Test
+  public void testSetStateUnsupportedInStreaming() throws Exception {
+    PipelineOptions options = buildPipelineOptions();
+    options.as(StreamingOptions.class).setStreaming(true);
+    verifySetStateUnsupported(options);
   }
 
   /** Records all the composite transforms visited within the Pipeline. */
@@ -1063,493 +1145,9 @@ public class DataflowRunnerTest {
         DataflowRunner.fromOptions(options).toString());
   }
 
-  private static PipelineOptions makeOptions(boolean streaming) {
-    DataflowPipelineOptions options = PipelineOptionsFactory.as(DataflowPipelineOptions.class);
-    options.setRunner(DataflowRunner.class);
-    options.setStreaming(streaming);
-    options.setJobName("TestJobName");
-    options.setProject("test-project");
-    options.setTempLocation("gs://test/temp/location");
-    options.setGcpCredential(new TestCredential());
-    options.setPathValidatorClass(NoopPathValidator.class);
-    return options;
-  }
-
-  private void testUnsupportedSource(PTransform<PBegin, ?> source, String name, boolean streaming)
-      throws Exception {
-    String mode = streaming ? "streaming" : "batch";
-    thrown.expect(UnsupportedOperationException.class);
-    thrown.expectMessage(
-        "The DataflowRunner in " + mode + " mode does not support " + name);
-
-    Pipeline p = Pipeline.create(makeOptions(streaming));
-    p.apply(source);
-    p.run();
-  }
-
-  @Test
-  public void testReadUnboundedUnsupportedInBatch() throws Exception {
-    testUnsupportedSource(Read.from(new TestCountingSource(1)), "Read.Unbounded", false);
-  }
-
-  @Test
-  public void testBatchViewAsSingletonToIsmRecord() throws Exception {
-    DoFnTester<KV<Integer, Iterable<KV<GlobalWindow, WindowedValue<String>>>>,
-               IsmRecord<WindowedValue<String>>> doFnTester =
-               DoFnTester.of(
-                   new BatchViewAsSingleton.IsmRecordForSingularValuePerWindowDoFn
-                   <String, GlobalWindow>(GlobalWindow.Coder.INSTANCE));
-
-    assertThat(
-        doFnTester.processBundle(
-            ImmutableList.of(KV.<Integer, Iterable<KV<GlobalWindow, WindowedValue<String>>>>of(
-                0, ImmutableList.of(KV.of(GlobalWindow.INSTANCE, valueInGlobalWindow("a")))))),
-        contains(IsmRecord.of(ImmutableList.of(GlobalWindow.INSTANCE), valueInGlobalWindow("a"))));
-  }
-
-  @Test
-  public void testBatchViewAsSingletonToIsmRecordWithMultipleValuesThrowsException()
-      throws Exception {
-    DoFnTester<KV<Integer, Iterable<KV<GlobalWindow, WindowedValue<String>>>>,
-    IsmRecord<WindowedValue<String>>> doFnTester =
-    DoFnTester.of(
-        new BatchViewAsSingleton.IsmRecordForSingularValuePerWindowDoFn
-        <String, GlobalWindow>(GlobalWindow.Coder.INSTANCE));
-
-    thrown.expect(IllegalStateException.class);
-    thrown.expectMessage("found for singleton within window");
-    doFnTester.processBundle(ImmutableList.of(
-        KV.<Integer, Iterable<KV<GlobalWindow, WindowedValue<String>>>>of(0,
-            ImmutableList.of(KV.of(GlobalWindow.INSTANCE, valueInGlobalWindow("a")),
-                KV.of(GlobalWindow.INSTANCE, valueInGlobalWindow("b"))))));
-  }
-
-  @Test
-  public void testBatchViewAsListToIsmRecordForGlobalWindow() throws Exception {
-    DoFnTester<String, IsmRecord<WindowedValue<String>>> doFnTester =
-        DoFnTester.of(new BatchViewAsList.ToIsmRecordForGlobalWindowDoFn<String>());
-
-    // The order of the output elements is important relative to processing order
-    assertThat(doFnTester.processBundle(ImmutableList.of("a", "b", "c")), contains(
-        IsmRecord.of(ImmutableList.of(GlobalWindow.INSTANCE, 0L), valueInGlobalWindow("a")),
-        IsmRecord.of(ImmutableList.of(GlobalWindow.INSTANCE, 1L), valueInGlobalWindow("b")),
-        IsmRecord.of(ImmutableList.of(GlobalWindow.INSTANCE, 2L), valueInGlobalWindow("c"))));
-  }
-
-  @Test
-  public void testBatchViewAsListToIsmRecordForNonGlobalWindow() throws Exception {
-    DoFnTester<KV<Integer, Iterable<KV<IntervalWindow, WindowedValue<Long>>>>,
-               IsmRecord<WindowedValue<Long>>> doFnTester =
-        DoFnTester.of(
-            new BatchViewAsList.ToIsmRecordForNonGlobalWindowDoFn<Long, IntervalWindow>(
-                IntervalWindow.getCoder()));
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-    IntervalWindow windowB = new IntervalWindow(new Instant(10), new Instant(20));
-    IntervalWindow windowC = new IntervalWindow(new Instant(20), new Instant(30));
-
-    Iterable<KV<Integer, Iterable<KV<IntervalWindow, WindowedValue<Long>>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1, (Iterable<KV<IntervalWindow, WindowedValue<Long>>>) ImmutableList.of(
-                KV.of(
-                    windowA, WindowedValue.of(110L, new Instant(1), windowA, PaneInfo.NO_FIRING)),
-                KV.of(
-                    windowA, WindowedValue.of(111L, new Instant(3), windowA, PaneInfo.NO_FIRING)),
-                KV.of(
-                    windowA, WindowedValue.of(112L, new Instant(4), windowA, PaneInfo.NO_FIRING)),
-                KV.of(
-                    windowB, WindowedValue.of(120L, new Instant(12), windowB, PaneInfo.NO_FIRING)),
-                KV.of(
-                    windowB, WindowedValue.of(121L, new Instant(14), windowB, PaneInfo.NO_FIRING))
-                )),
-            KV.of(2, (Iterable<KV<IntervalWindow, WindowedValue<Long>>>) ImmutableList.of(
-                KV.of(
-                    windowC, WindowedValue.of(210L, new Instant(25), windowC, PaneInfo.NO_FIRING))
-                )));
-
-    // The order of the output elements is important relative to processing order
-    assertThat(doFnTester.processBundle(inputElements), contains(
-        IsmRecord.of(ImmutableList.of(windowA, 0L),
-            WindowedValue.of(110L, new Instant(1), windowA, PaneInfo.NO_FIRING)),
-        IsmRecord.of(ImmutableList.of(windowA, 1L),
-            WindowedValue.of(111L, new Instant(3), windowA, PaneInfo.NO_FIRING)),
-        IsmRecord.of(ImmutableList.of(windowA, 2L),
-            WindowedValue.of(112L, new Instant(4), windowA, PaneInfo.NO_FIRING)),
-        IsmRecord.of(ImmutableList.of(windowB, 0L),
-            WindowedValue.of(120L, new Instant(12), windowB, PaneInfo.NO_FIRING)),
-        IsmRecord.of(ImmutableList.of(windowB, 1L),
-            WindowedValue.of(121L, new Instant(14), windowB, PaneInfo.NO_FIRING)),
-        IsmRecord.of(ImmutableList.of(windowC, 0L),
-            WindowedValue.of(210L, new Instant(25), windowC, PaneInfo.NO_FIRING))));
-  }
-
-  @Test
-  public void testToIsmRecordForMapLikeDoFn() throws Exception {
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForSizeTag = new TupleTag<>();
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForEntrySetTag = new TupleTag<>();
-
-    Coder<Long> keyCoder = VarLongCoder.of();
-    Coder<IntervalWindow> windowCoder = IntervalWindow.getCoder();
-
-    IsmRecordCoder<WindowedValue<Long>> ismCoder = IsmRecordCoder.of(
-        1,
-        2,
-        ImmutableList.<Coder<?>>of(
-            MetadataKeyCoder.of(keyCoder),
-            IntervalWindow.getCoder(),
-            BigEndianLongCoder.of()),
-        FullWindowedValueCoder.of(VarLongCoder.of(), windowCoder));
-
-    DoFnTester<KV<Integer, Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>>,
-               IsmRecord<WindowedValue<Long>>> doFnTester =
-        DoFnTester.of(new BatchViewAsMultimap.ToIsmRecordForMapLikeDoFn<>(
-            outputForSizeTag,
-            outputForEntrySetTag,
-            windowCoder,
-            keyCoder,
-            ismCoder,
-            false /* unique keys */));
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-    IntervalWindow windowB = new IntervalWindow(new Instant(10), new Instant(20));
-    IntervalWindow windowC = new IntervalWindow(new Instant(20), new Instant(30));
-
-    Iterable<KV<Integer,
-                Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1, (Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>) ImmutableList.of(
-                KV.of(KV.of(1L, windowA),
-                    WindowedValue.of(110L, new Instant(1), windowA, PaneInfo.NO_FIRING)),
-                // same window same key as to previous
-                KV.of(KV.of(1L, windowA),
-                    WindowedValue.of(111L, new Instant(2), windowA, PaneInfo.NO_FIRING)),
-                // same window different key as to previous
-                KV.of(KV.of(2L, windowA),
-                    WindowedValue.of(120L, new Instant(3), windowA, PaneInfo.NO_FIRING)),
-                // different window same key as to previous
-                KV.of(KV.of(2L, windowB),
-                    WindowedValue.of(210L, new Instant(11), windowB, PaneInfo.NO_FIRING)),
-                // different window and different key as to previous
-                KV.of(KV.of(3L, windowB),
-                    WindowedValue.of(220L, new Instant(12), windowB, PaneInfo.NO_FIRING)))),
-            KV.of(2, (Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>) ImmutableList.of(
-                // different shard
-                KV.of(KV.of(4L, windowC),
-                    WindowedValue.of(330L, new Instant(21), windowC, PaneInfo.NO_FIRING)))));
-
-    // The order of the output elements is important relative to processing order
-    assertThat(doFnTester.processBundle(inputElements), contains(
-        IsmRecord.of(
-            ImmutableList.of(1L, windowA, 0L),
-            WindowedValue.of(110L, new Instant(1), windowA, PaneInfo.NO_FIRING)),
-        IsmRecord.of(
-            ImmutableList.of(1L, windowA, 1L),
-            WindowedValue.of(111L, new Instant(2), windowA, PaneInfo.NO_FIRING)),
-        IsmRecord.of(
-            ImmutableList.of(2L, windowA, 0L),
-            WindowedValue.of(120L, new Instant(3), windowA, PaneInfo.NO_FIRING)),
-        IsmRecord.of(
-            ImmutableList.of(2L, windowB, 0L),
-            WindowedValue.of(210L, new Instant(11), windowB, PaneInfo.NO_FIRING)),
-        IsmRecord.of(
-            ImmutableList.of(3L, windowB, 0L),
-            WindowedValue.of(220L, new Instant(12), windowB, PaneInfo.NO_FIRING)),
-        IsmRecord.of(
-            ImmutableList.of(4L, windowC, 0L),
-            WindowedValue.of(330L, new Instant(21), windowC, PaneInfo.NO_FIRING))));
-
-    // Verify the number of unique keys per window.
-    assertThat(doFnTester.takeSideOutputElements(outputForSizeTag), contains(
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowA)),
-            KV.of(windowA, 2L)),
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowB)),
-            KV.of(windowB, 2L)),
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowC)),
-            KV.of(windowC, 1L))
-        ));
-
-    // Verify the output for the unique keys.
-    assertThat(doFnTester.takeSideOutputElements(outputForEntrySetTag), contains(
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowA)),
-            KV.of(windowA, 1L)),
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowA)),
-            KV.of(windowA, 2L)),
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowB)),
-            KV.of(windowB, 2L)),
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowB)),
-            KV.of(windowB, 3L)),
-        KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowC)),
-            KV.of(windowC, 4L))
-        ));
-  }
-
-  @Test
-  public void testToIsmRecordForMapLikeDoFnWithoutUniqueKeysThrowsException() throws Exception {
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForSizeTag = new TupleTag<>();
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForEntrySetTag = new TupleTag<>();
-
-    Coder<Long> keyCoder = VarLongCoder.of();
-    Coder<IntervalWindow> windowCoder = IntervalWindow.getCoder();
-
-    IsmRecordCoder<WindowedValue<Long>> ismCoder = IsmRecordCoder.of(
-        1,
-        2,
-        ImmutableList.<Coder<?>>of(
-            MetadataKeyCoder.of(keyCoder),
-            IntervalWindow.getCoder(),
-            BigEndianLongCoder.of()),
-        FullWindowedValueCoder.of(VarLongCoder.of(), windowCoder));
-
-    DoFnTester<KV<Integer, Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>>,
-               IsmRecord<WindowedValue<Long>>> doFnTester =
-        DoFnTester.of(new BatchViewAsMultimap.ToIsmRecordForMapLikeDoFn<>(
-            outputForSizeTag,
-            outputForEntrySetTag,
-            windowCoder,
-            keyCoder,
-            ismCoder,
-            true /* unique keys */));
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-
-    Iterable<KV<Integer,
-                Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1, (Iterable<KV<KV<Long, IntervalWindow>, WindowedValue<Long>>>) ImmutableList.of(
-                KV.of(KV.of(1L, windowA),
-                    WindowedValue.of(110L, new Instant(1), windowA, PaneInfo.NO_FIRING)),
-                // same window same key as to previous
-                KV.of(KV.of(1L, windowA),
-                    WindowedValue.of(111L, new Instant(2), windowA, PaneInfo.NO_FIRING)))));
-
-    thrown.expect(IllegalStateException.class);
-    thrown.expectMessage("Unique keys are expected but found key");
-    doFnTester.processBundle(inputElements);
-  }
-
-  @Test
-  public void testToIsmMetadataRecordForSizeDoFn() throws Exception {
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForSizeTag = new TupleTag<>();
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForEntrySetTag = new TupleTag<>();
-
-    Coder<Long> keyCoder = VarLongCoder.of();
-    Coder<IntervalWindow> windowCoder = IntervalWindow.getCoder();
-
-    IsmRecordCoder<WindowedValue<Long>> ismCoder = IsmRecordCoder.of(
-        1,
-        2,
-        ImmutableList.<Coder<?>>of(
-            MetadataKeyCoder.of(keyCoder),
-            IntervalWindow.getCoder(),
-            BigEndianLongCoder.of()),
-        FullWindowedValueCoder.of(VarLongCoder.of(), windowCoder));
-
-    DoFnTester<KV<Integer, Iterable<KV<IntervalWindow, Long>>>,
-               IsmRecord<WindowedValue<Long>>> doFnTester = DoFnTester.of(
-        new BatchViewAsMultimap.ToIsmMetadataRecordForSizeDoFn<Long, Long, IntervalWindow>(
-            windowCoder));
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-    IntervalWindow windowB = new IntervalWindow(new Instant(10), new Instant(20));
-    IntervalWindow windowC = new IntervalWindow(new Instant(20), new Instant(30));
-
-    Iterable<KV<Integer, Iterable<KV<IntervalWindow, Long>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1,
-                (Iterable<KV<IntervalWindow, Long>>) ImmutableList.of(
-                    KV.of(windowA, 2L),
-                    KV.of(windowA, 3L),
-                    KV.of(windowB, 7L))),
-            KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowB)),
-                (Iterable<KV<IntervalWindow, Long>>) ImmutableList.of(
-                    KV.of(windowC, 9L))));
-
-    // The order of the output elements is important relative to processing order
-    assertThat(doFnTester.processBundle(inputElements), contains(
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowA, 0L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 5L)),
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowB, 0L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 7L)),
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowC, 0L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 9L))
-        ));
-  }
-
-  @Test
-  public void testToIsmMetadataRecordForKeyDoFn() throws Exception {
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForSizeTag = new TupleTag<>();
-    TupleTag<KV<Integer, KV<IntervalWindow, Long>>> outputForEntrySetTag = new TupleTag<>();
-
-    Coder<Long> keyCoder = VarLongCoder.of();
-    Coder<IntervalWindow> windowCoder = IntervalWindow.getCoder();
-
-    IsmRecordCoder<WindowedValue<Long>> ismCoder = IsmRecordCoder.of(
-        1,
-        2,
-        ImmutableList.<Coder<?>>of(
-            MetadataKeyCoder.of(keyCoder),
-            IntervalWindow.getCoder(),
-            BigEndianLongCoder.of()),
-        FullWindowedValueCoder.of(VarLongCoder.of(), windowCoder));
-
-    DoFnTester<KV<Integer, Iterable<KV<IntervalWindow, Long>>>,
-               IsmRecord<WindowedValue<Long>>> doFnTester = DoFnTester.of(
-        new BatchViewAsMultimap.ToIsmMetadataRecordForKeyDoFn<Long, Long, IntervalWindow>(
-            keyCoder, windowCoder));
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-    IntervalWindow windowB = new IntervalWindow(new Instant(10), new Instant(20));
-    IntervalWindow windowC = new IntervalWindow(new Instant(20), new Instant(30));
-
-    Iterable<KV<Integer, Iterable<KV<IntervalWindow, Long>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1,
-                (Iterable<KV<IntervalWindow, Long>>) ImmutableList.of(
-                    KV.of(windowA, 2L),
-                    // same window as previous
-                    KV.of(windowA, 3L),
-                    // different window as previous
-                    KV.of(windowB, 3L))),
-            KV.of(ismCoder.hash(ImmutableList.of(IsmFormat.getMetadataKey(), windowB)),
-                (Iterable<KV<IntervalWindow, Long>>) ImmutableList.of(
-                    KV.of(windowC, 3L))));
-
-    // The order of the output elements is important relative to processing order
-    assertThat(doFnTester.processBundle(inputElements), contains(
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowA, 1L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 2L)),
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowA, 2L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 3L)),
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowB, 1L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 3L)),
-        IsmRecord.<WindowedValue<Long>>meta(
-            ImmutableList.of(IsmFormat.getMetadataKey(), windowC, 1L),
-            CoderUtils.encodeToByteArray(VarLongCoder.of(), 3L))
-        ));
-  }
-
-  @Test
-  public void testToMapDoFn() throws Exception {
-    Coder<IntervalWindow> windowCoder = IntervalWindow.getCoder();
-
-    DoFnTester<KV<Integer, Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>>,
-                  IsmRecord<WindowedValue<TransformedMap<Long,
-                                                         WindowedValue<Long>,
-                                                         Long>>>> doFnTester =
-        DoFnTester.of(new BatchViewAsMap.ToMapDoFn<Long, Long, IntervalWindow>(windowCoder));
-
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-    IntervalWindow windowB = new IntervalWindow(new Instant(10), new Instant(20));
-    IntervalWindow windowC = new IntervalWindow(new Instant(20), new Instant(30));
-
-    Iterable<KV<Integer,
-             Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1,
-                (Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>) ImmutableList.of(
-                    KV.of(windowA, WindowedValue.of(
-                        KV.of(1L, 11L), new Instant(3), windowA, PaneInfo.NO_FIRING)),
-                    KV.of(windowA, WindowedValue.of(
-                        KV.of(2L, 21L), new Instant(7), windowA, PaneInfo.NO_FIRING)),
-                    KV.of(windowB, WindowedValue.of(
-                        KV.of(2L, 21L), new Instant(13), windowB, PaneInfo.NO_FIRING)),
-                    KV.of(windowB, WindowedValue.of(
-                        KV.of(3L, 31L), new Instant(15), windowB, PaneInfo.NO_FIRING)))),
-            KV.of(2,
-                (Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>) ImmutableList.of(
-                    KV.of(windowC, WindowedValue.of(
-                        KV.of(4L, 41L), new Instant(25), windowC, PaneInfo.NO_FIRING)))));
-
-    // The order of the output elements is important relative to processing order
-    List<IsmRecord<WindowedValue<TransformedMap<Long,
-                                                WindowedValue<Long>,
-                                                Long>>>> output =
-                                                doFnTester.processBundle(inputElements);
-    assertEquals(3, output.size());
-    Map<Long, Long> outputMap;
-
-    outputMap = output.get(0).getValue().getValue();
-    assertEquals(2, outputMap.size());
-    assertEquals(ImmutableMap.of(1L, 11L, 2L, 21L), outputMap);
-
-    outputMap = output.get(1).getValue().getValue();
-    assertEquals(2, outputMap.size());
-    assertEquals(ImmutableMap.of(2L, 21L, 3L, 31L), outputMap);
-
-    outputMap = output.get(2).getValue().getValue();
-    assertEquals(1, outputMap.size());
-    assertEquals(ImmutableMap.of(4L, 41L), outputMap);
-  }
-
-  @Test
-  public void testToMultimapDoFn() throws Exception {
-    Coder<IntervalWindow> windowCoder = IntervalWindow.getCoder();
-
-    DoFnTester<KV<Integer, Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>>,
-                  IsmRecord<WindowedValue<TransformedMap<Long,
-                                                         Iterable<WindowedValue<Long>>,
-                                                         Iterable<Long>>>>> doFnTester =
-        DoFnTester.of(
-            new BatchViewAsMultimap.ToMultimapDoFn<Long, Long, IntervalWindow>(windowCoder));
-
-
-    IntervalWindow windowA = new IntervalWindow(new Instant(0), new Instant(10));
-    IntervalWindow windowB = new IntervalWindow(new Instant(10), new Instant(20));
-    IntervalWindow windowC = new IntervalWindow(new Instant(20), new Instant(30));
-
-    Iterable<KV<Integer,
-             Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>>> inputElements =
-        ImmutableList.of(
-            KV.of(1,
-                (Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>) ImmutableList.of(
-                    KV.of(windowA, WindowedValue.of(
-                        KV.of(1L, 11L), new Instant(3), windowA, PaneInfo.NO_FIRING)),
-                    KV.of(windowA, WindowedValue.of(
-                        KV.of(1L, 12L), new Instant(5), windowA, PaneInfo.NO_FIRING)),
-                    KV.of(windowA, WindowedValue.of(
-                        KV.of(2L, 21L), new Instant(7), windowA, PaneInfo.NO_FIRING)),
-                    KV.of(windowB, WindowedValue.of(
-                        KV.of(2L, 21L), new Instant(13), windowB, PaneInfo.NO_FIRING)),
-                    KV.of(windowB, WindowedValue.of(
-                        KV.of(3L, 31L), new Instant(15), windowB, PaneInfo.NO_FIRING)))),
-            KV.of(2,
-                (Iterable<KV<IntervalWindow, WindowedValue<KV<Long, Long>>>>) ImmutableList.of(
-                    KV.of(windowC, WindowedValue.of(
-                        KV.of(4L, 41L), new Instant(25), windowC, PaneInfo.NO_FIRING)))));
-
-    // The order of the output elements is important relative to processing order
-    List<IsmRecord<WindowedValue<TransformedMap<Long,
-                                                Iterable<WindowedValue<Long>>,
-                                                Iterable<Long>>>>> output =
-                                                doFnTester.processBundle(inputElements);
-    assertEquals(3, output.size());
-    Map<Long, Iterable<Long>> outputMap;
-
-    outputMap = output.get(0).getValue().getValue();
-    assertEquals(2, outputMap.size());
-    assertThat(outputMap.get(1L), containsInAnyOrder(11L, 12L));
-    assertThat(outputMap.get(2L), containsInAnyOrder(21L));
-
-    outputMap = output.get(1).getValue().getValue();
-    assertEquals(2, outputMap.size());
-    assertThat(outputMap.get(2L), containsInAnyOrder(21L));
-    assertThat(outputMap.get(3L), containsInAnyOrder(31L));
-
-    outputMap = output.get(2).getValue().getValue();
-    assertEquals(1, outputMap.size());
-    assertThat(outputMap.get(4L), containsInAnyOrder(41L));
-  }
-
   /**
-   * Tests that the {@link DataflowRunner} with {@code --templateLocation} returns normally
-   * when the runner issuccessfully run.
+   * Tests that the {@link DataflowRunner} with {@code --templateLocation} returns normally when the
+   * runner is successfully run.
    */
   @Test
   public void testTemplateRunnerFullCompletion() throws Exception {
@@ -1587,5 +1185,148 @@ public class DataflowRunnerTest {
     thrown.expectMessage("Cannot create output file at");
     thrown.expect(RuntimeException.class);
     p.run();
+  }
+
+  @Test
+  public void testHasExperiment() {
+    DataflowPipelineDebugOptions options =
+        PipelineOptionsFactory.as(DataflowPipelineDebugOptions.class);
+
+    options.setExperiments(null);
+    assertFalse(DataflowRunner.hasExperiment(options, "foo"));
+
+    options.setExperiments(ImmutableList.of("foo", "bar"));
+    assertTrue(DataflowRunner.hasExperiment(options, "foo"));
+    assertTrue(DataflowRunner.hasExperiment(options, "bar"));
+    assertFalse(DataflowRunner.hasExperiment(options, "baz"));
+    assertFalse(DataflowRunner.hasExperiment(options, "ba"));
+    assertFalse(DataflowRunner.hasExperiment(options, "BAR"));
+  }
+
+  @Test
+  public void testWorkerHarnessContainerImage() {
+    DataflowPipelineOptions options = PipelineOptionsFactory.as(DataflowPipelineOptions.class);
+
+    // default image set
+    options.setWorkerHarnessContainerImage("some-container");
+    assertThat(getContainerImageForJob(options), equalTo("some-container"));
+
+    // batch, legacy
+    options.setWorkerHarnessContainerImage("gcr.io/IMAGE/foo");
+    options.setExperiments(null);
+    options.setStreaming(false);
+    assertThat(
+        getContainerImageForJob(options), equalTo("gcr.io/beam-java-batch/foo"));
+    // streaming, legacy
+    options.setStreaming(true);
+    assertThat(
+        getContainerImageForJob(options), equalTo("gcr.io/beam-java-streaming/foo"));
+    // streaming, fnapi
+    options.setExperiments(ImmutableList.of("experiment1", "beam_fn_api"));
+    assertThat(
+        getContainerImageForJob(options), equalTo("gcr.io/java/foo"));
+  }
+
+  @Test
+  public void testStreamingWriteWithNoShardingReturnsNewTransform() {
+    PipelineOptions options = TestPipeline.testingPipelineOptions();
+    options.as(DataflowPipelineWorkerPoolOptions.class).setMaxNumWorkers(10);
+    testStreamingWriteOverride(options, 20);
+  }
+
+  @Test
+  public void testStreamingWriteWithNoShardingReturnsNewTransformMaxWorkersUnset() {
+    PipelineOptions options = TestPipeline.testingPipelineOptions();
+    testStreamingWriteOverride(options, StreamingShardedWriteFactory.DEFAULT_NUM_SHARDS);
+  }
+
+  private void verifyMergingStatefulParDoRejected(PipelineOptions options) throws Exception {
+    Pipeline p = Pipeline.create(options);
+
+    p.apply(Create.of(KV.of(13, 42)))
+        .apply(Window.<KV<Integer, Integer>>into(Sessions.withGapDuration(Duration.millis(1))))
+        .apply(ParDo.of(new DoFn<KV<Integer, Integer>, Void>() {
+          @StateId("fizzle")
+          private final StateSpec<ValueState<Void>> voidState = StateSpecs.value();
+
+          @ProcessElement
+          public void process() {}
+        }));
+
+    thrown.expectMessage("merging");
+    thrown.expect(UnsupportedOperationException.class);
+    p.run();
+  }
+
+  @Test
+  public void testMergingStatefulRejectedInStreaming() throws Exception {
+    PipelineOptions options = buildPipelineOptions();
+    options.as(StreamingOptions.class).setStreaming(true);
+    verifyMergingStatefulParDoRejected(options);
+  }
+
+  @Test
+  public void testMergingStatefulRejectedInBatch() throws Exception {
+    PipelineOptions options = buildPipelineOptions();
+    options.as(StreamingOptions.class).setStreaming(false);
+    verifyMergingStatefulParDoRejected(options);
+  }
+
+  private void testStreamingWriteOverride(PipelineOptions options, int expectedNumShards) {
+    TestPipeline p = TestPipeline.fromOptions(options);
+
+    StreamingShardedWriteFactory<Object, Void, Object> factory =
+        new StreamingShardedWriteFactory<>(p.getOptions());
+    WriteFiles<Object, Void, Object> original = WriteFiles.to(new TestSink(tmpFolder.toString()));
+    PCollection<Object> objs = (PCollection) p.apply(Create.empty(VoidCoder.of()));
+    AppliedPTransform<PCollection<Object>, WriteFilesResult<Void>, WriteFiles<Object, Void, Object>>
+        originalApplication =
+            AppliedPTransform.of(
+                "writefiles",
+                objs.expand(),
+                Collections.<TupleTag<?>, PValue>emptyMap(),
+                original,
+                p);
+
+    WriteFiles<Object, Void, Object> replacement =
+        (WriteFiles<Object, Void, Object>)
+            factory.getReplacementTransform(originalApplication).getTransform();
+    assertThat(replacement, not(equalTo((Object) original)));
+    assertThat(replacement.getNumShards().get(), equalTo(expectedNumShards));
+  }
+
+  private static class TestSink extends FileBasedSink<Object, Void, Object> {
+    @Override
+    public void validate(PipelineOptions options) {}
+
+    TestSink(String tmpFolder) {
+      super(
+          StaticValueProvider.of(FileSystems.matchNewResource(tmpFolder, true)),
+          DynamicFileDestinations.constant(
+              new FilenamePolicy() {
+                @Override
+                public ResourceId windowedFilename(
+                    int shardNumber,
+                    int numShards,
+                    BoundedWindow window,
+                    PaneInfo paneInfo,
+                    OutputFileHints outputFileHints) {
+                  throw new UnsupportedOperationException("should not be called");
+                }
+
+                @Nullable
+                @Override
+                public ResourceId unwindowedFilename(
+                    int shardNumber, int numShards, OutputFileHints outputFileHints) {
+                  throw new UnsupportedOperationException("should not be called");
+                }
+              },
+              SerializableFunctions.identity()));
+    }
+
+    @Override
+    public WriteOperation<Void, Object> createWriteOperation() {
+      throw new IllegalArgumentException("Should not be used");
+    }
   }
 }

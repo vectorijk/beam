@@ -17,8 +17,10 @@
  */
 package org.apache.beam.sdk.coders;
 
+import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -33,10 +35,10 @@ import org.apache.beam.sdk.testing.TestPipeline;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.util.CloudObject;
 import org.apache.beam.sdk.util.CoderUtils;
-import org.apache.beam.sdk.util.Serializer;
+import org.apache.beam.sdk.util.SerializableUtils;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -121,13 +123,17 @@ public class SerializableCoderTest implements Serializable {
   public void testSerializableCoderConstruction() throws Exception {
     SerializableCoder<MyRecord> coder = SerializableCoder.of(MyRecord.class);
     assertEquals(coder.getRecordType(), MyRecord.class);
+    CoderProperties.coderSerializable(coder);
 
-    CloudObject encoding = coder.asCloudObject();
-    Assert.assertThat(encoding.getClassName(),
-        Matchers.containsString(SerializableCoder.class.getSimpleName()));
+    SerializableCoder<?> decoded = SerializableUtils.clone(coder);
+    assertThat(decoded.getRecordType(), Matchers.<Object>equalTo(MyRecord.class));
+  }
 
-    Coder<?> decoded = Serializer.deserialize(encoding, Coder.class);
-    Assert.assertThat(decoded, Matchers.instanceOf(SerializableCoder.class));
+  @Test
+  public <T extends Serializable> void testSerializableCoderIsSerializableWithGenericTypeToken()
+  throws Exception {
+    SerializableCoder<T> coder = SerializableCoder.of(new TypeDescriptor<T>() {});
+    CoderProperties.coderSerializable(coder);
   }
 
   @Test
@@ -182,15 +188,15 @@ public class SerializableCoderTest implements Serializable {
     // Encode both strings into NESTED form.
     byte[] nestedEncoding;
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
-      coder.encode(source, os, Coder.Context.NESTED);
-      coder.encode(source2, os, Coder.Context.NESTED);
+      coder.encode(source, os);
+      coder.encode(source2, os);
       nestedEncoding = os.toByteArray();
     }
 
     // Decode from NESTED form.
     try (ByteArrayInputStream is = new ByteArrayInputStream(nestedEncoding)) {
-      assertEquals(source, coder.decode(is, Coder.Context.NESTED));
-      assertEquals(source2, coder.decode(is, Coder.Context.NESTED));
+      assertEquals(source, coder.decode(is));
+      assertEquals(source2, coder.decode(is));
       assertEquals(0, is.available());
     }
   }
@@ -207,29 +213,38 @@ public class SerializableCoderTest implements Serializable {
     Coder<String> coder = SerializableCoder.of(String.class);
     byte[] encodedBytes;
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
-      coder.encode(null, os, Coder.Context.NESTED);
-      coder.encode("TestValue", os, Coder.Context.NESTED);
-      coder.encode(null, os, Coder.Context.NESTED);
-      coder.encode("TestValue2", os, Coder.Context.NESTED);
-      coder.encode(null, os, Coder.Context.NESTED);
+      coder.encode(null, os);
+      coder.encode("TestValue", os);
+      coder.encode(null, os);
+      coder.encode("TestValue2", os);
+      coder.encode(null, os);
       encodedBytes = os.toByteArray();
     }
 
     try (ByteArrayInputStream is = new ByteArrayInputStream(encodedBytes)) {
-      assertNull(coder.decode(is, Coder.Context.NESTED));
-      assertEquals("TestValue", coder.decode(is,  Coder.Context.NESTED));
-      assertNull(coder.decode(is, Coder.Context.NESTED));
-      assertEquals("TestValue2", coder.decode(is,  Coder.Context.NESTED));
-      assertNull(coder.decode(is, Coder.Context.NESTED));
+      assertNull(coder.decode(is));
+      assertEquals("TestValue", coder.decode(is));
+      assertNull(coder.decode(is));
+      assertEquals("TestValue2", coder.decode(is));
+      assertNull(coder.decode(is));
       assertEquals(0, is.available());
     }
   }
 
   @Test
-  public void testPojoEncodingId() throws Exception {
-    Coder<MyRecord> coder = SerializableCoder.of(MyRecord.class);
-    CoderProperties.coderHasEncodingId(
-        coder,
-        String.format("%s:%s", MyRecord.class.getName(), MyRecord.serialVersionUID));
+  public void testEncodedTypeDescriptor() throws Exception {
+    assertThat(
+        SerializableCoder.of(MyRecord.class).getEncodedTypeDescriptor(),
+        Matchers.equalTo(TypeDescriptor.of(MyRecord.class)));
+  }
+
+  private static class AutoRegistration implements Serializable {
+    private static final long serialVersionUID = 42L;
+  }
+
+  @Test
+  public void testSerializableCoderProviderIsRegistered() throws Exception {
+    assertThat(CoderRegistry.createDefault().getCoder(AutoRegistration.class),
+        instanceOf(SerializableCoder.class));
   }
 }

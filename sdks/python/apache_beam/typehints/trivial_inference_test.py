@@ -18,7 +18,6 @@
 """Tests for apache_beam.typehints.trivial_inference."""
 import unittest
 
-
 from apache_beam.typehints import trivial_inference
 from apache_beam.typehints import typehints
 
@@ -59,6 +58,13 @@ class TrivialInferenceTest(unittest.TestCase):
                           reverse, [trivial_inference.Const((1.0, 1))])
     self.assertReturnType(any_tuple,
                           reverse, [trivial_inference.Const((1, 2, 3))])
+
+  def testNoneReturn(self):
+    def func(a):
+      if a == 5:
+        return a
+      return None
+    self.assertReturnType(typehints.Union[int, type(None)], func, [int])
 
   def testListComprehension(self):
     self.assertReturnType(
@@ -130,8 +136,7 @@ class TrivialInferenceTest(unittest.TestCase):
     def some_fn(v):
       if v:
         return 1
-      else:
-        return 2
+      return 2
 
     self.assertReturnType(int, some_fn)
 

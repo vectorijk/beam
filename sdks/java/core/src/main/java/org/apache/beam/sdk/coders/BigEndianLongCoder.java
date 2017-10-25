@@ -17,7 +17,6 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
@@ -25,13 +24,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UTFDataFormatException;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link BigEndianLongCoder} encodes {@link Long}s in 8 bytes, big-endian.
  */
 public class BigEndianLongCoder extends AtomicCoder<Long> {
 
-  @JsonCreator
   public static BigEndianLongCoder of() {
     return INSTANCE;
   }
@@ -39,11 +38,12 @@ public class BigEndianLongCoder extends AtomicCoder<Long> {
   /////////////////////////////////////////////////////////////////////////////
 
   private static final BigEndianLongCoder INSTANCE = new BigEndianLongCoder();
+  private static final TypeDescriptor<Long> TYPE_DESCRIPTOR = new TypeDescriptor<Long>() {};
 
   private BigEndianLongCoder() {}
 
   @Override
-  public void encode(Long value, OutputStream outStream, Context context)
+  public void encode(Long value, OutputStream outStream)
       throws IOException, CoderException {
     if (value == null) {
       throw new CoderException("cannot encode a null Long");
@@ -52,7 +52,7 @@ public class BigEndianLongCoder extends AtomicCoder<Long> {
   }
 
   @Override
-  public Long decode(InputStream inStream, Context context)
+  public Long decode(InputStream inStream)
       throws IOException, CoderException {
     try {
       return new DataInputStream(inStream).readLong();
@@ -62,6 +62,9 @@ public class BigEndianLongCoder extends AtomicCoder<Long> {
       throw new CoderException(exn);
     }
   }
+
+  @Override
+  public void verifyDeterministic() {}
 
   /**
    * {@inheritDoc}
@@ -79,8 +82,13 @@ public class BigEndianLongCoder extends AtomicCoder<Long> {
    * @return {@code true}, since {@link #getEncodedElementByteSize} returns a constant.
    */
   @Override
-  public boolean isRegisterByteSizeObserverCheap(Long value, Context context) {
+  public boolean isRegisterByteSizeObserverCheap(Long value) {
     return true;
+  }
+
+  @Override
+  public TypeDescriptor<Long> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
   }
 
   /**
@@ -89,7 +97,7 @@ public class BigEndianLongCoder extends AtomicCoder<Long> {
    * @return {@code 8}, the byte size of a big-endian encoded {@code Long}.
    */
   @Override
-  protected long getEncodedElementByteSize(Long value, Context context)
+  protected long getEncodedElementByteSize(Long value)
       throws Exception {
     if (value == null) {
       throw new CoderException("cannot encode a null Long");

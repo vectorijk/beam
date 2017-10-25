@@ -21,7 +21,6 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.emptyIterable;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasItem;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
@@ -37,16 +36,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.Coder.NonDeterministicException;
 import org.apache.beam.sdk.coders.CoderException;
 import org.apache.beam.sdk.util.CoderUtils;
-import org.apache.beam.sdk.util.PropertyNames;
 import org.apache.beam.sdk.util.SerializableUtils;
-import org.apache.beam.sdk.util.Serializer;
-import org.apache.beam.sdk.util.Structs;
 import org.apache.beam.sdk.util.UnownedInputStream;
 import org.apache.beam.sdk.util.UnownedOutputStream;
 import org.apache.beam.sdk.util.common.ElementByteSizeObserver;
@@ -87,7 +82,6 @@ public class CoderProperties {
   public static <T> void coderDeterministicInContext(
       Coder<T> coder, Coder.Context context, T value1, T value2)
       throws Exception {
-
     try {
       coder.verifyDeterministic();
     } catch (NonDeterministicException e) {
@@ -189,22 +183,34 @@ public class CoderProperties {
     }
   }
 
+  /**
+   * Verifies that the given {@code Coder<T>} can be correctly serialized and
+   * deserialized.
+   */
   public static <T> void coderSerializable(Coder<T> coder) {
     SerializableUtils.ensureSerializable(coder);
   }
 
+  /**
+   * Verifies that for the given {@code Coder<T>} and values of
+   * type {@code T}, the values are equal if and only if the
+   * encoded bytes are equal.
+   */
   public static <T> void coderConsistentWithEquals(
       Coder<T> coder, T value1, T value2)
       throws Exception {
-
     for (Coder.Context context : ALL_CONTEXTS) {
       CoderProperties.<T>coderConsistentWithEqualsInContext(coder, context, value1, value2);
     }
   }
 
+  /**
+   * Verifies that for the given {@code Coder<T>}, {@code Coder.Context}, and
+   * values of type {@code T}, the values are equal if and only if the
+   * encoded bytes are equal, in any {@code Coder.Context}.
+   */
   public static <T> void coderConsistentWithEqualsInContext(
       Coder<T> coder, Coder.Context context, T value1, T value2) throws Exception {
-
     assertEquals(
         value1.equals(value2),
         Arrays.equals(
@@ -212,37 +218,27 @@ public class CoderProperties {
             encode(coder, context, value2)));
   }
 
-  public static <T> void coderHasEncodingId(Coder<T> coder, String encodingId) throws Exception {
-    assertThat(coder.getEncodingId(), equalTo(encodingId));
-    assertThat(Structs.getString(coder.asCloudObject(), PropertyNames.ENCODING_ID, ""),
-        equalTo(encodingId));
-  }
-
-  public static <T> void coderAllowsEncoding(Coder<T> coder, String encodingId) throws Exception {
-    assertThat(coder.getAllowedEncodings(), hasItem(encodingId));
-    assertThat(
-        String.format("Expected to find \"%s\" in property \"%s\" of %s",
-            encodingId, PropertyNames.ALLOWED_ENCODINGS, coder.asCloudObject()),
-        Structs.getStrings(
-            coder.asCloudObject(),
-            PropertyNames.ALLOWED_ENCODINGS,
-            Collections.<String>emptyList()),
-        hasItem(encodingId));
-  }
-
+  /**
+   * Verifies that for the given {@code Coder<T>} and values of
+   * type {@code T}, the structural values are equal if and only if the
+   * encoded bytes are equal.
+   */
   public static <T> void structuralValueConsistentWithEquals(
       Coder<T> coder, T value1, T value2)
       throws Exception {
-
     for (Coder.Context context : ALL_CONTEXTS) {
       CoderProperties.<T>structuralValueConsistentWithEqualsInContext(
           coder, context, value1, value2);
     }
   }
 
+  /**
+   * Verifies that for the given {@code Coder<T>}, {@code Coder.Context}, and
+   * values of type {@code T}, the structural values are equal if and only if the
+   * encoded bytes are equal, in any {@code Coder.Context}.
+   */
   public static <T> void structuralValueConsistentWithEqualsInContext(
       Coder<T> coder, Coder.Context context, T value1, T value2) throws Exception {
-
     assertEquals(
         coder.structuralValue(value1).equals(coder.structuralValue(value2)),
         Arrays.equals(
@@ -250,14 +246,41 @@ public class CoderProperties {
             encode(coder, context, value2)));
   }
 
+  /**
+   * Verifies that for the given {@code Coder<T>} and value of type {@code T},
+   * the structural value is equal to the structural value yield by encoding
+   * and decoding the original value.
+   *
+   * <p>This is useful to test the correct implementation of a Coder structural
+   * equality with values that don't implement the equals contract.
+   */
+  public static <T> void structuralValueDecodeEncodeEqual(
+          Coder<T> coder, T value)
+          throws Exception {
+    for (Coder.Context context : ALL_CONTEXTS) {
+      CoderProperties.<T>structuralValueDecodeEncodeEqualInContext(
+              coder, context, value);
+    }
+  }
+
+  /**
+   * Verifies that for the given {@code Coder<T>}, {@code Coder.Context},
+   * and value of type {@code T}, the structural value is equal to the
+   * structural value yield by encoding and decoding the original value,
+   * in any {@code Coder.Context}.
+   */
+  public static <T> void structuralValueDecodeEncodeEqualInContext(
+          Coder<T> coder, Coder.Context context, T value) throws Exception {
+    assertEquals(
+            coder.structuralValue(value),
+            coder.structuralValue(decodeEncode(coder, context, value)));
+  }
 
   private static final String DECODING_WIRE_FORMAT_MESSAGE =
       "Decoded value from known wire format does not match expected value."
-      + " This probably means that this Coder no longer correctly decodes"
-      + " a prior wire format. Changing the wire formats this Coder can read"
-      + " should be avoided, as it is likely to cause breakage."
-      + " If you truly intend to change the backwards compatibility for this Coder "
-      + " then you must remove any now-unsupported encodings from getAllowedEncodings().";
+          + " This probably means that this Coder no longer correctly decodes"
+          + " a prior wire format. Changing the wire formats this Coder can read"
+          + " should be avoided, as it is likely to cause breakage.";
 
   public static <T> void coderDecodesBase64(Coder<T> coder, String base64Encoding, T value)
       throws Exception {
@@ -278,9 +301,7 @@ public class CoderProperties {
   private static final String ENCODING_WIRE_FORMAT_MESSAGE =
       "Encoded value does not match expected wire format."
       + " Changing the wire format should be avoided, as it is likely to cause breakage."
-      + " If you truly intend to change the wire format for this Coder "
-      + " then you must update getEncodingId() to a new value and add any supported"
-      + " prior formats to getAllowedEncodings()."
+      + " If you truly intend to change the wire format for this Coder,"
       + " See org.apache.beam.sdk.coders.PrintBase64Encoding for how to generate"
       + " new test data.";
 
@@ -330,7 +351,7 @@ public class CoderProperties {
   static <T> byte[] encode(
       Coder<T> coder, Coder.Context context, T value) throws CoderException, IOException {
     @SuppressWarnings("unchecked")
-    Coder<T> deserializedCoder = Serializer.deserialize(coder.asCloudObject(), Coder.class);
+    Coder<T> deserializedCoder = SerializableUtils.clone(coder);
 
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     deserializedCoder.encode(value, new UnownedOutputStream(os), context);
@@ -341,7 +362,7 @@ public class CoderProperties {
   static <T> T decode(
       Coder<T> coder, Coder.Context context, byte[] bytes) throws CoderException, IOException {
     @SuppressWarnings("unchecked")
-    Coder<T> deserializedCoder = Serializer.deserialize(coder.asCloudObject(), Coder.class);
+    Coder<T> deserializedCoder = SerializableUtils.clone(coder);
 
     byte[] buffer;
     if (context == Coder.Context.NESTED) {
@@ -374,16 +395,19 @@ public class CoderProperties {
       throws Exception {
     TestElementByteSizeObserver observer = new TestElementByteSizeObserver();
 
-    CountingOutputStream os = new CountingOutputStream(ByteStreams.nullOutputStream());
-    for (T elem : elements) {
-      coder.registerByteSizeObserver(elem, observer, context);
-      coder.encode(elem, os, context);
-      observer.advance();
-    }
-    long expectedLength = os.getCount();
+    try (CountingOutputStream os = new CountingOutputStream(ByteStreams.nullOutputStream())) {
+      for (T elem : elements) {
+        coder.registerByteSizeObserver(elem, observer);
+        coder.encode(elem, os, context);
+        observer.advance();
+      }
+      long expectedLength = os.getCount();
 
-    assertEquals(expectedLength, observer.getSum());
-    assertEquals(elements.length, observer.getCount());
+      if (!context.isWholeStream) {
+        assertEquals(expectedLength, observer.getSum());
+      }
+      assertEquals(elements.length, observer.getCount());
+    }
   }
 
   /**

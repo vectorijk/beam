@@ -17,6 +17,8 @@
  */
 package org.apache.beam.runners.direct;
 
+import org.apache.beam.sdk.annotations.Experimental;
+import org.apache.beam.sdk.annotations.Experimental.Kind;
 import org.apache.beam.sdk.options.ApplicationNameOptions;
 import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.DefaultValueFactory;
@@ -27,17 +29,6 @@ import org.apache.beam.sdk.options.PipelineOptions;
  * Options that can be used to configure the {@link org.apache.beam.runners.direct.DirectRunner}.
  */
 public interface DirectOptions extends PipelineOptions, ApplicationNameOptions {
-  @Default.Boolean(true)
-  @Description(
-      "If the pipeline should shut down producers which have reached the maximum "
-          + "representable watermark. If this is set to true, a pipeline in which all PTransforms "
-          + "have reached the maximum watermark will be shut down, even if there are unbounded "
-          + "sources that could produce additional (late) data. By default, if the pipeline "
-          + "contains any unbounded PCollections, it will run until explicitly shut down.")
-  boolean isShutdownUnboundedProducersWithMaxWatermark();
-
-  void setShutdownUnboundedProducersWithMaxWatermark(boolean shutdown);
-
   @Default.Boolean(true)
   @Description(
       "If the pipeline should block awaiting completion of the pipeline. If set to true, "
@@ -60,7 +51,7 @@ public interface DirectOptions extends PipelineOptions, ApplicationNameOptions {
   @Default.Boolean(true)
   @Description(
       "Controls whether the DirectRunner should ensure that all of the elements of every "
-          + "PCollection are encodable. All elements in a PCollection must be encodable.")
+          + "PCollection can be encoded and decoded by that PCollection's Coder.")
   boolean isEnforceEncodability();
   void setEnforceEncodability(boolean test);
 
@@ -85,4 +76,10 @@ public interface DirectOptions extends PipelineOptions, ApplicationNameOptions {
       return Math.max(Runtime.getRuntime().availableProcessors(), MIN_PARALLELISM);
     }
   }
+
+  @Experimental(Kind.CORE_RUNNERS_ONLY)
+  @Default.Boolean(false)
+  @Description("Control whether toProto/fromProto translations are applied to original Pipeline")
+  boolean isProtoTranslation();
+  void setProtoTranslation(boolean b);
 }

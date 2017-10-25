@@ -27,6 +27,7 @@ import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo.Timing;
+import org.apache.beam.sdk.values.ValueInSingleWindow;
 import org.joda.time.Instant;
 import org.junit.Rule;
 import org.junit.Test;
@@ -42,7 +43,7 @@ public class PaneExtractorsTest {
   @Test
   public void onlyPaneNoFiring() {
     SerializableFunction<Iterable<ValueInSingleWindow<Integer>>, Iterable<Integer>> extractor =
-        PaneExtractors.onlyPane();
+        PaneExtractors.onlyPane(PAssert.PAssertionSite.capture(""));
     Iterable<ValueInSingleWindow<Integer>> noFiring =
         ImmutableList.of(
             ValueInSingleWindow.of(
@@ -55,7 +56,7 @@ public class PaneExtractorsTest {
   @Test
   public void onlyPaneOnlyOneFiring() {
     SerializableFunction<Iterable<ValueInSingleWindow<Integer>>, Iterable<Integer>> extractor =
-        PaneExtractors.onlyPane();
+        PaneExtractors.onlyPane(PAssert.PAssertionSite.capture(""));
     Iterable<ValueInSingleWindow<Integer>> onlyFiring =
         ImmutableList.of(
             ValueInSingleWindow.of(
@@ -69,7 +70,7 @@ public class PaneExtractorsTest {
   @Test
   public void onlyPaneMultiplePanesFails() {
     SerializableFunction<Iterable<ValueInSingleWindow<Integer>>, Iterable<Integer>> extractor =
-        PaneExtractors.onlyPane();
+        PaneExtractors.onlyPane(PAssert.PAssertionSite.capture(""));
     Iterable<ValueInSingleWindow<Integer>> multipleFiring =
         ImmutableList.of(
             ValueInSingleWindow.of(
@@ -88,7 +89,6 @@ public class PaneExtractorsTest {
                 GlobalWindow.INSTANCE,
                 PaneInfo.createPane(false, false, Timing.LATE, 2L, 1L)));
 
-    thrown.expect(IllegalStateException.class);
     thrown.expectMessage("trigger that fires at most once");
     extractor.apply(multipleFiring);
   }

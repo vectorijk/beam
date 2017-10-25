@@ -20,19 +20,38 @@
 import logging
 import platform
 import unittest
+from collections import defaultdict
 
+import apache_beam as beam
+from apache_beam.io import Read
+from apache_beam.metrics import Metrics
 from apache_beam.pipeline import Pipeline
 from apache_beam.pipeline import PipelineOptions
 from apache_beam.pipeline import PipelineVisitor
+from apache_beam.pipeline import PTransformOverride
+from apache_beam.pvalue import AsSingleton
+from apache_beam.runners import DirectRunner
 from apache_beam.runners.dataflow.native_io.iobase import NativeSource
-from apache_beam.test_pipeline import TestPipeline
+from apache_beam.runners.direct.evaluation_context import _ExecutionContext
+from apache_beam.runners.direct.transform_evaluator import _GroupByKeyOnlyEvaluator
+from apache_beam.runners.direct.transform_evaluator import _TransformEvaluator
+from apache_beam.testing.test_pipeline import TestPipeline
+from apache_beam.testing.util import assert_that
+from apache_beam.testing.util import equal_to
 from apache_beam.transforms import CombineGlobally
 from apache_beam.transforms import Create
+from apache_beam.transforms import DoFn
 from apache_beam.transforms import FlatMap
 from apache_beam.transforms import Map
+from apache_beam.transforms import ParDo
 from apache_beam.transforms import PTransform
-from apache_beam.transforms import Read
-from apache_beam.transforms.util import assert_that, equal_to
+from apache_beam.transforms import WindowInto
+from apache_beam.transforms.window import SlidingWindows
+from apache_beam.transforms.window import TimestampedValue
+from apache_beam.utils.timestamp import MIN_TIMESTAMP
+
+# TODO(BEAM-1555): Test is failing on the service, with FakeSource.
+# from nose.plugins.attrib import attr
 
 
 class FakeSource(NativeSource):
@@ -42,6 +61,7 @@ class FakeSource(NativeSource):
 
     def __init__(self, vals):
       self._vals = vals
+      self._output_counter = Metrics.counter('main', 'outputs')
 
     def __enter__(self):
       return self
@@ -51,6 +71,7 @@ class FakeSource(NativeSource):
 
     def __iter__(self):
       for v in self._vals:
+        self._output_counter.inc()
         yield v
 
   def __init__(self, vals):
@@ -60,10 +81,19 @@ class FakeSource(NativeSource):
     return FakeSource._Reader(self._vals)
 
 
-class PipelineTest(unittest.TestCase):
+class DoubleParDo(beam.PTransform):
+  def expand(self, input):
+    return input | 'Inner' >> beam.Map(lambda a: a * 2)
 
-  def setUp(self):
-    self.runner_name = 'DirectRunner'
+
+class TripleParDo(beam.PTransform):
+  def expand(self, input):
+    # Keeping labels the same intentionally to make sure that there is no label
+    # conflict due to replacement.
+    return input | 'Inner' >> beam.Map(lambda a: a * 3)
+
+
+class PipelineTest(unittest.TestCase):
 
   @staticmethod
   def custom_callable(pcoll):
@@ -95,7 +125,7 @@ class PipelineTest(unittest.TestCase):
       self.leave_composite.append(transform_node)
 
   def test_create(self):
-    pipeline = TestPipeline(runner=self.runner_name)
+    pipeline = TestPipeline()
     pcoll = pipeline | 'label1' >> Create([1, 2, 3])
     assert_that(pcoll, equal_to([1, 2, 3]))
 
@@ -105,20 +135,49 @@ class PipelineTest(unittest.TestCase):
     assert_that(pcoll3, equal_to([14, 15, 16]), label='pcoll3')
     pipeline.run()
 
+  def test_flatmap_builtin(self):
+    pipeline = TestPipeline()
+    pcoll = pipeline | 'label1' >> Create([1, 2, 3])
+    assert_that(pcoll, equal_to([1, 2, 3]))
+
+    pcoll2 = pcoll | 'do' >> FlatMap(lambda x: [x + 10])
+    assert_that(pcoll2, equal_to([11, 12, 13]), label='pcoll2')
+
+    pcoll3 = pcoll2 | 'm1' >> Map(lambda x: [x, 12])
+    assert_that(pcoll3,
+                equal_to([[11, 12], [12, 12], [13, 12]]), label='pcoll3')
+
+    pcoll4 = pcoll3 | 'do2' >> FlatMap(set)
+    assert_that(pcoll4, equal_to([11, 12, 12, 12, 13]), label='pcoll4')
+    pipeline.run()
+
   def test_create_singleton_pcollection(self):
-    pipeline = TestPipeline(runner=self.runner_name)
+    pipeline = TestPipeline()
     pcoll = pipeline | 'label' >> Create([[1, 2, 3]])
     assert_that(pcoll, equal_to([[1, 2, 3]]))
     pipeline.run()
 
+  # TODO(BEAM-1555): Test is failing on the service, with FakeSource.
+  # @attr('ValidatesRunner')
+  def test_metrics_in_source(self):
+    pipeline = TestPipeline()
+    pcoll = pipeline | Read(FakeSource([1, 2, 3, 4, 5, 6]))
+    assert_that(pcoll, equal_to([1, 2, 3, 4, 5, 6]))
+    res = pipeline.run()
+    metric_results = res.metrics().query()
+    outputs_counter = metric_results['counters'][0]
+    self.assertEqual(outputs_counter.key.step, 'Read')
+    self.assertEqual(outputs_counter.key.metric.name, 'outputs')
+    self.assertEqual(outputs_counter.committed, 6)
+
   def test_read(self):
-    pipeline = TestPipeline(runner=self.runner_name)
+    pipeline = TestPipeline()
     pcoll = pipeline | 'read' >> Read(FakeSource([1, 2, 3]))
     assert_that(pcoll, equal_to([1, 2, 3]))
     pipeline.run()
 
   def test_visit_entire_graph(self):
-    pipeline = Pipeline(self.runner_name)
+    pipeline = Pipeline()
     pcoll1 = pipeline | 'pcoll' >> Create([1, 2, 3])
     pcoll2 = pcoll1 | 'do1' >> FlatMap(lambda x: [x + 1])
     pcoll3 = pcoll2 | 'do2' >> FlatMap(lambda x: [x + 1])
@@ -132,19 +191,19 @@ class PipelineTest(unittest.TestCase):
                      set(visitor.visited))
     self.assertEqual(set(visitor.enter_composite),
                      set(visitor.leave_composite))
-    self.assertEqual(2, len(visitor.enter_composite))
-    self.assertEqual(visitor.enter_composite[1].transform, transform)
-    self.assertEqual(visitor.leave_composite[0].transform, transform)
+    self.assertEqual(3, len(visitor.enter_composite))
+    self.assertEqual(visitor.enter_composite[2].transform, transform)
+    self.assertEqual(visitor.leave_composite[1].transform, transform)
 
   def test_apply_custom_transform(self):
-    pipeline = TestPipeline(runner=self.runner_name)
+    pipeline = TestPipeline()
     pcoll = pipeline | 'pcoll' >> Create([1, 2, 3])
     result = pcoll | PipelineTest.CustomTransform()
     assert_that(result, equal_to([2, 3, 4]))
     pipeline.run()
 
   def test_reuse_custom_transform_instance(self):
-    pipeline = Pipeline(self.runner_name)
+    pipeline = Pipeline()
     pcoll1 = pipeline | 'pcoll1' >> Create([1, 2, 3])
     pcoll2 = pipeline | 'pcoll2' >> Create([4, 5, 6])
     transform = PipelineTest.CustomTransform()
@@ -159,7 +218,7 @@ class PipelineTest(unittest.TestCase):
         'pvalue | "label" >> transform')
 
   def test_reuse_cloned_custom_transform_instance(self):
-    pipeline = TestPipeline(runner=self.runner_name)
+    pipeline = TestPipeline()
     pcoll1 = pipeline | 'pc1' >> Create([1, 2, 3])
     pcoll2 = pipeline | 'pc2' >> Create([4, 5, 6])
     transform = PipelineTest.CustomTransform()
@@ -208,11 +267,14 @@ class PipelineTest(unittest.TestCase):
     num_elements = 10
     num_maps = 100
 
-    pipeline = TestPipeline(runner='DirectRunner')
+    pipeline = TestPipeline()
 
     # Consumed memory should not be proportional to the number of maps.
     memory_threshold = (
-        get_memory_usage_in_bytes() + (3 * len_elements * num_elements))
+        get_memory_usage_in_bytes() + (5 * len_elements * num_elements))
+
+    # Plus small additional slack for memory fluctuations during the test.
+    memory_threshold += 10 * (2 ** 20)
 
     biglist = pipeline | 'oom:create' >> Create(
         ['x' * len_elements] * num_elements)
@@ -232,13 +294,110 @@ class PipelineTest(unittest.TestCase):
     def raise_exception(exn):
       raise exn
     with self.assertRaises(ValueError):
-      with Pipeline(self.runner_name) as p:
+      with Pipeline() as p:
         # pylint: disable=expression-not-assigned
-        p | Create([ValueError]) | Map(raise_exception)
+        p | Create([ValueError('msg')]) | Map(raise_exception)
 
-  def test_eager_pipeline(self):
-    p = Pipeline('EagerRunner')
-    self.assertEqual([1, 4, 9], p | Create([1, 2, 3]) | Map(lambda x: x*x))
+  # TODO(BEAM-1894).
+  # def test_eager_pipeline(self):
+  #   p = Pipeline('EagerRunner')
+  #   self.assertEqual([1, 4, 9], p | Create([1, 2, 3]) | Map(lambda x: x*x))
+
+  def test_ptransform_overrides(self):
+
+    def my_par_do_matcher(applied_ptransform):
+      return isinstance(applied_ptransform.transform, DoubleParDo)
+
+    class MyParDoOverride(PTransformOverride):
+
+      def get_matcher(self):
+        return my_par_do_matcher
+
+      def get_replacement_transform(self, ptransform):
+        if isinstance(ptransform, DoubleParDo):
+          return TripleParDo()
+        raise ValueError('Unsupported type of transform: %r', ptransform)
+
+    # Using following private variable for testing.
+    DirectRunner._PTRANSFORM_OVERRIDES.append(MyParDoOverride())
+    with Pipeline() as p:
+      pcoll = p | beam.Create([1, 2, 3]) | 'Multiply' >> DoubleParDo()
+      assert_that(pcoll, equal_to([3, 6, 9]))
+
+
+class DoFnTest(unittest.TestCase):
+
+  def test_element(self):
+    class TestDoFn(DoFn):
+      def process(self, element):
+        yield element + 10
+
+    pipeline = TestPipeline()
+    pcoll = pipeline | 'Create' >> Create([1, 2]) | 'Do' >> ParDo(TestDoFn())
+    assert_that(pcoll, equal_to([11, 12]))
+    pipeline.run()
+
+  def test_side_input_no_tag(self):
+    class TestDoFn(DoFn):
+      def process(self, element, prefix, suffix):
+        return ['%s-%s-%s' % (prefix, element, suffix)]
+
+    pipeline = TestPipeline()
+    words_list = ['aa', 'bb', 'cc']
+    words = pipeline | 'SomeWords' >> Create(words_list)
+    prefix = 'zyx'
+    suffix = pipeline | 'SomeString' >> Create(['xyz'])  # side in
+    result = words | 'DecorateWordsDoFnNoTag' >> ParDo(
+        TestDoFn(), prefix, suffix=AsSingleton(suffix))
+    assert_that(result, equal_to(['zyx-%s-xyz' % x for x in words_list]))
+    pipeline.run()
+
+  def test_side_input_tagged(self):
+    class TestDoFn(DoFn):
+      def process(self, element, prefix, suffix=DoFn.SideInputParam):
+        return ['%s-%s-%s' % (prefix, element, suffix)]
+
+    pipeline = TestPipeline()
+    words_list = ['aa', 'bb', 'cc']
+    words = pipeline | 'SomeWords' >> Create(words_list)
+    prefix = 'zyx'
+    suffix = pipeline | 'SomeString' >> Create(['xyz'])  # side in
+    result = words | 'DecorateWordsDoFnNoTag' >> ParDo(
+        TestDoFn(), prefix, suffix=AsSingleton(suffix))
+    assert_that(result, equal_to(['zyx-%s-xyz' % x for x in words_list]))
+    pipeline.run()
+
+  def test_window_param(self):
+    class TestDoFn(DoFn):
+      def process(self, element, window=DoFn.WindowParam):
+        yield (element, (float(window.start), float(window.end)))
+
+    pipeline = TestPipeline()
+    pcoll = (pipeline
+             | Create([1, 7])
+             | Map(lambda x: TimestampedValue(x, x))
+             | WindowInto(windowfn=SlidingWindows(10, 5))
+             | ParDo(TestDoFn()))
+    assert_that(pcoll, equal_to([(1, (-5, 5)), (1, (0, 10)),
+                                 (7, (0, 10)), (7, (5, 15))]))
+    pcoll2 = pcoll | 'Again' >> ParDo(TestDoFn())
+    assert_that(
+        pcoll2,
+        equal_to([
+            ((1, (-5, 5)), (-5, 5)), ((1, (0, 10)), (0, 10)),
+            ((7, (0, 10)), (0, 10)), ((7, (5, 15)), (5, 15))]),
+        label='doubled windows')
+    pipeline.run()
+
+  def test_timestamp_param(self):
+    class TestDoFn(DoFn):
+      def process(self, element, timestamp=DoFn.TimestampParam):
+        yield timestamp
+
+    pipeline = TestPipeline()
+    pcoll = pipeline | 'Create' >> Create([1, 2]) | 'Do' >> ParDo(TestDoFn())
+    assert_that(pcoll, equal_to([MIN_TIMESTAMP, MIN_TIMESTAMP]))
+    pipeline.run()
 
 
 class Bacon(PipelineOptions):
@@ -309,6 +468,117 @@ class PipelineOptionsTest(unittest.TestCase):
              'display_data']),
         set([attr for attr in dir(options.view_as(Eggs))
              if not attr.startswith('_')]))
+
+
+class RunnerApiTest(unittest.TestCase):
+
+  def test_simple(self):
+    """Tests serializing, deserializing, and running a simple pipeline.
+
+    More extensive tests are done at pipeline.run for each suitable test.
+    """
+    p = beam.Pipeline()
+    p | beam.Create([None]) | beam.Map(lambda x: x)  # pylint: disable=expression-not-assigned
+    proto = p.to_runner_api()
+
+    p2 = Pipeline.from_runner_api(proto, p.runner, p._options)
+    p2.run()
+
+  def test_pickling(self):
+    class MyPTransform(beam.PTransform):
+      pickle_count = [0]
+
+      def expand(self, p):
+        self.p = p
+        return p | beam.Create([None])
+
+      def __reduce__(self):
+        self.pickle_count[0] += 1
+        return str, ()
+
+    p = beam.Pipeline()
+    for k in range(20):
+      p | 'Iter%s' % k >> MyPTransform()  # pylint: disable=expression-not-assigned
+    p.to_runner_api()
+    self.assertEqual(MyPTransform.pickle_count[0], 20)
+
+
+class DirectRunnerRetryTests(unittest.TestCase):
+
+  def test_retry_fork_graph(self):
+    pipeline_options = PipelineOptions(['--direct_runner_bundle_retry'])
+    p = beam.Pipeline(options=pipeline_options)
+
+    # TODO(mariagh): Remove the use of globals from the test.
+    global count_b, count_c # pylint: disable=global-variable-undefined
+    count_b, count_c = 0, 0
+
+    def f_b(x):
+      global count_b  # pylint: disable=global-variable-undefined
+      count_b += 1
+      raise Exception('exception in f_b')
+
+    def f_c(x):
+      global count_c  # pylint: disable=global-variable-undefined
+      count_c += 1
+      raise Exception('exception in f_c')
+
+    names = p | 'CreateNodeA' >> beam.Create(['Ann', 'Joe'])
+
+    fork_b = names | 'SendToB' >> beam.Map(f_b) # pylint: disable=unused-variable
+    fork_c = names | 'SendToC' >> beam.Map(f_c) # pylint: disable=unused-variable
+
+    with self.assertRaises(Exception):
+      p.run().wait_until_finish()
+    assert count_b == count_c == 4
+
+  def test_no_partial_writeouts(self):
+
+    class TestTransformEvaluator(_TransformEvaluator):
+
+      def __init__(self):
+        self._execution_context = _ExecutionContext(None, {})
+
+      def start_bundle(self):
+        self.step_context = self._execution_context.get_step_context()
+
+      def process_element(self, element):
+        k, v = element
+        state = self.step_context.get_keyed_state(k)
+        state.add_state(None, _GroupByKeyOnlyEvaluator.ELEMENTS_TAG, v)
+
+    # Create instance and add key/value, key/value2
+    evaluator = TestTransformEvaluator()
+    evaluator.start_bundle()
+    self.assertIsNone(evaluator.step_context.existing_keyed_state.get('key'))
+    self.assertIsNone(evaluator.step_context.partial_keyed_state.get('key'))
+
+    evaluator.process_element(['key', 'value'])
+    self.assertEqual(
+        evaluator.step_context.existing_keyed_state['key'].state,
+        defaultdict(lambda: defaultdict(list)))
+    self.assertEqual(
+        evaluator.step_context.partial_keyed_state['key'].state,
+        {None: {'elements':['value']}})
+
+    evaluator.process_element(['key', 'value2'])
+    self.assertEqual(
+        evaluator.step_context.existing_keyed_state['key'].state,
+        defaultdict(lambda: defaultdict(list)))
+    self.assertEqual(
+        evaluator.step_context.partial_keyed_state['key'].state,
+        {None: {'elements':['value', 'value2']}})
+
+    # Simulate an exception (redo key/value)
+    evaluator._execution_context.reset()
+    evaluator.start_bundle()
+    evaluator.process_element(['key', 'value'])
+    self.assertEqual(
+        evaluator.step_context.existing_keyed_state['key'].state,
+        defaultdict(lambda: defaultdict(list)))
+    self.assertEqual(
+        evaluator.step_context.partial_keyed_state['key'].state,
+        {None: {'elements':['value']}})
 
 
 if __name__ == '__main__':

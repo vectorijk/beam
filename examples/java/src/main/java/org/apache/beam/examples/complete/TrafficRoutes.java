@@ -29,6 +29,8 @@ import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+
 import org.apache.avro.reflect.Nullable;
 import org.apache.beam.examples.common.ExampleBigQueryTableOptions;
 import org.apache.beam.examples.common.ExampleOptions;
@@ -111,6 +113,23 @@ public class TrafficRoutes {
     @Override
     public int compareTo(StationSpeed other) {
       return Long.compare(this.timestamp, other.timestamp);
+    }
+
+    @Override
+    public boolean equals(Object object) {
+      if (object == null) {
+        return false;
+      }
+      if (object.getClass() != getClass()) {
+        return false;
+      }
+      StationSpeed otherStationSpeed = (StationSpeed) object;
+      return Objects.equals(this.timestamp, otherStationSpeed.timestamp);
+    }
+
+    @Override
+    public int hashCode() {
+      return this.timestamp.hashCode();
     }
   }
 
@@ -301,7 +320,7 @@ public class TrafficRoutes {
     @Override
     public PCollection<String> expand(PBegin begin) {
       return begin
-          .apply(TextIO.Read.from(inputFile))
+          .apply(TextIO.read().from(inputFile))
           .apply(ParDo.of(new ExtractTimestamps()));
     }
   }
@@ -311,7 +330,7 @@ public class TrafficRoutes {
   *
   * <p>Inherits standard configuration options.
   */
-  private interface TrafficRoutesOptions extends ExampleOptions, ExampleBigQueryTableOptions {
+  public interface TrafficRoutesOptions extends ExampleOptions, ExampleBigQueryTableOptions {
     @Description("Path of the file to read from")
     @Default.String("gs://apache-beam-samples/traffic_sensor/"
         + "Freeways-5Minaa2010-01-01_to_2010-02-15_test2.csv")
@@ -359,7 +378,7 @@ public class TrafficRoutes {
             Duration.standardMinutes(options.getWindowDuration())).
             every(Duration.standardMinutes(options.getWindowSlideEvery()))))
         .apply(new TrackSpeed())
-        .apply(BigQueryIO.Write.to(tableRef)
+        .apply(BigQueryIO.writeTableRows().to(tableRef)
             .withSchema(FormatStatsFn.getSchema()));
 
     // Run the pipeline.

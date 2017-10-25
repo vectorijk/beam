@@ -35,6 +35,8 @@ import java.util.Collections;
 import java.util.List;
 import org.apache.beam.sdk.coders.Coder.Context;
 import org.apache.beam.sdk.testing.CoderProperties;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -66,12 +68,9 @@ public class NullableCoderTest {
     CoderProperties.coderSerializable(TEST_CODER);
   }
 
-  // If this changes, it implies the binary format has changed.
-  private static final String EXPECTED_ENCODING_ID = "";
-
   @Test
-  public void testEncodingId() throws Exception {
-    CoderProperties.coderHasEncodingId(TEST_CODER, EXPECTED_ENCODING_ID);
+  public void testCoderIsSerializableWithWellKnownCoderType() throws Exception {
+    CoderProperties.coderSerializable(NullableCoder.of(GlobalWindow.Coder.INSTANCE));
   }
 
   /**
@@ -99,38 +98,34 @@ public class NullableCoderTest {
   @Test
   public void testEncodedSize() throws Exception {
     NullableCoder<Double> coder = NullableCoder.of(DoubleCoder.of());
-    assertEquals(1, coder.getEncodedElementByteSize(null, Coder.Context.OUTER));
-    assertEquals(9, coder.getEncodedElementByteSize(5.0, Coder.Context.OUTER));
+    assertEquals(1, coder.getEncodedElementByteSize(null));
+    assertEquals(9, coder.getEncodedElementByteSize(5.0));
   }
 
   @Test
   public void testEncodedSizeNested() throws Exception {
     NullableCoder<String> varLenCoder = NullableCoder.of(StringUtf8Coder.of());
-
-    assertEquals(1, varLenCoder.getEncodedElementByteSize(null, Context.OUTER));
-    assertEquals(1, varLenCoder.getEncodedElementByteSize(null, Context.NESTED));
-
-    assertEquals(5, varLenCoder.getEncodedElementByteSize("spam", Context.OUTER));
-    assertEquals(6, varLenCoder.getEncodedElementByteSize("spam", Context.NESTED));
+    assertEquals(1, varLenCoder.getEncodedElementByteSize(null));
+    assertEquals(6, varLenCoder.getEncodedElementByteSize("spam"));
   }
 
   @Test
   public void testObserverIsCheap() throws Exception {
     NullableCoder<Double> coder = NullableCoder.of(DoubleCoder.of());
-    assertTrue(coder.isRegisterByteSizeObserverCheap(5.0, Coder.Context.OUTER));
+    assertTrue(coder.isRegisterByteSizeObserverCheap(5.0));
   }
 
   @Test
   public void testObserverIsNotCheap() throws Exception {
     NullableCoder<List<String>> coder = NullableCoder.of(ListCoder.of(StringUtf8Coder.of()));
     assertFalse(coder.isRegisterByteSizeObserverCheap(
-        ImmutableList.of("hi", "test"), Coder.Context.OUTER));
+        ImmutableList.of("hi", "test")));
   }
 
   @Test
   public void testObserverIsAlwaysCheapForNullValues() throws Exception {
     NullableCoder<List<String>> coder = NullableCoder.of(ListCoder.of(StringUtf8Coder.of()));
-    assertTrue(coder.isRegisterByteSizeObserverCheap(null, Coder.Context.OUTER));
+    assertTrue(coder.isRegisterByteSizeObserverCheap(null));
   }
 
   @Test
@@ -165,12 +160,28 @@ public class NullableCoderTest {
     assertThat(NullableCoder.of(coder), theInstance(coder));
   }
 
-  private static class EntireStreamExpectingCoder extends DeterministicStandardCoder<String> {
+  @Test
+  public void testEncodedTypeDescriptor() throws Exception {
+    assertThat(TEST_CODER.getEncodedTypeDescriptor(), equalTo(TypeDescriptor.of(String.class)));
+  }
+
+  private static class EntireStreamExpectingCoder extends AtomicCoder<String> {
+    @Override
+    public void encode(String value, OutputStream outStream)
+        throws IOException {
+      encode(value, outStream, Context.NESTED);
+    }
+
     @Override
     public void encode(
         String value, OutputStream outStream, Context context) throws IOException {
       checkArgument(context.isWholeStream, "Expected to get entire stream");
       StringUtf8Coder.of().encode(value, outStream, context);
+    }
+
+    @Override
+    public String decode(InputStream inStream) throws CoderException, IOException {
+      return decode(inStream, Context.NESTED);
     }
 
     @Override
@@ -184,5 +195,8 @@ public class NullableCoderTest {
     public List<? extends Coder<?>> getCoderArguments() {
       return Collections.emptyList();
     }
+
+    @Override
+    public void verifyDeterministic() throws NonDeterministicException {}
   }
 }

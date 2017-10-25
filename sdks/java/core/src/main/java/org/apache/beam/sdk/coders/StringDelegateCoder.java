@@ -21,9 +21,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
-import java.util.Collection;
 import org.apache.beam.sdk.coders.DelegateCoder.CodingFunction;
-import org.apache.beam.sdk.coders.protobuf.ProtoCoder;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link Coder} that wraps a {@code Coder<String>}
@@ -42,14 +41,18 @@ import org.apache.beam.sdk.coders.protobuf.ProtoCoder;
  *
  * <p>This method of encoding is not designed for ease of evolution of {@code Clazz};
  * it should only be used in cases where the class is stable or the encoding is not
- * important. If evolution of the class is important, see {@link ProtoCoder}, {@link AvroCoder},
- * or {@link JAXBCoder}.
+ * important. If evolution of the class is important, see {@link AvroCoder} or any other
+ * evolution safe encoding.
  *
  * @param <T> The type of objects coded.
  */
 public final class StringDelegateCoder<T> extends CustomCoder<T> {
   public static <T> StringDelegateCoder<T> of(Class<T> clazz) {
-    return new StringDelegateCoder<T>(clazz);
+    return StringDelegateCoder.<T>of(clazz, TypeDescriptor.of(clazz));
+  }
+
+  public static <T> StringDelegateCoder<T> of(Class<T> clazz, TypeDescriptor<T> typeDescriptor) {
+    return new StringDelegateCoder<T>(clazz, typeDescriptor);
   }
 
   @Override
@@ -60,7 +63,7 @@ public final class StringDelegateCoder<T> extends CustomCoder<T> {
   private final DelegateCoder<T, String> delegateCoder;
   private final Class<T> clazz;
 
-  protected StringDelegateCoder(final Class<T> clazz) {
+  protected StringDelegateCoder(final Class<T> clazz, TypeDescriptor<T> typeDescriptor) {
     delegateCoder = DelegateCoder.of(StringUtf8Coder.of(),
       new CodingFunction<T, String>() {
         @Override
@@ -77,7 +80,7 @@ public final class StringDelegateCoder<T> extends CustomCoder<T> {
             InvocationTargetException {
           return clazz.getConstructor(String.class).newInstance(input);
         }
-      });
+      }, typeDescriptor);
 
     this.clazz = clazz;
   }
@@ -97,9 +100,20 @@ public final class StringDelegateCoder<T> extends CustomCoder<T> {
   }
 
   @Override
+  public void encode(T value, OutputStream outStream)
+      throws CoderException, IOException {
+    encode(value, outStream, Context.NESTED);
+  }
+
+  @Override
   public void encode(T value, OutputStream outStream, Context context)
       throws CoderException, IOException {
     delegateCoder.encode(value, outStream, context);
+  }
+
+  @Override
+  public T decode(InputStream inStream) throws CoderException, IOException {
+    return decode(inStream, Context.NESTED);
   }
 
   @Override
@@ -113,21 +127,12 @@ public final class StringDelegateCoder<T> extends CustomCoder<T> {
   }
 
   @Override
-  public Object structuralValue(T value) throws Exception {
+  public Object structuralValue(T value) {
     return delegateCoder.structuralValue(value);
   }
 
-  /**
-   * The encoding id is the fully qualified name of the encoded/decoded class.
-   */
   @Override
-  public String getEncodingId() {
-    return clazz.getName();
-  }
-
-  @Override
-  public Collection<String> getAllowedEncodings() {
-    return delegateCoder.getAllowedEncodings();
+  public TypeDescriptor<T> getEncodedTypeDescriptor() {
+    return delegateCoder.getEncodedTypeDescriptor();
   }
 }
-

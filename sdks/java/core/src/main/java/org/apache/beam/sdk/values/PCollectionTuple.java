@@ -17,18 +17,16 @@
  */
 package org.apache.beam.sdk.values;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.transforms.AppliedPTransform;
+import org.apache.beam.sdk.annotations.Internal;
+import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.values.PCollection.IsBounded;
 
 /**
@@ -39,8 +37,7 @@ import org.apache.beam.sdk.values.PCollection.IsBounded;
  * {@link PTransform} taking
  * or producing multiple PCollection inputs or outputs that can be of
  * different types, for instance a
- * {@link ParDo} with side
- * outputs.
+ * {@link ParDo} with multiple outputs.
  *
  * <p>A {@link PCollectionTuple} can be created and accessed like follows:
  * <pre> {@code
@@ -194,14 +191,18 @@ public class PCollectionTuple implements PInput, POutput {
   }
 
   /**
-   * Returns a {@link PCollectionTuple} with each of the given tags mapping to a new
+   * <b><i>For internal use only; no backwards-compatibility guarantees.</i></b>
+   *
+   * <p>Returns a {@link PCollectionTuple} with each of the given tags mapping to a new
    * output {@link PCollection}.
    *
    * <p>For use by primitive transformations only.
    */
+  @Internal
   public static PCollectionTuple ofPrimitiveOutputsInternal(
       Pipeline pipeline,
       TupleTagList outputTags,
+      Map<TupleTag<?>, Coder<?>> coders,
       WindowingStrategy<?, ?> windowingStrategy,
       IsBounded isBounded) {
     Map<TupleTag<?>, PCollection<?>> pcollectionMap = new LinkedHashMap<>();
@@ -218,10 +219,10 @@ public class PCollectionTuple implements PInput, POutput {
       // erasure as the correct type. When a transform adds
       // elements to `outputCollection` they will be of type T.
       @SuppressWarnings("unchecked")
-      TypeDescriptor<Object> token = (TypeDescriptor<Object>) outputTag.getTypeDescriptor();
-      PCollection<Object> outputCollection = PCollection
-          .createPrimitiveOutputInternal(pipeline, windowingStrategy, isBounded)
-          .setTypeDescriptor(token);
+      PCollection outputCollection =
+          PCollection.createPrimitiveOutputInternal(
+                  pipeline, windowingStrategy, isBounded, coders.get(outputTag))
+              .setTypeDescriptor((TypeDescriptor) outputTag.getTypeDescriptor());
 
       pcollectionMap.put(outputTag, outputCollection);
     }
@@ -234,29 +235,25 @@ public class PCollectionTuple implements PInput, POutput {
   }
 
   @Override
-  public List<TaggedPValue> expand() {
-    ImmutableList.Builder<TaggedPValue> values = ImmutableList.builder();
-    for (Map.Entry<TupleTag<?>, PCollection<?>> entry : pcollectionMap.entrySet()) {
-      values.add(TaggedPValue.of(entry.getKey(), entry.getValue()));
-    }
-    return values.build();
+  public Map<TupleTag<?>, PValue> expand() {
+    return ImmutableMap.<TupleTag<?>, PValue>copyOf(pcollectionMap);
   }
 
   @Override
-  public void recordAsOutput(AppliedPTransform<?, ?, ?> transform) {
+  public void finishSpecifyingOutput(
+      String transformName, PInput input, PTransform<?, ?> transform) {
+    // All component PCollections will already have been finished. Update their names if
+    // appropriate.
     int i = 0;
     for (Map.Entry<TupleTag<?>, PCollection<?>> entry
-             : pcollectionMap.entrySet()) {
+        : pcollectionMap.entrySet()) {
       TupleTag<?> tag = entry.getKey();
       PCollection<?> pc = entry.getValue();
-      pc.recordAsOutput(transform, tag.getOutName(i));
+      if (pc.getName().equals(PValueBase.defaultName(transformName))) {
+        pc.setName(String.format("%s.%s", transformName, tag.getOutName(i)));
+      }
       i++;
     }
-  }
-
-  @Override
-  public void finishSpecifyingOutput(PInput input, PTransform<?, ?> transform) {
-    // All component PCollections will already have been finished
   }
 
   @Override

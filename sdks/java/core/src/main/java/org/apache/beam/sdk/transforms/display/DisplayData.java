@@ -220,7 +220,7 @@ public class DisplayData implements Serializable {
    * within {@link HasDisplayData#populateDisplayData} implementations.
    */
   @AutoValue
-  public abstract static class Item {
+  public abstract static class Item implements Serializable {
 
     /**
      * The path for the display item within a component hierarchy.
@@ -489,7 +489,7 @@ public class DisplayData implements Serializable {
    * item will be retained; previous versions are discarded.
    */
   @AutoValue
-  public abstract static class Identifier {
+  public abstract static class Identifier implements Serializable {
     public abstract Path getPath();
     public abstract Class<?> getNamespace();
     public abstract String getKey();
@@ -512,7 +512,7 @@ public class DisplayData implements Serializable {
    * be registered at the path specified. Each sub-component path is created by appending a child
    * element to the path of its parent component, forming a hierarchy.
    */
-  public static class Path {
+  public static class Path implements Serializable {
     private final ImmutableList<String> components;
     private Path(ImmutableList<String> components) {
       this.components = components;
@@ -778,6 +778,12 @@ public class DisplayData implements Serializable {
       visitedComponents.add(subComponent);
       visitedPathMap.put(path, subComponent);
       Class<?> namespace = subComponent.getClass();
+      // Common case: AutoValue classes such as AutoValue_FooIO_Read. It's more useful
+      // to show the user the FooIO.Read class, which is the direct superclass of the AutoValue
+      // generated class.
+      if (namespace.getSimpleName().startsWith("AutoValue_")) {
+        namespace = namespace.getSuperclass();
+      }
 
       Path prevPath = latestPath;
       Class<?> prevNs = latestNs;
@@ -790,8 +796,9 @@ public class DisplayData implements Serializable {
         // Don't re-wrap exceptions recursively.
         throw e;
       } catch (Throwable e) {
-        String msg = String.format("Error while populating display data for component: %s",
-            namespace.getName());
+        String msg = String.format(
+            "Error while populating display data for component '%s': %s",
+            namespace.getName(), e.getMessage());
         throw new PopulateDisplayDataException(msg, e);
       }
 
@@ -876,12 +883,12 @@ public class DisplayData implements Serializable {
         return item(key, Type.STRING, null);
       }
       Type type = inferType(got);
-      if (type == null) {
-        throw new RuntimeException(String.format("Unknown value type: %s", got));
+      if (type != null) {
+        return item(key, type, got);
       }
-      return item(key, type, got);
     }
-    return item(key, Type.STRING, value.toString());
+    // General case: not null and type not inferable. Fall back to toString of the VP itself.
+    return item(key, Type.STRING, String.valueOf(value));
   }
 
   /**

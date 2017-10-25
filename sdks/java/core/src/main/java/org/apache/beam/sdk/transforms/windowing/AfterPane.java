@@ -20,24 +20,15 @@ package org.apache.beam.sdk.transforms.windowing;
 import java.util.List;
 import java.util.Objects;
 import org.apache.beam.sdk.annotations.Experimental;
-import org.apache.beam.sdk.coders.VarLongCoder;
-import org.apache.beam.sdk.transforms.Sum;
 import org.apache.beam.sdk.transforms.windowing.Trigger.OnceTrigger;
-import org.apache.beam.sdk.util.state.AccumulatorCombiningState;
-import org.apache.beam.sdk.util.state.StateTag;
-import org.apache.beam.sdk.util.state.StateTags;
 import org.joda.time.Instant;
 
 /**
- * {@link Trigger}s that fire based on properties of the elements in the current pane.
+ * A {@link Trigger} that fires at some point after a specified number of input elements have
+ * arrived.
  */
 @Experimental(Experimental.Kind.TRIGGER)
 public class AfterPane extends OnceTrigger {
-
-private static final StateTag<Object, AccumulatorCombiningState<Long, long[], Long>>
-      ELEMENTS_IN_PANE_TAG =
-      StateTags.makeSystemTagInternal(StateTags.combiningValueFromInputInternal(
-          "count", VarLongCoder.of(), new Sum.SumLongFn()));
 
   private final int countElems;
 
@@ -71,7 +62,7 @@ private static final StateTag<Object, AccumulatorCombiningState<Long, long[], Lo
   }
 
   @Override
-  public OnceTrigger getContinuationTrigger(List<Trigger> continuationTriggers) {
+  protected OnceTrigger getContinuationTrigger(List<Trigger> continuationTriggers) {
     return AfterPane.elementCountAtLeast(1);
   }
 

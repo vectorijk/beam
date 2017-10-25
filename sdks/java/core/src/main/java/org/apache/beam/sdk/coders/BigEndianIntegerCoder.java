@@ -17,7 +17,6 @@
  */
 package org.apache.beam.sdk.coders;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
@@ -25,13 +24,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UTFDataFormatException;
+import org.apache.beam.sdk.values.TypeDescriptor;
 
 /**
  * A {@link BigEndianIntegerCoder} encodes {@link Integer Integers} in 4 bytes, big-endian.
  */
 public class BigEndianIntegerCoder extends AtomicCoder<Integer> {
 
-  @JsonCreator
   public static BigEndianIntegerCoder of() {
     return INSTANCE;
   }
@@ -39,11 +38,12 @@ public class BigEndianIntegerCoder extends AtomicCoder<Integer> {
   /////////////////////////////////////////////////////////////////////////////
 
   private static final BigEndianIntegerCoder INSTANCE = new BigEndianIntegerCoder();
+  private static final TypeDescriptor<Integer> TYPE_DESCRIPTOR = new TypeDescriptor<Integer>() {};
 
   private BigEndianIntegerCoder() {}
 
   @Override
-  public void encode(Integer value, OutputStream outStream, Context context)
+  public void encode(Integer value, OutputStream outStream)
       throws IOException, CoderException {
     if (value == null) {
       throw new CoderException("cannot encode a null Integer");
@@ -52,7 +52,7 @@ public class BigEndianIntegerCoder extends AtomicCoder<Integer> {
   }
 
   @Override
-  public Integer decode(InputStream inStream, Context context)
+  public Integer decode(InputStream inStream)
       throws IOException, CoderException {
     try {
       return new DataInputStream(inStream).readInt();
@@ -62,6 +62,9 @@ public class BigEndianIntegerCoder extends AtomicCoder<Integer> {
       throw new CoderException(exn);
     }
   }
+
+  @Override
+  public void verifyDeterministic() {}
 
   /**
    * {@inheritDoc}
@@ -79,8 +82,13 @@ public class BigEndianIntegerCoder extends AtomicCoder<Integer> {
    * @return {@code true}, because {@link #getEncodedElementByteSize} runs in constant time.
    */
   @Override
-  public boolean isRegisterByteSizeObserverCheap(Integer value, Context context) {
+  public boolean isRegisterByteSizeObserverCheap(Integer value) {
     return true;
+  }
+
+  @Override
+  public TypeDescriptor<Integer> getEncodedTypeDescriptor() {
+    return TYPE_DESCRIPTOR;
   }
 
   /**
@@ -89,7 +97,7 @@ public class BigEndianIntegerCoder extends AtomicCoder<Integer> {
    * @return {@code 4}, the size in bytes of an integer's big endian encoding.
    */
   @Override
-  protected long getEncodedElementByteSize(Integer value, Context context)
+  protected long getEncodedElementByteSize(Integer value)
       throws Exception {
     if (value == null) {
       throw new CoderException("cannot encode a null Integer");

@@ -20,29 +20,35 @@ package org.apache.beam.runners.spark.stateful;
 
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
+import org.apache.beam.runners.core.metrics.MetricsContainerStepMap;
 import org.apache.beam.runners.spark.coders.CoderHelpers;
 import org.apache.beam.runners.spark.io.EmptyCheckpointMark;
 import org.apache.beam.runners.spark.io.MicrobatchSource;
-import org.apache.beam.runners.spark.translation.SparkRuntimeContext;
+import org.apache.beam.runners.spark.io.SparkUnboundedSource.Metadata;
 import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.io.BoundedSource;
 import org.apache.beam.sdk.io.Source;
 import org.apache.beam.sdk.io.UnboundedSource;
+import org.apache.beam.sdk.metrics.MetricsContainer;
+import org.apache.beam.sdk.metrics.MetricsEnvironment;
+import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
 import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.spark.streaming.State;
 import org.apache.spark.streaming.StateSpec;
+import org.joda.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import scala.Option;
+import scala.Tuple2;
 import scala.runtime.AbstractFunction3;
 
 /**
@@ -85,24 +91,38 @@ public class StateSpecFunctions {
    *
    * <p>See also <a href="https://issues.apache.org/jira/browse/SPARK-4819">SPARK-4819</a>.</p>
    *
-   * @param runtimeContext    A serializable {@link SparkRuntimeContext}.
+   * @param options           A serializable {@link SerializablePipelineOptions}.
    * @param <T>               The type of the input stream elements.
    * @param <CheckpointMarkT> The type of the {@link UnboundedSource.CheckpointMark}.
    * @return The appropriate {@link org.apache.spark.streaming.StateSpec} function.
    */
   public static <T, CheckpointMarkT extends UnboundedSource.CheckpointMark>
-  scala.Function3<Source<T>, scala.Option<CheckpointMarkT>, /* CheckpointMarkT */State<byte[]>,
-      Iterator<WindowedValue<T>>> mapSourceFunction(final SparkRuntimeContext runtimeContext) {
+  scala.Function3<Source<T>, scala.Option<CheckpointMarkT>, State<Tuple2<byte[], Instant>>,
+      Tuple2<Iterable<byte[]>, Metadata>> mapSourceFunction(
+      final SerializablePipelineOptions options, final String stepName) {
 
-    return new SerializableFunction3<Source<T>, Option<CheckpointMarkT>, State<byte[]>,
-        Iterator<WindowedValue<T>>>() {
+    return new SerializableFunction3<Source<T>, Option<CheckpointMarkT>,
+        State<Tuple2<byte[], Instant>>, Tuple2<Iterable<byte[]>, Metadata>>() {
 
       @Override
-      public Iterator<WindowedValue<T>> apply(Source<T> source, scala.Option<CheckpointMarkT>
-          startCheckpointMark, State<byte[]> state) {
-        // source as MicrobatchSource
-        MicrobatchSource<T, CheckpointMarkT> microbatchSource =
-            (MicrobatchSource<T, CheckpointMarkT>) source;
+      public Tuple2<Iterable<byte[]>, Metadata> apply(
+          Source<T> source,
+          scala.Option<CheckpointMarkT> startCheckpointMark,
+          State<Tuple2<byte[], Instant>> state) {
+
+        MetricsContainerStepMap metricsContainers = new MetricsContainerStepMap();
+        MetricsContainer metricsContainer = metricsContainers.getContainer(stepName);
+
+        // Add metrics container to the scope of org.apache.beam.sdk.io.Source.Reader methods
+        // since they may report metrics.
+        try (Closeable ignored = MetricsEnvironment.scopedMetricsContainer(metricsContainer)) {
+          // source as MicrobatchSource
+          MicrobatchSource<T, CheckpointMarkT> microbatchSource =
+              (MicrobatchSource<T, CheckpointMarkT>) source;
+
+        // Initial high/low watermarks.
+        Instant lowWatermark = BoundedWindow.TIMESTAMP_MIN_VALUE;
+        final Instant highWatermark;
 
         // if state exists, use it, otherwise it's first time so use the startCheckpointMark.
         // startCheckpointMark may be EmptyCheckpointMark (the Spark Java API tries to apply
@@ -110,7 +130,9 @@ public class StateSpecFunctions {
         Coder<CheckpointMarkT> checkpointCoder = microbatchSource.getCheckpointMarkCoder();
         CheckpointMarkT checkpointMark;
         if (state.exists()) {
-          checkpointMark = CoderHelpers.fromByteArray(state.get(), checkpointCoder);
+          // previous (output) watermark is now the low watermark.
+          lowWatermark = state.get()._2();
+          checkpointMark = CoderHelpers.fromByteArray(state.get()._1(), checkpointCoder);
           LOG.info("Continue reading from an existing CheckpointMark.");
         } else if (startCheckpointMark.isDefined()
             && !startCheckpointMark.get().equals(EmptyCheckpointMark.get())) {
@@ -122,45 +144,81 @@ public class StateSpecFunctions {
         }
 
         // create reader.
-        BoundedSource.BoundedReader<T> reader;
+        final MicrobatchSource.Reader/*<T>*/ microbatchReader;
+        final Stopwatch stopwatch = Stopwatch.createStarted();
+        long readDurationMillis = 0;
+
         try {
-          reader =
-              microbatchSource.createReader(runtimeContext.getPipelineOptions(), checkpointMark);
+          microbatchReader =
+              (MicrobatchSource.Reader)
+                  microbatchSource.getOrCreateReader(options.get(),
+                                                     checkpointMark);
         } catch (IOException e) {
           throw new RuntimeException(e);
         }
 
-        // read microbatch.
-        final List<WindowedValue<T>> readValues = new ArrayList<>();
+        // read microbatch as a serialized collection.
+        final List<byte[]> readValues = new ArrayList<>();
+        WindowedValue.FullWindowedValueCoder<T> coder =
+            WindowedValue.FullWindowedValueCoder.of(
+                source.getOutputCoder(),
+                GlobalWindow.Coder.INSTANCE);
         try {
           // measure how long a read takes per-partition.
-          Stopwatch stopwatch = Stopwatch.createStarted();
-          boolean finished = !reader.start();
+          boolean finished = !microbatchReader.start();
           while (!finished) {
-            readValues.add(WindowedValue.of(reader.getCurrent(), reader.getCurrentTimestamp(),
-                GlobalWindow.INSTANCE, PaneInfo.NO_FIRING));
-            finished = !reader.advance();
+            final WindowedValue<T> wv =
+                WindowedValue.of((T) microbatchReader.getCurrent(),
+                                 microbatchReader.getCurrentTimestamp(),
+                                 GlobalWindow.INSTANCE,
+                                 PaneInfo.NO_FIRING);
+            readValues.add(CoderHelpers.toByteArray(wv, coder));
+            finished = !microbatchReader.advance();
           }
 
-          // close and checkpoint reader.
-          reader.close();
-          LOG.info("Source id {} spent {} msec on reading.", microbatchSource.getId(),
-              stopwatch.stop().elapsed(TimeUnit.MILLISECONDS));
+          // end-of-read watermark is the high watermark, but don't allow decrease.
+          final Instant sourceWatermark = microbatchReader.getWatermark();
+          highWatermark = sourceWatermark.isAfter(lowWatermark) ? sourceWatermark : lowWatermark;
+
+          readDurationMillis = stopwatch.stop().elapsed(TimeUnit.MILLISECONDS);
+
+          LOG.info(
+              "Source id {} spent {} millis on reading.",
+              microbatchSource.getId(),
+              readDurationMillis);
 
           // if the Source does not supply a CheckpointMark skip updating the state.
           @SuppressWarnings("unchecked")
-          CheckpointMarkT finishedReadCheckpointMark =
-              (CheckpointMarkT) ((MicrobatchSource.Reader) reader).getCheckpointMark();
+          final CheckpointMarkT finishedReadCheckpointMark =
+              (CheckpointMarkT) microbatchReader.getCheckpointMark();
+          byte[] codedCheckpoint = new byte[0];
           if (finishedReadCheckpointMark != null) {
-            state.update(CoderHelpers.toByteArray(finishedReadCheckpointMark, checkpointCoder));
+            codedCheckpoint = CoderHelpers.toByteArray(finishedReadCheckpointMark, checkpointCoder);
           } else {
             LOG.info("Skipping checkpoint marking because the reader failed to supply one.");
           }
+          // persist the end-of-read (high) watermark for following read, where it will become
+          // the next low watermark.
+          state.update(new Tuple2<>(codedCheckpoint, highWatermark));
         } catch (IOException e) {
           throw new RuntimeException("Failed to read from reader.", e);
         }
 
-        return Iterators.unmodifiableIterator(readValues.iterator());
+        final ArrayList<byte[]> payload =
+            Lists.newArrayList(Iterators.unmodifiableIterator(readValues.iterator()));
+
+        return new Tuple2<>(
+            (Iterable<byte[]>) payload,
+            new Metadata(
+                readValues.size(),
+                lowWatermark,
+                highWatermark,
+                readDurationMillis,
+                metricsContainers));
+
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
       }
     };
   }

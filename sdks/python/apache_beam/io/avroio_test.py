@@ -21,25 +21,25 @@ import os
 import tempfile
 import unittest
 
-import apache_beam as beam
-from apache_beam.io import avroio
-from apache_beam.io import filebasedsource
-from apache_beam.io import source_test_utils
-from apache_beam.transforms.display import DisplayData
-from apache_beam.transforms.display_test import DisplayDataItemMatcher
-from apache_beam.transforms.util import assert_that
-from apache_beam.transforms.util import equal_to
-
-# Importing following private class for testing purposes.
-from apache_beam.io.avroio import _AvroSource as AvroSource
-from apache_beam.io.avroio import _AvroSink as AvroSink
-
 import avro.datafile
+import avro.schema
 from avro.datafile import DataFileWriter
 from avro.io import DatumWriter
-import avro.schema
 import hamcrest as hc
 
+import apache_beam as beam
+from apache_beam import Create
+from apache_beam.io import avroio
+from apache_beam.io import filebasedsource
+from apache_beam.io import iobase
+from apache_beam.io import source_test_utils
+from apache_beam.io.avroio import _AvroSink as AvroSink # For testing
+from apache_beam.io.avroio import _AvroSource as AvroSource # For testing
+from apache_beam.testing.test_pipeline import TestPipeline
+from apache_beam.testing.util import assert_that
+from apache_beam.testing.util import equal_to
+from apache_beam.transforms.display import DisplayData
+from apache_beam.transforms.display_test import DisplayDataItemMatcher
 
 # Import snappy optionally; some tests will be skipped when import fails.
 try:
@@ -140,10 +140,10 @@ class TestAvro(unittest.TestCase):
           (split.source, split.start_position, split.stop_position)
           for split in splits
       ]
-      source_test_utils.assertSourcesEqualReferenceSource((source, None, None),
-                                                          sources_info)
+      source_test_utils.assert_sources_equal_reference_source(
+          (source, None, None), sources_info)
     else:
-      read_records = source_test_utils.readFromSource(source, None, None)
+      read_records = source_test_utils.read_from_source(source, None, None)
       self.assertItemsEqual(expected_result, read_records)
 
   def test_read_without_splitting(self):
@@ -196,9 +196,6 @@ class TestAvro(unittest.TestCase):
             'file_pattern',
             'some_avro_sink-%(shard_num)05d-of-%(num_shards)05d.end'),
         DisplayDataItemMatcher(
-            'shards',
-            0),
-        DisplayDataItemMatcher(
             'codec',
             'null'),
         DisplayDataItemMatcher(
@@ -219,9 +216,6 @@ class TestAvro(unittest.TestCase):
             'file_pattern',
             'some_avro_sink-%(shard_num)05d-of-%(num_shards)05d'),
         DisplayDataItemMatcher(
-            'shards',
-            0),
-        DisplayDataItemMatcher(
             'codec',
             'deflate'),
         DisplayDataItemMatcher(
@@ -232,7 +226,7 @@ class TestAvro(unittest.TestCase):
   def test_read_reentrant_without_splitting(self):
     file_name = self._write_data()
     source = AvroSource(file_name)
-    source_test_utils.assertReentrantReadsSucceed((source, None, None))
+    source_test_utils.assert_reentrant_reads_succeed((source, None, None))
 
   def test_read_reantrant_with_splitting(self):
     file_name = self._write_data()
@@ -240,7 +234,7 @@ class TestAvro(unittest.TestCase):
     splits = [
         split for split in source.split(desired_bundle_size=100000)]
     assert len(splits) == 1
-    source_test_utils.assertReentrantReadsSucceed(
+    source_test_utils.assert_reentrant_reads_succeed(
         (splits[0].source, splits[0].start_position, splits[0].stop_position))
 
   def test_read_without_splitting_multiple_blocks(self):
@@ -252,6 +246,36 @@ class TestAvro(unittest.TestCase):
     file_name = self._write_data(count=12000)
     expected_result = self.RECORDS * 2000
     self._run_avro_test(file_name, 10000, True, expected_result)
+
+  def test_split_points(self):
+    file_name = self._write_data(count=12000)
+    source = AvroSource(file_name)
+
+    splits = [
+        split
+        for split in source.split(desired_bundle_size=float('inf'))
+    ]
+    assert len(splits) == 1
+
+    range_tracker = splits[0].source.get_range_tracker(
+        splits[0].start_position, splits[0].stop_position)
+
+    split_points_report = []
+
+    for _ in splits[0].source.read(range_tracker):
+      split_points_report.append(range_tracker.split_points())
+
+    # There are a total of three blocks. Each block has more than 10 records.
+
+    # When reading records of the first block, range_tracker.split_points()
+    # should return (0, iobase.RangeTracker.SPLIT_POINTS_UNKNOWN)
+    self.assertEquals(
+        split_points_report[:10],
+        [(0, iobase.RangeTracker.SPLIT_POINTS_UNKNOWN)] * 10)
+
+    # When reading records of last block, range_tracker.split_points() should
+    # return (2, 1)
+    self.assertEquals(split_points_report[-10:], [(2, 1)] * 10)
 
   def test_read_without_splitting_compressed_deflate(self):
     file_name = self._write_data(codec='deflate')
@@ -290,13 +314,13 @@ class TestAvro(unittest.TestCase):
     # work rebalancing test that completes within an acceptable amount of time.
     old_sync_interval = avro.datafile.SYNC_INTERVAL
     try:
-      avro.datafile.SYNC_INTERVAL = 5
-      file_name = self._write_data(count=20)
+      avro.datafile.SYNC_INTERVAL = 2
+      file_name = self._write_data(count=5)
       source = AvroSource(file_name)
       splits = [split
                 for split in source.split(desired_bundle_size=float('inf'))]
       assert len(splits) == 1
-      source_test_utils.assertSplitAtFractionExhaustive(splits[0].source)
+      source_test_utils.assert_split_at_fraction_exhaustive(splits[0].source)
     finally:
       avro.datafile.SYNC_INTERVAL = old_sync_interval
 
@@ -317,21 +341,51 @@ class TestAvro(unittest.TestCase):
 
     source = AvroSource(corrupted_file_name)
     with self.assertRaises(ValueError) as exn:
-      source_test_utils.readFromSource(source, None, None)
+      source_test_utils.read_from_source(source, None, None)
       self.assertEqual(0, exn.exception.message.find('Unexpected sync marker'))
 
-  def test_source_transform(self):
+  def test_read_from_avro(self):
     path = self._write_data()
-    with beam.Pipeline('DirectRunner') as p:
+    with TestPipeline() as p:
       assert_that(p | avroio.ReadFromAvro(path), equal_to(self.RECORDS))
+
+  def test_read_all_from_avro_single_file(self):
+    path = self._write_data()
+    with TestPipeline() as p:
+      assert_that(p | Create([path]) | avroio.ReadAllFromAvro(),
+                  equal_to(self.RECORDS))
+
+  def test_read_all_from_avro_many_single_files(self):
+    path1 = self._write_data()
+    path2 = self._write_data()
+    path3 = self._write_data()
+    with TestPipeline() as p:
+      assert_that(p | Create([path1, path2, path3]) | avroio.ReadAllFromAvro(),
+                  equal_to(self.RECORDS * 3))
+
+  def test_read_all_from_avro_file_pattern(self):
+    file_pattern = self._write_pattern(5)
+    with TestPipeline() as p:
+      assert_that(p | Create([file_pattern]) | avroio.ReadAllFromAvro(),
+                  equal_to(self.RECORDS * 5))
+
+  def test_read_all_from_avro_many_file_patterns(self):
+    file_pattern1 = self._write_pattern(5)
+    file_pattern2 = self._write_pattern(2)
+    file_pattern3 = self._write_pattern(3)
+    with TestPipeline() as p:
+      assert_that(p
+                  | Create([file_pattern1, file_pattern2, file_pattern3])
+                  | avroio.ReadAllFromAvro(),
+                  equal_to(self.RECORDS * 10))
 
   def test_sink_transform(self):
     with tempfile.NamedTemporaryFile() as dst:
       path = dst.name
-      with beam.Pipeline('DirectRunner') as p:
+      with TestPipeline() as p:
         # pylint: disable=expression-not-assigned
         p | beam.Create(self.RECORDS) | avroio.WriteToAvro(path, self.SCHEMA)
-      with beam.Pipeline('DirectRunner') as p:
+      with TestPipeline() as p:
         # json used for stable sortability
         readback = p | avroio.ReadFromAvro(path + '*') | beam.Map(json.dumps)
         assert_that(readback, equal_to([json.dumps(r) for r in self.RECORDS]))
@@ -340,11 +394,11 @@ class TestAvro(unittest.TestCase):
   def test_sink_transform_snappy(self):
     with tempfile.NamedTemporaryFile() as dst:
       path = dst.name
-      with beam.Pipeline('DirectRunner') as p:
+      with TestPipeline() as p:
         # pylint: disable=expression-not-assigned
         p | beam.Create(self.RECORDS) | avroio.WriteToAvro(
             path, self.SCHEMA, codec='snappy')
-      with beam.Pipeline('DirectRunner') as p:
+      with TestPipeline() as p:
         # json used for stable sortability
         readback = p | avroio.ReadFromAvro(path + '*') | beam.Map(json.dumps)
         assert_that(readback, equal_to([json.dumps(r) for r in self.RECORDS]))

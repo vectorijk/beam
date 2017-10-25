@@ -291,7 +291,7 @@ public class TrafficMaxLaneFlow {
     @Override
     public PCollection<String> expand(PBegin begin) {
       return begin
-          .apply(TextIO.Read.from(inputFile))
+          .apply(TextIO.read().from(inputFile))
           .apply(ParDo.of(new ExtractTimestamps()));
     }
   }
@@ -301,7 +301,7 @@ public class TrafficMaxLaneFlow {
     *
     * <p>Inherits standard configuration options.
     */
-  private interface TrafficMaxLaneFlowOptions extends ExampleOptions, ExampleBigQueryTableOptions {
+  public interface TrafficMaxLaneFlowOptions extends ExampleOptions, ExampleBigQueryTableOptions {
     @Description("Path of the file to read from")
     @Default.String("gs://apache-beam-samples/traffic_sensor/"
         + "Freeways-5Minaa2010-01-01_to_2010-02-15_test2.csv")
@@ -348,7 +348,7 @@ public class TrafficMaxLaneFlow {
             Duration.standardMinutes(options.getWindowDuration())).
             every(Duration.standardMinutes(options.getWindowSlideEvery()))))
         .apply(new MaxLaneFlow())
-        .apply(BigQueryIO.Write.to(tableRef)
+        .apply(BigQueryIO.writeTableRows().to(tableRef)
             .withSchema(FormatMaxesFn.getSchema()));
 
     // Run the pipeline.

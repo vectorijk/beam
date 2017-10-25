@@ -23,12 +23,11 @@ import com.google.common.base.Joiner;
 import java.util.Arrays;
 import java.util.List;
 import org.apache.beam.sdk.annotations.Experimental;
+import org.apache.beam.sdk.annotations.Internal;
 import org.apache.beam.sdk.transforms.windowing.Trigger.OnceTrigger;
 import org.joda.time.Instant;
 
-/**
- * Create a {@link Trigger} that fires and finishes once after all of its sub-triggers have fired.
- */
+/** A composite {@link Trigger} that fires when all of its sub-triggers are ready. */
 @Experimental(Experimental.Kind.TRIGGER)
 public class AfterAll extends OnceTrigger {
 
@@ -44,6 +43,14 @@ public class AfterAll extends OnceTrigger {
     return new AfterAll(Arrays.<Trigger>asList(triggers));
   }
 
+  /**
+   * Returns an {@code AfterAll} {@code Trigger} with the given subtriggers.
+   */
+  public static AfterAll of(List<Trigger> triggers) {
+    return new AfterAll(triggers);
+  }
+
+  @Internal
   @Override
   public Instant getWatermarkThatGuaranteesFiring(BoundedWindow window) {
     // This trigger will fire after the latest of its sub-triggers.
@@ -58,7 +65,7 @@ public class AfterAll extends OnceTrigger {
   }
 
   @Override
-  public OnceTrigger getContinuationTrigger(List<Trigger> continuationTriggers) {
+  protected OnceTrigger getContinuationTrigger(List<Trigger> continuationTriggers) {
     return new AfterAll(continuationTriggers);
   }
 

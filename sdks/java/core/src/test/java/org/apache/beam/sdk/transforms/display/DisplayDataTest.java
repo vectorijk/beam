@@ -44,8 +44,10 @@ import static org.junit.Assert.fail;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 import com.google.common.testing.EqualsTester;
 import java.io.IOException;
@@ -1202,6 +1204,21 @@ public class DisplayDataTest implements Serializable {
     }
   }
 
+  @Test
+  public void testSerializable() {
+    DisplayData data =
+        DisplayData.from(
+            new HasDisplayData() {
+              @Override
+              public void populateDisplayData(DisplayData.Builder builder) {
+                builder.add(DisplayData.item("foo", "bar"));
+              }
+            });
+
+    DisplayData serData = SerializableUtils.clone(data);
+    assertEquals(data, serData);
+  }
+
   /**
    * Verify that {@link DisplayData.Builder} can recover from exceptions thrown in user code.
    * This is not used within the Beam SDK since we want all code to produce valid DisplayData.
@@ -1282,6 +1299,21 @@ public class DisplayDataTest implements Serializable {
 
     thrown.expectCause(is(cause));
     DisplayData.from(component);
+  }
+
+  @AutoValue
+  abstract static class Foo implements HasDisplayData {
+    @Override
+    public void populateDisplayData(Builder builder) {
+      builder.add(DisplayData.item("someKey", "someValue"));
+    }
+  }
+
+  @Test
+  public void testAutoValue() {
+    DisplayData data = DisplayData.from(new AutoValue_DisplayDataTest_Foo());
+    Item item = Iterables.getOnlyElement(data.asMap().values());
+    assertEquals(Foo.class, item.getNamespace());
   }
 
   private String quoted(Object obj) {

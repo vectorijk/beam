@@ -29,18 +29,19 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import org.apache.beam.runners.spark.util.BroadcastHelper;
+import org.apache.beam.runners.core.SideInputReader;
+import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
+import org.apache.beam.runners.spark.util.SideInputBroadcast;
 import org.apache.beam.runners.spark.util.SparkSideInputReader;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.transforms.CombineWithContext;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
-import org.apache.beam.sdk.util.SideInputReader;
 import org.apache.beam.sdk.util.WindowedValue;
-import org.apache.beam.sdk.util.WindowingStrategy;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.sdk.values.WindowingStrategy;
 
 
 /**
@@ -48,18 +49,18 @@ import org.apache.beam.sdk.values.TupleTag;
  * {@link org.apache.beam.sdk.transforms.Combine.CombineFn}.
  */
 public class SparkAbstractCombineFn implements Serializable {
-  protected final SparkRuntimeContext runtimeContext;
-  protected final Map<TupleTag<?>, KV<WindowingStrategy<?, ?>, BroadcastHelper<?>>> sideInputs;
-  protected final WindowingStrategy<?, ?> windowingStrategy;
+  protected final SerializablePipelineOptions options;
+  protected final Map<TupleTag<?>, KV<WindowingStrategy<?, ?>, SideInputBroadcast<?>>> sideInputs;
+  protected final WindowingStrategy<?, BoundedWindow> windowingStrategy;
 
 
-  public SparkAbstractCombineFn(SparkRuntimeContext runtimeContext,
-                                Map<TupleTag<?>,  KV<WindowingStrategy<?, ?>, BroadcastHelper<?>>>
-                                    sideInputs,
-                                WindowingStrategy<?, ?> windowingStrategy) {
-    this.runtimeContext = runtimeContext;
+  public SparkAbstractCombineFn(
+      SerializablePipelineOptions options,
+      Map<TupleTag<?>,  KV<WindowingStrategy<?, ?>, SideInputBroadcast<?>>> sideInputs,
+      WindowingStrategy<?, ?> windowingStrategy) {
+    this.options = options;
     this.sideInputs = sideInputs;
-    this.windowingStrategy = windowingStrategy;
+    this.windowingStrategy = (WindowingStrategy<?, BoundedWindow>) windowingStrategy;
   }
 
   // each Spark task should get it's own copy of this SparkKeyedCombineFn, and since Spark tasks
@@ -71,7 +72,7 @@ public class SparkAbstractCombineFn implements Serializable {
   private transient SparkCombineContext combineContext;
   protected SparkCombineContext ctxtForInput(WindowedValue<?> input) {
     if (combineContext == null) {
-      combineContext = new SparkCombineContext(runtimeContext.getPipelineOptions(),
+      combineContext = new SparkCombineContext(options.get(),
           new SparkSideInputReader(sideInputs));
     }
     return combineContext.forInput(input);

@@ -44,6 +44,11 @@ import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.coders.Coder;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.state.State;
+import org.apache.beam.sdk.state.StateSpec;
+import org.apache.beam.sdk.state.Timer;
+import org.apache.beam.sdk.state.TimerSpec;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.DoFn.StateId;
 import org.apache.beam.sdk.transforms.DoFn.TimerId;
@@ -54,13 +59,10 @@ import org.apache.beam.sdk.transforms.reflect.DoFnSignature.Parameter.TimerParam
 import org.apache.beam.sdk.transforms.reflect.DoFnSignature.Parameter.WindowParameter;
 import org.apache.beam.sdk.transforms.reflect.DoFnSignature.StateDeclaration;
 import org.apache.beam.sdk.transforms.reflect.DoFnSignature.TimerDeclaration;
+import org.apache.beam.sdk.transforms.splittabledofn.HasDefaultTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
-import org.apache.beam.sdk.util.Timer;
-import org.apache.beam.sdk.util.TimerSpec;
 import org.apache.beam.sdk.util.common.ReflectHelpers;
-import org.apache.beam.sdk.util.state.State;
-import org.apache.beam.sdk.util.state.StateSpec;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeParameter;
@@ -70,7 +72,7 @@ import org.apache.beam.sdk.values.TypeParameter;
  */
 public class DoFnSignatures {
 
-  private DoFnSignatures() {};
+  private DoFnSignatures() {}
 
   private static final Map<Class<?>, DoFnSignature> signatureCache = new LinkedHashMap<>();
 
@@ -79,21 +81,23 @@ public class DoFnSignatures {
       ImmutableList.of(
           Parameter.ProcessContextParameter.class,
           Parameter.WindowParameter.class,
+          Parameter.PipelineOptionsParameter.class,
           Parameter.TimerParameter.class,
-          Parameter.StateParameter.class,
-          Parameter.InputProviderParameter.class,
-          Parameter.OutputReceiverParameter.class);
+          Parameter.StateParameter.class);
 
   private static final Collection<Class<? extends Parameter>>
       ALLOWED_SPLITTABLE_PROCESS_ELEMENT_PARAMETERS =
           ImmutableList.of(
-              Parameter.ProcessContextParameter.class, Parameter.RestrictionTrackerParameter.class);
+              Parameter.PipelineOptionsParameter.class,
+              Parameter.ProcessContextParameter.class,
+              Parameter.RestrictionTrackerParameter.class);
 
   private static final Collection<Class<? extends Parameter>>
       ALLOWED_ON_TIMER_PARAMETERS =
           ImmutableList.of(
               Parameter.OnTimerContextParameter.class,
               Parameter.WindowParameter.class,
+              Parameter.PipelineOptionsParameter.class,
               Parameter.TimerParameter.class,
               Parameter.StateParameter.class);
 
@@ -188,6 +192,15 @@ public class DoFnSignatures {
     public boolean hasWindowParameter() {
       return Iterables.any(
           extraParameters, Predicates.instanceOf(WindowParameter.class));
+    }
+
+    /**
+     * Indicates whether a {@link Parameter.PipelineOptionsParameter} is
+     * known in this context.
+     */
+    public boolean hasPipelineOptionsParamter() {
+      return Iterables.any(
+          extraParameters, Predicates.instanceOf(Parameter.PipelineOptionsParameter.class));
     }
 
     /** The window type, if any, used by this method. */
@@ -349,14 +362,14 @@ public class DoFnSignatures {
     if (startBundleMethod != null) {
       ErrorReporter startBundleErrors = errors.forMethod(DoFn.StartBundle.class, startBundleMethod);
       signatureBuilder.setStartBundle(
-          analyzeBundleMethod(startBundleErrors, fnT, startBundleMethod, inputT, outputT));
+          analyzeStartBundleMethod(startBundleErrors, fnT, startBundleMethod, inputT, outputT));
     }
 
     if (finishBundleMethod != null) {
       ErrorReporter finishBundleErrors =
           errors.forMethod(DoFn.FinishBundle.class, finishBundleMethod);
       signatureBuilder.setFinishBundle(
-          analyzeBundleMethod(finishBundleErrors, fnT, finishBundleMethod, inputT, outputT));
+          analyzeFinishBundleMethod(finishBundleErrors, fnT, finishBundleMethod, inputT, outputT));
     }
 
     if (setupMethod != null) {
@@ -370,42 +383,35 @@ public class DoFnSignatures {
               errors.forMethod(DoFn.Teardown.class, teardownMethod), teardownMethod));
     }
 
-    DoFnSignature.GetInitialRestrictionMethod getInitialRestriction = null;
-    ErrorReporter getInitialRestrictionErrors = null;
+    ErrorReporter getInitialRestrictionErrors;
     if (getInitialRestrictionMethod != null) {
       getInitialRestrictionErrors =
           errors.forMethod(DoFn.GetInitialRestriction.class, getInitialRestrictionMethod);
       signatureBuilder.setGetInitialRestriction(
-          getInitialRestriction =
               analyzeGetInitialRestrictionMethod(
                   getInitialRestrictionErrors, fnT, getInitialRestrictionMethod, inputT));
     }
 
-    DoFnSignature.SplitRestrictionMethod splitRestriction = null;
     if (splitRestrictionMethod != null) {
       ErrorReporter splitRestrictionErrors =
           errors.forMethod(DoFn.SplitRestriction.class, splitRestrictionMethod);
       signatureBuilder.setSplitRestriction(
-          splitRestriction =
               analyzeSplitRestrictionMethod(
                   splitRestrictionErrors, fnT, splitRestrictionMethod, inputT));
     }
 
-    DoFnSignature.GetRestrictionCoderMethod getRestrictionCoder = null;
     if (getRestrictionCoderMethod != null) {
       ErrorReporter getRestrictionCoderErrors =
           errors.forMethod(DoFn.GetRestrictionCoder.class, getRestrictionCoderMethod);
       signatureBuilder.setGetRestrictionCoder(
-          getRestrictionCoder =
               analyzeGetRestrictionCoderMethod(
                   getRestrictionCoderErrors, fnT, getRestrictionCoderMethod));
     }
 
-    DoFnSignature.NewTrackerMethod newTracker = null;
     if (newTrackerMethod != null) {
       ErrorReporter newTrackerErrors = errors.forMethod(DoFn.NewTracker.class, newTrackerMethod);
       signatureBuilder.setNewTracker(
-          newTracker = analyzeNewTrackerMethod(newTrackerErrors, fnT, newTrackerMethod));
+          analyzeNewTrackerMethod(newTrackerErrors, fnT, newTrackerMethod));
     }
 
     signatureBuilder.setIsBoundedPerElement(inferBoundedness(fnT, processElement, errors));
@@ -503,38 +509,66 @@ public class DoFnSignatures {
     ErrorReporter processElementErrors =
         errors.forMethod(DoFn.ProcessElement.class, processElement.targetMethod());
 
+    final TypeDescriptor<?> trackerT;
+    final String originOfTrackerT;
+
     List<String> missingRequiredMethods = new ArrayList<>();
     if (getInitialRestriction == null) {
       missingRequiredMethods.add("@" + DoFn.GetInitialRestriction.class.getSimpleName());
     }
     if (newTracker == null) {
-      missingRequiredMethods.add("@" + DoFn.NewTracker.class.getSimpleName());
+      if (getInitialRestriction != null
+          && getInitialRestriction
+              .restrictionT()
+              .isSubtypeOf(TypeDescriptor.of(HasDefaultTracker.class))) {
+        trackerT =
+            getInitialRestriction
+                .restrictionT()
+                .resolveType(HasDefaultTracker.class.getTypeParameters()[1]);
+        originOfTrackerT =
+            String.format(
+                "restriction type %s of @%s method %s",
+                formatType(getInitialRestriction.restrictionT()),
+                DoFn.GetInitialRestriction.class.getSimpleName(),
+                format(getInitialRestriction.targetMethod()));
+      } else {
+        missingRequiredMethods.add("@" + DoFn.NewTracker.class.getSimpleName());
+        trackerT = null;
+        originOfTrackerT = null;
+      }
+    } else {
+      trackerT = newTracker.trackerT();
+      originOfTrackerT =
+          String.format(
+              "%s method %s",
+              DoFn.NewTracker.class.getSimpleName(), format(newTracker.targetMethod()));
+      ErrorReporter getInitialRestrictionErrors =
+          errors.forMethod(DoFn.GetInitialRestriction.class, getInitialRestriction.targetMethod());
+      TypeDescriptor<?> restrictionT = getInitialRestriction.restrictionT();
+      getInitialRestrictionErrors.checkArgument(
+          restrictionT.equals(newTracker.restrictionT()),
+          "Uses restriction type %s, but @%s method %s uses restriction type %s",
+          formatType(restrictionT),
+          DoFn.NewTracker.class.getSimpleName(),
+          format(newTracker.targetMethod()),
+          formatType(newTracker.restrictionT()));
     }
+
     if (!missingRequiredMethods.isEmpty()) {
       processElementErrors.throwIllegalArgument(
           "Splittable, but does not define the following required methods: %s",
           missingRequiredMethods);
     }
 
-    processElementErrors.checkArgument(
-        processElement.trackerT().equals(newTracker.trackerT()),
-        "Has tracker type %s, but @%s method %s uses tracker type %s",
-        formatType(processElement.trackerT()),
-        DoFn.NewTracker.class.getSimpleName(),
-        format(newTracker.targetMethod()),
-        formatType(newTracker.trackerT()));
-
     ErrorReporter getInitialRestrictionErrors =
         errors.forMethod(DoFn.GetInitialRestriction.class, getInitialRestriction.targetMethod());
     TypeDescriptor<?> restrictionT = getInitialRestriction.restrictionT();
-
-    getInitialRestrictionErrors.checkArgument(
-        restrictionT.equals(newTracker.restrictionT()),
-        "Uses restriction type %s, but @%s method %s uses restriction type %s",
-        formatType(restrictionT),
-        DoFn.NewTracker.class.getSimpleName(),
-        format(newTracker.targetMethod()),
-        formatType(newTracker.restrictionT()));
+    processElementErrors.checkArgument(
+        processElement.trackerT().equals(trackerT),
+        "Has tracker type %s, but the DoFn's tracker type was inferred as %s from %s",
+        formatType(processElement.trackerT()),
+        trackerT,
+        originOfTrackerT);
 
     if (getRestrictionCoder != null) {
       getInitialRestrictionErrors.checkArgument(
@@ -595,12 +629,25 @@ public class DoFnSignatures {
   }
 
   /**
-   * Generates a {@link TypeDescriptor} for {@code DoFn<InputT, OutputT>.Context} given {@code
-   * InputT} and {@code OutputT}.
+   * Generates a {@link TypeDescriptor} for {@code DoFn<InputT, OutputT>.StartBundleContext} given
+   * {@code InputT} and {@code OutputT}.
    */
-  private static <InputT, OutputT> TypeDescriptor<DoFn<InputT, OutputT>.Context> doFnContextTypeOf(
-      TypeDescriptor<InputT> inputT, TypeDescriptor<OutputT> outputT) {
-    return new TypeDescriptor<DoFn<InputT, OutputT>.Context>() {}.where(
+  private static <InputT, OutputT>
+      TypeDescriptor<DoFn<InputT, OutputT>.StartBundleContext> doFnStartBundleContextTypeOf(
+          TypeDescriptor<InputT> inputT, TypeDescriptor<OutputT> outputT) {
+    return new TypeDescriptor<DoFn<InputT, OutputT>.StartBundleContext>() {}.where(
+            new TypeParameter<InputT>() {}, inputT)
+        .where(new TypeParameter<OutputT>() {}, outputT);
+  }
+
+  /**
+   * Generates a {@link TypeDescriptor} for {@code DoFn<InputT, OutputT>.FinishBundleContext} given
+   * {@code InputT} and {@code OutputT}.
+   */
+  private static <InputT, OutputT>
+      TypeDescriptor<DoFn<InputT, OutputT>.FinishBundleContext> doFnFinishBundleContextTypeOf(
+          TypeDescriptor<InputT> inputT, TypeDescriptor<OutputT> outputT) {
+    return new TypeDescriptor<DoFn<InputT, OutputT>.FinishBundleContext>() {}.where(
             new TypeParameter<InputT>() {}, inputT)
         .where(new TypeParameter<OutputT>() {}, outputT);
   }
@@ -615,25 +662,6 @@ public class DoFnSignatures {
     return new TypeDescriptor<DoFn<InputT, OutputT>.OnTimerContext>() {}.where(
             new TypeParameter<InputT>() {}, inputT)
         .where(new TypeParameter<OutputT>() {}, outputT);
-  }
-
-  /**
-   * Generates a {@link TypeDescriptor} for {@code DoFn.InputProvider<InputT>} given {@code InputT}.
-   */
-  private static <InputT> TypeDescriptor<DoFn.InputProvider<InputT>> inputProviderTypeOf(
-      TypeDescriptor<InputT> inputT) {
-    return new TypeDescriptor<DoFn.InputProvider<InputT>>() {}.where(
-        new TypeParameter<InputT>() {}, inputT);
-  }
-
-  /**
-   * Generates a {@link TypeDescriptor} for {@code DoFn.OutputReceiver<OutputT>} given {@code
-   * OutputT}.
-   */
-  private static <OutputT> TypeDescriptor<DoFn.OutputReceiver<OutputT>> outputReceiverTypeOf(
-      TypeDescriptor<OutputT> inputT) {
-    return new TypeDescriptor<DoFn.OutputReceiver<OutputT>>() {}.where(
-        new TypeParameter<OutputT>() {}, inputT);
   }
 
   @VisibleForTesting
@@ -765,10 +793,7 @@ public class DoFnSignatures {
       TypeDescriptor<?> outputT) {
 
     TypeDescriptor<?> expectedProcessContextT = doFnProcessContextTypeOf(inputT, outputT);
-    TypeDescriptor<?> expectedContextT = doFnContextTypeOf(inputT, outputT);
     TypeDescriptor<?> expectedOnTimerContextT = doFnOnTimerContextTypeOf(inputT, outputT);
-    TypeDescriptor<?> expectedInputProviderT = inputProviderTypeOf(inputT);
-    TypeDescriptor<?> expectedOutputReceiverT = outputReceiverTypeOf(outputT);
 
     TypeDescriptor<?> paramT = param.getType();
     Class<?> rawType = paramT.getRawType();
@@ -776,51 +801,28 @@ public class DoFnSignatures {
     ErrorReporter paramErrors = methodErrors.forParameter(param);
 
     if (rawType.equals(DoFn.ProcessContext.class)) {
-      methodErrors.checkArgument(paramT.equals(expectedProcessContextT),
-        "Must take %s as the ProcessContext argument",
+      paramErrors.checkArgument(paramT.equals(expectedProcessContextT),
+        "ProcessContext argument must have type %s",
         formatType(expectedProcessContextT));
       return Parameter.processContext();
-    } else if (rawType.equals(DoFn.Context.class)) {
-      methodErrors.checkArgument(paramT.equals(expectedContextT),
-          "Must take %s as the Context argument",
-          formatType(expectedContextT));
-      return Parameter.context();
     } else if (rawType.equals(DoFn.OnTimerContext.class)) {
-        methodErrors.checkArgument(paramT.equals(expectedOnTimerContextT),
-            "Must take %s as the OnTimerContext argument",
-            formatType(expectedOnTimerContextT));
-        return Parameter.onTimerContext();
+      paramErrors.checkArgument(
+          paramT.equals(expectedOnTimerContextT),
+          "OnTimerContext argument must have type %s",
+          formatType(expectedOnTimerContextT));
+      return Parameter.onTimerContext();
     } else if (BoundedWindow.class.isAssignableFrom(rawType)) {
       methodErrors.checkArgument(
           !methodContext.hasWindowParameter(),
           "Multiple %s parameters",
           BoundedWindow.class.getSimpleName());
       return Parameter.boundedWindow((TypeDescriptor<? extends BoundedWindow>) paramT);
-    } else if (rawType.equals(DoFn.InputProvider.class)) {
+    } else if (PipelineOptions.class.equals(rawType)) {
       methodErrors.checkArgument(
-          !methodContext.getExtraParameters().contains(Parameter.inputProvider()),
+          !methodContext.hasPipelineOptionsParamter(),
           "Multiple %s parameters",
-          DoFn.InputProvider.class.getSimpleName());
-      paramErrors.checkArgument(
-          paramT.equals(expectedInputProviderT),
-          "%s is for %s when it should be %s",
-          DoFn.InputProvider.class.getSimpleName(),
-          formatType(paramT),
-          formatType(expectedInputProviderT));
-      return Parameter.inputProvider();
-    } else if (rawType.equals(DoFn.OutputReceiver.class)) {
-      methodErrors.checkArgument(
-          !methodContext.getExtraParameters().contains(Parameter.outputReceiver()),
-          "Multiple %s parameters",
-          DoFn.OutputReceiver.class.getSimpleName());
-      paramErrors.checkArgument(
-          paramT.equals(expectedOutputReceiverT),
-          "%s is for %s when it should be %s",
-          DoFn.OutputReceiver.class.getSimpleName(),
-          formatType(paramT),
-          formatType(expectedOutputReceiverT));
-      return Parameter.outputReceiver();
-
+          PipelineOptions.class.getSimpleName());
+      return Parameter.pipelineOptions();
     } else if (RestrictionTracker.class.isAssignableFrom(rawType)) {
       methodErrors.checkArgument(
           !methodContext.hasRestrictionTrackerParameter(),
@@ -890,7 +892,7 @@ public class DoFnSignatures {
           "reference to %s %s with different type %s",
           StateId.class.getSimpleName(),
           id,
-          stateDecl.stateType());
+          formatType(stateDecl.stateType()));
 
       paramErrors.checkArgument(
           stateDecl.field().getDeclaringClass().equals(param.getMethod().getDeclaringClass()),
@@ -960,17 +962,36 @@ public class DoFnSignatures {
   }
 
   @VisibleForTesting
-  static DoFnSignature.BundleMethod analyzeBundleMethod(
+  static DoFnSignature.BundleMethod analyzeStartBundleMethod(
       ErrorReporter errors,
       TypeDescriptor<? extends DoFn<?, ?>> fnT,
       Method m,
       TypeDescriptor<?> inputT,
       TypeDescriptor<?> outputT) {
     errors.checkArgument(void.class.equals(m.getReturnType()), "Must return void");
-    TypeDescriptor<?> expectedContextT = doFnContextTypeOf(inputT, outputT);
+    TypeDescriptor<?> expectedContextT = doFnStartBundleContextTypeOf(inputT, outputT);
     Type[] params = m.getGenericParameterTypes();
     errors.checkArgument(
-        params.length == 1 && fnT.resolveType(params[0]).equals(expectedContextT),
+        params.length == 0
+            || (params.length == 1 && fnT.resolveType(params[0]).equals(expectedContextT)),
+        "Must take a single argument of type %s",
+        formatType(expectedContextT));
+    return DoFnSignature.BundleMethod.create(m);
+  }
+
+  @VisibleForTesting
+  static DoFnSignature.BundleMethod analyzeFinishBundleMethod(
+      ErrorReporter errors,
+      TypeDescriptor<? extends DoFn<?, ?>> fnT,
+      Method m,
+      TypeDescriptor<?> inputT,
+      TypeDescriptor<?> outputT) {
+    errors.checkArgument(void.class.equals(m.getReturnType()), "Must return void");
+    TypeDescriptor<?> expectedContextT = doFnFinishBundleContextTypeOf(inputT, outputT);
+    Type[] params = m.getGenericParameterTypes();
+    errors.checkArgument(
+        params.length == 0
+            || (params.length == 1 && fnT.resolveType(params[0]).equals(expectedContextT)),
         "Must take a single argument of type %s",
         formatType(expectedContextT));
     return DoFnSignature.BundleMethod.create(m);
@@ -1001,9 +1022,14 @@ public class DoFnSignatures {
         m, fnT.resolveType(m.getGenericReturnType()));
   }
 
-  /** Generates a {@link TypeDescriptor} for {@code List<T>} given {@code T}. */
-  private static <T> TypeDescriptor<List<T>> listTypeOf(TypeDescriptor<T> elementT) {
-    return new TypeDescriptor<List<T>>() {}.where(new TypeParameter<T>() {}, elementT);
+  /**
+   * Generates a {@link TypeDescriptor} for {@code DoFn.OutputReceiver<OutputT>} given {@code
+   * OutputT}.
+   */
+  private static <OutputT> TypeDescriptor<DoFn.OutputReceiver<OutputT>> outputReceiverTypeOf(
+      TypeDescriptor<OutputT> inputT) {
+    return new TypeDescriptor<DoFn.OutputReceiver<OutputT>>() {}.where(
+        new TypeParameter<OutputT>() {}, inputT);
   }
 
   @VisibleForTesting
@@ -1222,7 +1248,8 @@ public class DoFnSignatures {
       }
 
       Class<?> stateSpecRawType = field.getType();
-      if (!(stateSpecRawType.equals(StateSpec.class))) {
+      if (!(TypeDescriptor.of(stateSpecRawType)
+          .isSubtypeOf(TypeDescriptor.of(StateSpec.class)))) {
         errors.throwIllegalArgument(
                 "%s annotation on non-%s field [%s] that has class %s",
             DoFn.StateId.class.getSimpleName(),
@@ -1242,14 +1269,26 @@ public class DoFnSignatures {
 
       Type stateSpecType = field.getGenericType();
 
+      // A type descriptor for whatever type the @StateId-annotated class has, which
+      // must be some subtype of StateSpec
+      TypeDescriptor<? extends StateSpec<?>> stateSpecSubclassTypeDescriptor =
+          (TypeDescriptor) TypeDescriptor.of(stateSpecType);
+
+      // A type descriptor for StateSpec, with the generic type parameters filled
+      // in according to the specialization of the subclass (or just straight params)
+      TypeDescriptor<StateSpec<?>> stateSpecTypeDescriptor =
+          (TypeDescriptor)
+      stateSpecSubclassTypeDescriptor.getSupertype(StateSpec.class);
+
+      // The type of the state, which may still have free type variables from the
+      // context
+      Type unresolvedStateType =
+          ((ParameterizedType) stateSpecTypeDescriptor.getType()).getActualTypeArguments()[0];
+
       // By static typing this is already a well-formed State subclass
       TypeDescriptor<? extends State> stateType =
           (TypeDescriptor<? extends State>)
-              TypeDescriptor.of(fnClazz)
-                  .resolveType(
-                      TypeDescriptor.of(
-                              ((ParameterizedType) stateSpecType).getActualTypeArguments()[1])
-                          .getType());
+              TypeDescriptor.of(fnClazz).resolveType(unresolvedStateType);
 
       declarations.put(id, DoFnSignature.StateDeclaration.create(id, field, stateType));
     }
@@ -1317,7 +1356,7 @@ public class DoFnSignatures {
           this,
           String.format(
               "parameter of type %s at index %s",
-              param.getType(), param.getIndex()));
+              formatType(param.getType()), param.getIndex()));
     }
 
     void throwIllegalArgument(String message, Object... args) {

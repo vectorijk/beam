@@ -19,7 +19,9 @@ package org.apache.beam.sdk.transforms.windowing;
 
 import java.io.InputStream;
 import java.io.OutputStream;
-import org.apache.beam.sdk.coders.AtomicCoder;
+import java.util.Collections;
+import java.util.List;
+import org.apache.beam.sdk.coders.StructuredCoder;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 
@@ -46,20 +48,43 @@ public class GlobalWindow extends BoundedWindow {
     return END_OF_GLOBAL_WINDOW;
   }
 
+  @Override
+  public boolean equals(Object other) {
+    return other instanceof GlobalWindow;
+  }
+
+  @Override
+  public int hashCode() {
+    return GlobalWindow.class.hashCode();
+  }
+
   private GlobalWindow() {}
 
   /**
    * {@link Coder} for encoding and decoding {@code GlobalWindow}s.
    */
-  public static class Coder extends AtomicCoder<GlobalWindow> {
+  public static class Coder extends StructuredCoder<GlobalWindow> {
     public static final Coder INSTANCE = new Coder();
 
     @Override
-    public void encode(GlobalWindow window, OutputStream outStream, Context context) {}
+    public void encode(GlobalWindow window, OutputStream outStream) {}
 
     @Override
-    public GlobalWindow decode(InputStream inStream, Context context) {
+    public GlobalWindow decode(InputStream inStream) {
       return GlobalWindow.INSTANCE;
+    }
+
+    @Override
+    public void verifyDeterministic() {}
+
+    @Override
+    public boolean consistentWithEquals() {
+      return true;
+    }
+
+    @Override
+    public final List<org.apache.beam.sdk.coders.Coder<?>> getCoderArguments() {
+      return Collections.emptyList();
     }
 
     private Coder() {}

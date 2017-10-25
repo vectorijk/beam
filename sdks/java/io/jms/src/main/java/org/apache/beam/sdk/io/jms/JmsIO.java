@@ -18,7 +18,6 @@
 package org.apache.beam.sdk.io.jms;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.annotations.VisibleForTesting;
@@ -37,6 +36,7 @@ import javax.jms.MessageConsumer;
 import javax.jms.MessageProducer;
 import javax.jms.Session;
 import javax.jms.TextMessage;
+import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.coders.AvroCoder;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.SerializableCoder;
@@ -97,6 +97,7 @@ import org.slf4j.LoggerFactory;
  *
  * }</pre>
  */
+@Experimental(Experimental.Kind.SOURCE_SINK)
 public class JmsIO {
 
   private static final Logger LOG = LoggerFactory.getLogger(JmsIO.class);
@@ -129,6 +130,8 @@ public class JmsIO {
     @Nullable abstract ConnectionFactory getConnectionFactory();
     @Nullable abstract String getQueue();
     @Nullable abstract String getTopic();
+    @Nullable abstract String getUsername();
+    @Nullable abstract String getPassword();
     abstract long getMaxNumRecords();
     @Nullable abstract Duration getMaxReadTime();
 
@@ -139,6 +142,8 @@ public class JmsIO {
       abstract Builder setConnectionFactory(ConnectionFactory connectionFactory);
       abstract Builder setQueue(String queue);
       abstract Builder setTopic(String topic);
+      abstract Builder setUsername(String username);
+      abstract Builder setPassword(String password);
       abstract Builder setMaxNumRecords(long maxNumRecords);
       abstract Builder setMaxReadTime(Duration maxReadTime);
       abstract Read build();
@@ -159,8 +164,7 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Read withConnectionFactory(ConnectionFactory connectionFactory) {
-      checkArgument(connectionFactory != null, "withConnectionFactory(connectionFactory) called"
-          + " with null connectionFactory");
+      checkArgument(connectionFactory != null, "connectionFactory can not be null");
       return builder().setConnectionFactory(connectionFactory).build();
     }
 
@@ -183,7 +187,7 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Read withQueue(String queue) {
-      checkArgument(queue != null, "withQueue(queue) called with null queue");
+      checkArgument(queue != null, "queue can not be null");
       return builder().setQueue(queue).build();
     }
 
@@ -206,8 +210,24 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Read withTopic(String topic) {
-      checkArgument(topic != null, "withTopic(topic) called with null topic");
+      checkArgument(topic != null, "topic can not be null");
       return builder().setTopic(topic).build();
+    }
+
+    /**
+     * Define the username to connect to the JMS broker (authenticated).
+     */
+    public Read withUsername(String username) {
+      checkArgument(username != null, "username can not be null");
+      return builder().setUsername(username).build();
+    }
+
+    /**
+     * Define the password to connect to the JMS broker (authenticated).
+     */
+    public Read withPassword(String password) {
+      checkArgument(password != null, "password can not be null");
+      return builder().setPassword(password).build();
     }
 
     /**
@@ -227,8 +247,7 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Read withMaxNumRecords(long maxNumRecords) {
-      checkArgument(maxNumRecords >= 0, "withMaxNumRecords(maxNumRecords) called with invalid "
-          + "maxNumRecords");
+      checkArgument(maxNumRecords >= 0, "maxNumRecords must be > 0, but was: %d", maxNumRecords);
       return builder().setMaxNumRecords(maxNumRecords).build();
     }
 
@@ -249,13 +268,20 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Read withMaxReadTime(Duration maxReadTime) {
-      checkArgument(maxReadTime != null, "withMaxReadTime(maxReadTime) called with null "
-          + "maxReadTime");
+      checkArgument(maxReadTime != null, "maxReadTime can not be null");
       return builder().setMaxReadTime(maxReadTime).build();
     }
 
     @Override
     public PCollection<JmsRecord> expand(PBegin input) {
+      checkArgument(getConnectionFactory() != null, "withConnectionFactory() is required");
+      checkArgument(
+          getQueue() != null || getTopic() != null,
+          "Either withQueue() or withTopic() is required");
+      checkArgument(
+          getQueue() == null || getTopic() == null,
+          "withQueue() and withTopic() are exclusive");
+
       // handles unbounded source to bounded conversion if maxNumRecords is set.
       Unbounded<JmsRecord> unbounded = org.apache.beam.sdk.io.Read.from(createSource());
 
@@ -268,15 +294,6 @@ public class JmsIO {
       }
 
       return input.getPipeline().apply(transform);
-    }
-
-    @Override
-    public void validate(PBegin input) {
-      checkState(getConnectionFactory() != null, "JmsIO.read() requires a JMS connection "
-          + "factory to be set via withConnectionFactory(connectionFactory)");
-      checkState((getQueue() != null || getTopic() != null), "JmsIO.read() requires a JMS "
-          + "destination (queue or topic) to be set via withQueue(queueName) or withTopic"
-          + "(topicName)");
     }
 
     @Override
@@ -303,7 +320,11 @@ public class JmsIO {
 
   private JmsIO() {}
 
-  private static class UnboundedJmsSource extends UnboundedSource<JmsRecord, JmsCheckpointMark> {
+  /**
+   * An unbounded JMS source.
+   */
+  @VisibleForTesting
+  protected static class UnboundedJmsSource extends UnboundedSource<JmsRecord, JmsCheckpointMark> {
 
     private final Read spec;
 
@@ -312,11 +333,18 @@ public class JmsIO {
     }
 
     @Override
-    public List<UnboundedJmsSource> generateInitialSplits(
+    public List<UnboundedJmsSource> split(
         int desiredNumSplits, PipelineOptions options) throws Exception {
       List<UnboundedJmsSource> sources = new ArrayList<>();
-      for (int i = 0; i < desiredNumSplits; i++) {
+      if (spec.getTopic() != null) {
+        // in the case of a topic, we create a single source, so an unique subscriber, to avoid
+        // element duplication
         sources.add(new UnboundedJmsSource(spec));
+      } else {
+        // in the case of a queue, we allow concurrent consumers
+        for (int i = 0; i < desiredNumSplits; i++) {
+          sources.add(new UnboundedJmsSource(spec));
+        }
       }
       return sources;
     }
@@ -328,23 +356,19 @@ public class JmsIO {
     }
 
     @Override
-    public void validate() {
-      spec.validate(null);
-    }
-
-    @Override
     public Coder<JmsCheckpointMark> getCheckpointMarkCoder() {
       return AvroCoder.of(JmsCheckpointMark.class);
     }
 
     @Override
-    public Coder<JmsRecord> getDefaultOutputCoder() {
+    public Coder<JmsRecord> getOutputCoder() {
       return SerializableCoder.of(JmsRecord.class);
     }
 
   }
 
-  private static class UnboundedJmsReader extends UnboundedReader<JmsRecord> {
+  @VisibleForTesting
+  static class UnboundedJmsReader extends UnboundedReader<JmsRecord> {
 
     private UnboundedJmsSource source;
     private JmsCheckpointMark checkpointMark;
@@ -369,23 +393,41 @@ public class JmsIO {
 
     @Override
     public boolean start() throws IOException {
-      ConnectionFactory connectionFactory = source.spec.getConnectionFactory();
+      Read spec = source.spec;
+      ConnectionFactory connectionFactory = spec.getConnectionFactory();
       try {
-        this.connection = connectionFactory.createConnection();
-        this.connection.start();
-        this.session = this.connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
-        if (source.spec.getTopic() != null) {
+        Connection connection;
+        if (spec.getUsername() != null) {
+          connection =
+              connectionFactory.createConnection(spec.getUsername(), spec.getPassword());
+        } else {
+          connection = connectionFactory.createConnection();
+        }
+        connection.start();
+        this.connection = connection;
+      } catch (Exception e) {
+        throw new IOException("Error connecting to JMS", e);
+      }
+
+      try {
+        this.session = this.connection.createSession(false, Session.CLIENT_ACKNOWLEDGE);
+      } catch (Exception e) {
+        throw new IOException("Error creating JMS session", e);
+      }
+
+      try {
+        if (spec.getTopic() != null) {
           this.consumer =
-              this.session.createConsumer(this.session.createTopic(source.spec.getTopic()));
+              this.session.createConsumer(this.session.createTopic(spec.getTopic()));
         } else {
           this.consumer =
-              this.session.createConsumer(this.session.createQueue(source.spec.getQueue()));
+              this.session.createConsumer(this.session.createQueue(spec.getQueue()));
         }
-
-        return advance();
       } catch (Exception e) {
-        throw new IOException(e);
+        throw new IOException("Error creating JMS consumer", e);
       }
+
+      return advance();
     }
 
     @Override
@@ -495,6 +537,8 @@ public class JmsIO {
     @Nullable abstract ConnectionFactory getConnectionFactory();
     @Nullable abstract String getQueue();
     @Nullable abstract String getTopic();
+    @Nullable abstract String getUsername();
+    @Nullable abstract String getPassword();
 
     abstract Builder builder();
 
@@ -503,6 +547,8 @@ public class JmsIO {
       abstract Builder setConnectionFactory(ConnectionFactory connectionFactory);
       abstract Builder setQueue(String queue);
       abstract Builder setTopic(String topic);
+      abstract Builder setUsername(String username);
+      abstract Builder setPassword(String password);
       abstract Write build();
     }
 
@@ -521,8 +567,7 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Write withConnectionFactory(ConnectionFactory connectionFactory) {
-      checkArgument(connectionFactory != null, "withConnectionFactory(connectionFactory) called"
-          + " with null connectionFactory");
+      checkArgument(connectionFactory != null, "connectionFactory can not be null");
       return builder().setConnectionFactory(connectionFactory).build();
     }
 
@@ -545,7 +590,7 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Write withQueue(String queue) {
-      checkArgument(queue != null, "withQueue(queue) called with null queue");
+      checkArgument(queue != null, "queue can not be null");
       return builder().setQueue(queue).build();
     }
 
@@ -568,22 +613,38 @@ public class JmsIO {
      * @return The corresponding {@link JmsIO.Read}.
      */
     public Write withTopic(String topic) {
-      checkArgument(topic != null, "withTopic(topic) called with null topic");
+      checkArgument(topic != null, "topic can not be null");
       return builder().setTopic(topic).build();
+    }
+
+    /**
+     * Define the username to connect to the JMS broker (authenticated).
+     */
+    public Write withUsername(String username) {
+      checkArgument(username != null,  "username can not be null");
+      return builder().setUsername(username).build();
+    }
+
+    /**
+     * Define the password to connect to the JMS broker (authenticated).
+     */
+    public Write withPassword(String password) {
+      checkArgument(password != null, "password can not be null");
+      return builder().setPassword(password).build();
     }
 
     @Override
     public PDone expand(PCollection<String> input) {
+      checkArgument(getConnectionFactory() != null, "withConnectionFactory() is required");
+      checkArgument(
+          getQueue() != null || getTopic() != null,
+          "Either withQueue(queue) or withTopic(topic) is required");
+      checkArgument(
+          getQueue() == null || getTopic() == null,
+          "withQueue(queue) and withTopic(topic) are exclusive");
+
       input.apply(ParDo.of(new WriterFn(this)));
       return PDone.in(input.getPipeline());
-    }
-
-    @Override
-    public void validate(PCollection<String> input) {
-      checkState(getConnectionFactory() != null, "JmsIO.write() requires a JMS connection "
-          + "factory to be set via withConnectionFactory(connectionFactory)");
-      checkState((getQueue() != null || getTopic() != null), "JmsIO.write() requires a JMS "
-          + "destination (queue or topic) to be set via withQueue(queue) or withTopic(topic)");
     }
 
     private static class WriterFn extends DoFn<String, Void> {
@@ -598,10 +659,16 @@ public class JmsIO {
         this.spec = spec;
       }
 
-      @StartBundle
-      public void startBundle(Context c) throws Exception {
+      @Setup
+      public void setup() throws Exception {
         if (producer == null) {
-          this.connection = spec.getConnectionFactory().createConnection();
+          if (spec.getUsername() != null) {
+            this.connection =
+                spec.getConnectionFactory()
+                    .createConnection(spec.getUsername(), spec.getPassword());
+          } else {
+            this.connection = spec.getConnectionFactory().createConnection();
+          }
           this.connection.start();
           // false means we don't use JMS transaction.
           this.session = this.connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
@@ -618,17 +685,12 @@ public class JmsIO {
       @ProcessElement
       public void processElement(ProcessContext ctx) throws Exception {
         String value = ctx.element();
-        try {
-          TextMessage message = session.createTextMessage(value);
-          producer.send(message);
-        } catch (Exception t) {
-          finishBundle(null);
-          throw t;
-        }
+        TextMessage message = session.createTextMessage(value);
+        producer.send(message);
       }
 
-      @FinishBundle
-      public void finishBundle(Context c) throws Exception {
+      @Teardown
+      public void teardown() throws Exception {
         producer.close();
         producer = null;
         session.close();
