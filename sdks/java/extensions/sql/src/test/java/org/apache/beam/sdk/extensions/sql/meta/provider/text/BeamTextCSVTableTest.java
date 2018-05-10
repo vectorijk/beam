@@ -108,6 +108,7 @@ public class BeamTextCSVTableTest {
   @BeforeClass public static void setUp() throws IOException {
     tempFolder = Files.createTempDirectory("BeamTextTableTest");
     readerSourceFile = writeToFile(testData, "readerSourceFile.txt");
+    System.out.println(readerSourceFile.getAbsolutePath());
     writerTargetFile = writeToFile(testData, "writerTargetFile.txt");
   }
 

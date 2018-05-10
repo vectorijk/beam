@@ -51,8 +51,8 @@ public final class BeamTableUtils {
 
       if (rawRecord.size() != schema.getFieldCount()) {
         throw new IllegalArgumentException(String.format(
-            "Expect %d fields, but actually %d",
-            schema.getFieldCount(), rawRecord.size()
+            "Expect %d fields, but actually %d %s",
+            schema.getFieldCount(), rawRecord.size(), rawRecord.toString()
         ));
       }
 
