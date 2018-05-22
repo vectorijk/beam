@@ -34,13 +34,19 @@ import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.plan.Contexts;
 import org.apache.calcite.plan.ConventionTraitDef;
+import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitDef;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
-import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
+import org.apache.calcite.rel.metadata.JaninoRelMetadataProvider;
+import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
+import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperatorTable;
@@ -51,38 +57,43 @@ import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
+import org.apache.calcite.tools.Program;
+import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RelConversionException;
+import org.apache.calcite.tools.RuleSet;
+import org.apache.calcite.tools.RuleSets;
 import org.apache.calcite.tools.ValidationException;
 import org.apache.calcite.util.ConversionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The core component to handle through a SQL statement, from explain execution plan,
- * to generate a Beam pipeline.
- *
+ * The core component to handle through a SQL statement, from explain execution plan, to generate a
+ * Beam pipeline.
  */
 public class BeamQueryPlanner {
   private static final Logger LOG = LoggerFactory.getLogger(BeamQueryPlanner.class);
 
   protected final Planner planner;
+  protected final RelOptPlanner optPlanner;
 
-  public static final JavaTypeFactory TYPE_FACTORY = new JavaTypeFactoryImpl(
-      RelDataTypeSystem.DEFAULT);
+  public static final JavaTypeFactory TYPE_FACTORY =
+      new JavaTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
 
   public BeamQueryPlanner(BeamSqlEnv sqlEnv, SchemaPlus schema) {
     String defaultCharsetKey = "saffron.default.charset";
     if (System.getProperty(defaultCharsetKey) == null) {
       System.setProperty(defaultCharsetKey, ConversionUtil.NATIVE_UTF16_CHARSET_NAME);
-      System.setProperty("saffron.default.nationalcharset",
-        ConversionUtil.NATIVE_UTF16_CHARSET_NAME);
-      System.setProperty("saffron.default.collation.name",
-        String.format("%s$%s", ConversionUtil.NATIVE_UTF16_CHARSET_NAME, "en_US"));
+      System.setProperty(
+          "saffron.default.nationalcharset", ConversionUtil.NATIVE_UTF16_CHARSET_NAME);
+      System.setProperty(
+          "saffron.default.collation.name",
+          String.format("%s$%s", ConversionUtil.NATIVE_UTF16_CHARSET_NAME, "en_US"));
     }
 
     final List<RelTraitDef> traitDefs = new ArrayList<>();
     traitDefs.add(ConventionTraitDef.INSTANCE);
-    traitDefs.add(RelCollationTraitDef.INSTANCE);
+    //    traitDefs.add(RelCollationTraitDef.INSTANCE);
 
     List<SqlOperatorTable> sqlOperatorTables = new ArrayList<>();
     sqlOperatorTables.add(SqlStdOperatorTable.instance());
@@ -92,10 +103,11 @@ public class BeamQueryPlanner {
 
     FrameworkConfig config =
         Frameworks.newConfigBuilder()
-            .parserConfig(SqlParser.configBuilder()
-                .setLex(Lex.MYSQL)
-                .setParserFactory(BeamSqlParserImpl.FACTORY)
-                .build())
+            .parserConfig(
+                SqlParser.configBuilder()
+                    .setLex(Lex.MYSQL)
+                    .setParserFactory(BeamSqlParserImpl.FACTORY)
+                    .build())
             .defaultSchema(schema)
             .traitDefs(traitDefs)
             .context(Contexts.EMPTY_CONTEXT)
@@ -105,13 +117,26 @@ public class BeamQueryPlanner {
             .operatorTable(new ChainedSqlOperatorTable(sqlOperatorTables))
             .build();
     this.planner = Frameworks.getPlanner(config);
+
+    VolcanoPlanner volcanoPlanner = new VolcanoPlanner(config.getCostFactory(), Contexts.empty());
+    volcanoPlanner.setExecutor(config.getExecutor());
+    volcanoPlanner.addRelTraitDef(ConventionTraitDef.INSTANCE);
+
+    RelOptCluster optCluster = RelOptCluster.create(volcanoPlanner, new RexBuilder(TYPE_FACTORY));
+    optCluster.setMetadataProvider(DefaultRelMetadataProvider.INSTANCE);
+    // just set metadataProvider is not enough, see
+    // https://www.mail-archive.com/dev@calcite.apache.org/msg00930.html
+    RelMetadataQuery.THREAD_PROVIDERS.set(
+        JaninoRelMetadataProvider.of(optCluster.getMetadataProvider()));
+    this.optPlanner = optCluster.getPlanner();
   }
 
   /**
    * Parse input SQL query, and return a {@link SqlNode} as grammar tree.
    */
   public SqlNode parseQuery(String sqlQuery) throws SqlParseException{
-    return planner.parse(sqlQuery);
+    SqlNode test = planner.parse(sqlQuery);
+    return test;
   }
 
   /**
@@ -119,8 +144,8 @@ public class BeamQueryPlanner {
    * which is linked with the given {@code pipeline}. The final output stream is returned as
    * {@code PCollection} so more operations can be applied.
    */
-  public PCollection<Row> compileBeamPipeline(String sqlStatement, Pipeline basePipeline
-      , BeamSqlEnv sqlEnv) throws Exception {
+  public PCollection<Row> compileBeamPipeline(
+      String sqlStatement, Pipeline basePipeline, BeamSqlEnv sqlEnv) throws Exception {
     BeamRelNode relNode = convertToBeamRel(sqlStatement);
 
     // the input PCollectionTuple is empty, and be rebuilt in BeamIOSourceRel.
@@ -133,22 +158,81 @@ public class BeamQueryPlanner {
    *
    */
   public BeamRelNode convertToBeamRel(String sqlStatement)
-      throws ValidationException, RelConversionException, SqlParseException {
+          throws Exception {
     BeamRelNode beamRelNode;
     try {
-      beamRelNode = (BeamRelNode) validateAndConvert(planner.parse(sqlStatement));
+      SqlNode test = planner.parse(sqlStatement);
+      beamRelNode = (BeamRelNode) validateAndConvert(test);
+    } catch (Exception e) {
+      throw e;
     } finally {
       planner.close();
     }
     return beamRelNode;
   }
 
-  private RelNode validateAndConvert(SqlNode sqlNode)
-      throws ValidationException, RelConversionException {
+  private RelNode validateAndConvert(SqlNode sqlNode) throws Exception {
     SqlNode validated = validateNode(sqlNode);
-    LOG.info("SQL:\n" + validated);
+    LOG.debug("SQL:\n" + validated);
+
     RelNode relNode = convertToRelNode(validated);
-    return convertToBeamRel(relNode);
+    LOG.debug("RelNode:\n" + RelOptUtil.toString(relNode));
+
+    // optimize logic plan
+    RelNode optLogicPlanRelNode = optimizeLogicPlan(relNode);
+    LOG.debug("OptimizeRelNode:\n" + RelOptUtil.toString(optLogicPlanRelNode));
+
+    return convertToBeamRel(optLogicPlanRelNode);
+  }
+
+  /** execute volcano planner. */
+  private RelNode runVolcanoPlanner(
+      RuleSet logicalOptRuleSet, RelNode relNode, RelTraitSet logicalOutputProps) throws Exception {
+    Program optProgram = Programs.ofRules(logicalOptRuleSet);
+
+    RelNode output;
+
+    try {
+      output =
+          optProgram.run(
+              relNode.getCluster().getPlanner(),
+              relNode,
+              logicalOutputProps,
+              Collections.EMPTY_LIST,
+              Collections.EMPTY_LIST);
+    } catch (RelOptPlanner.CannotPlanException e) {
+      throw new Exception(
+          "Cannot generate a valid execution plan for the given query: \n\n"
+              + "This exception indicates that the query uses an unsupported SQL feature.\n"
+              + "Please check the documentation for the set of currently supported SQL features.");
+    } catch (AssertionError e) {
+      throw e;
+    }
+
+    return output;
+  }
+
+  private RuleSet getLogicOptRuleSet() {
+    return RuleSets.ofList(BeamRuleSets.LOGICAL_OPT_RULES);
+  }
+
+  private RelNode optimizeLogicPlan(RelNode relNode) throws Exception {
+    RuleSet logicalOptRuleSet = getLogicOptRuleSet();
+    RelTraitSet logicalOutputProps = relNode.getTraitSet();
+    RelTraitSet tmp =
+        RelTraitSet.createEmpty()
+            .plus(logicalOutputProps.getTrait(0))
+            .replace(BeamLogicalConvention.INSTANCE)
+            .simplify();
+
+    RelNode optLogicalPlan;
+    if (logicalOptRuleSet.iterator().hasNext()) {
+      optLogicalPlan = runVolcanoPlanner(logicalOptRuleSet, relNode, tmp);
+    } else {
+      optLogicalPlan = relNode;
+    }
+
+    return optLogicalPlan;
   }
 
   private RelNode convertToBeamRel(RelNode relNode) throws RelConversionException {
@@ -171,5 +255,4 @@ public class BeamQueryPlanner {
   public Planner getPlanner() {
     return planner;
   }
-
 }
