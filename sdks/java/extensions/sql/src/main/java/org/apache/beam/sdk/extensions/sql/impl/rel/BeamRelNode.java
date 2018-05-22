@@ -22,9 +22,14 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionTuple;
 import org.apache.beam.sdk.values.Row;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.type.RelDataType;
 
 /** A {@link RelNode} that can also give a {@link PTransform} that implements the expression. */
 public interface BeamRelNode extends RelNode {
+
+  static double estimateRowSize(RelDataType rowType) {
+
+  }
 
   /**
    * A {@link BeamRelNode} is a recursive structure, the {@code BeamQueryPlanner} visits it with a

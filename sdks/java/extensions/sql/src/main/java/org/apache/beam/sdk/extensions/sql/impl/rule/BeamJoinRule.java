@@ -24,6 +24,8 @@ import org.apache.calcite.plan.Convention;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Join;
+import org.apache.calcite.rel.core.JoinInfo;
+import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.logical.LogicalJoin;
 
 /** {@code ConverterRule} to replace {@code Join} with {@code BeamJoinRel}. */
@@ -37,6 +39,19 @@ public class BeamJoinRule extends ConverterRule {
   @Override
   public RelNode convert(RelNode rel) {
     Join join = (Join) rel;
+    System.out.println("Join Condition Type:" + join.getCondition().getType().toString());
+    System.out.println("Join Condition:" + join.getCondition().getKind());
+    System.out.println("Join Type" + join.getJoinType().toString());
+    System.out.println("Join Type" + join.getJoinType().toString());
+
+    RelNode left = join.getInput(0);
+    RelNode right = join.getInput(1);
+
+    final JoinInfo info = JoinInfo.of(left, right, join.getCondition());
+//    if (info.isEqui() && join.getJoinType() == JoinRelType.INNER) {
+//      return null;
+//    }
+
     return new BeamJoinRel(
         join.getCluster(),
         join.getTraitSet().replace(BeamLogicalConvention.INSTANCE),

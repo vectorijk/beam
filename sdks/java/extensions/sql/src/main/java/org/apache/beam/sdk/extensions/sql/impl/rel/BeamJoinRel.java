@@ -330,6 +330,7 @@ public class BeamJoinRel extends Join implements BeamRelNode {
   private List<Pair<Integer, Integer>> extractJoinColumns(int leftRowColumnCount) {
     // it's a CROSS JOIN because: condition == true
     if (condition instanceof RexLiteral && (Boolean) ((RexLiteral) condition).getValue()) {
+
       throw new UnsupportedOperationException("CROSS JOIN is not supported!");
     }
 
