@@ -173,7 +173,7 @@ class TPCdsSql {
 
     String rootPath = "/Users/jiangkai/data/";
 
-    String storeSalesFilePath = rootPath + "store_sales1.dat";
+    String storeSalesFilePath = rootPath + "store_sales_c.dat";
     String reasonFilePath = rootPath + "reason.dat";
     String dateDimFilePath = rootPath + "date_dim.dat";
 //    String storeFilePath = rootPath + "store.dat";
@@ -227,15 +227,19 @@ class TPCdsSql {
             + "                  where ss_quantity between 81 and 100) end bucket5\n"
             + " from reason\n";
 
-    String query9simplify = "select case when (select count(*) \n"
-        + "                  from store_sales \n"
-        + "                  where ss_quantity between 1 and 20) > 1071\n"
-        + "            then (select avg(ss_ext_tax) \n" + "                  from store_sales \n"
-        + "                  where ss_quantity between 1 and 20) \n"
-        + "            else (select avg(ss_net_paid_inc_tax)\n"
-        + "                  from store_sales\n"
-        + "                  where ss_quantity between 1 and 20) end bucket1 \n" + "from reason"
-        + " where r_reason_sk = 1" ;
+    String query9simplify =
+            "select case when (select count(*) \n"
+                    + "                  from store_sales \n"
+                    + "                  where ss_quantity between 1 and 20) > 1071\n"
+                    + "            then (select avg(ss_ext_tax) \n"
+                    + "                  from store_sales \n"
+                    + "                  where ss_quantity between 1 and 20) \n"
+                    + "            else (select avg(ss_net_paid_inc_tax)\n"
+                    + "                  from store_sales\n"
+                    + "                  where ss_quantity between 1 and 20) end bucket1 \n"
+                    + "from reason "
+//                    + " where r_reason_sk = 1"
+            ;
 
     String query59 = "with wss as \n"
         + " (select d_week_seq,\n"
@@ -312,10 +316,10 @@ class TPCdsSql {
                     .buildIOReader(pipeline)
                     .setCoder(reasonSchema.getRowCoder());
 
-    PCollection<Row> dateDimTable =
-            new BeamTextCSVTable(dateDimSchema, dateDimFilePath, format)
-                    .buildIOReader(pipeline)
-                    .setCoder(dateDimSchema.getRowCoder());
+//    PCollection<Row> dateDimTable =
+//            new BeamTextCSVTable(dateDimSchema, dateDimFilePath, format)
+//                    .buildIOReader(pipeline)
+//                    .setCoder(dateDimSchema.getRowCoder());
 
 //    PCollection<Row> item_table =
 //            new BeamTextCSVTable(reason_schema, item_file_path, format)
@@ -329,7 +333,7 @@ class TPCdsSql {
 
     PCollectionTuple tables = PCollectionTuple
             .of(new TupleTag<>("reason"), reasonTable)
-            .and(new TupleTag<>("date_dim"), dateDimTable)
+//            .and(new TupleTag<>("date_dim"), dateDimTable)
             .and(new TupleTag<>("store_sales"), storeSalesTable)
 //            .and(new TupleTag<>("store"), storeTable)
             ;

@@ -106,20 +106,23 @@ class TPC_H {
     String rootPath = "/Users/jiangkai/data/";
 
     String nationFilePath = rootPath + "nation.tbl";
-    String lineitemFilePath = rootPath + "lineitem.tbl";
+    String lineitemFilePath = rootPath + "lineitem_c.tbl";
     String orderFilePath = rootPath + "orders_c.tbl";
     String customerFilePath = rootPath + "customer_c.tbl";
 
     String query10 = "select c_custkey,\n" + "    c_name,\n"
-        + "    sum(l_extendedprice * (1 - l_discount)) as revenue,\n" + "    c_acctbal,\n"
+        + "    SUM(l_extendedprice * (1 - l_discount)) as revenue,\n"
+            + "    c_acctbal,\n"
         + "    n_name,\n" + "    c_address,\n" + "    c_phone,\n" + "    c_comment\n" + "from\n"
         + "    customer,\n" + "    orders,\n" + "    lineitem,\n" + "    nation\n" + "where\n"
         + "    c_custkey = o_custkey\n" + "    and l_orderkey = o_orderkey\n"
         + "    and o_orderdate >= '1993-10-01'\n" + "    and o_orderdate < '1994-01-01'\n"
         + "    and l_returnflag = 'R'\n" + "    and c_nationkey = n_nationkey\n" + "group by\n"
         + "    c_custkey,\n" + "    c_name,\n" + "    c_acctbal,\n" + "    c_phone,\n"
-        + "    n_name,\n" + "    c_address,\n" + "    c_comment\n" + "order by\n"
-        + "    revenue desc\n" + "limit 20";
+        + "    n_name,\n" + "    c_address,\n" + "    c_comment\n"
+            + "order by\n"
+        + "    revenue desc\n"
+            + "limit 20";
 
     String Q10 = "SELECT *\n"
         + "FROM\n"
@@ -145,20 +148,20 @@ class TPC_H {
                     .buildIOReader(pipeline)
                     .setCoder(nationSchema.getRowCoder());
 
-//    PCollection<Row> lineitemTable =
-//            new BeamTextCSVTable(lineitemSchema, lineitemFilePath, format)
-//                    .buildIOReader(pipeline)
-//                    .setCoder(lineitemSchema.getRowCoder());
+    PCollection<Row> lineitemTable =
+            new BeamTextCSVTable(lineitemSchema, lineitemFilePath, format)
+                    .buildIOReader(pipeline)
+                    .setCoder(lineitemSchema.getRowCoder());
 
     PCollectionTuple tables = PCollectionTuple
             .of(new TupleTag<>("nation"), nationTable)
             .and(new TupleTag<>("customer"), customerTable)
-//            .and(new TupleTag<>("lineitem"), lineitemTable)
+            .and(new TupleTag<>("lineitem"), lineitemTable)
             .and(new TupleTag<>("orders"), orderTable);
 
 
     tables.apply(
-            BeamSql.query(Q10)
+            BeamSql.query(query10)
     ).apply(
             "exp_table",
             MapElements.via(

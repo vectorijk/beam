@@ -76,63 +76,63 @@ public class BeamRuleSets {
             // push filter into the children of a join
             FilterJoinRule.JOIN,
             // push filter through an aggregation
-//            FilterAggregateTransposeRule.INSTANCE,
-//            // push filter through set operation
-//            FilterSetOpTransposeRule.INSTANCE,
-//            // push project through set operation
-//            ProjectSetOpTransposeRule.INSTANCE,
-//
-//            // aggregation and projection rules
+            FilterAggregateTransposeRule.INSTANCE,
+            // push filter through set operation
+            FilterSetOpTransposeRule.INSTANCE,
+            // push project through set operation
+            ProjectSetOpTransposeRule.INSTANCE,
+
+            // aggregation and projection rules
 //            AggregateProjectMergeRule.INSTANCE, AggregateProjectPullUpConstantsRule.INSTANCE,
-//            // push a projection past a filter or vice versa
-//            ProjectFilterTransposeRule.INSTANCE, FilterProjectTransposeRule.INSTANCE,
-//            // push a projection to the children of a join
-//            // push all expressions to handle the time indicator correctly
-//            new ProjectJoinTransposeRule(PushProjector.ExprCondition.FALSE, RelFactories.LOGICAL_BUILDER),
-//            // merge projections
-//            ProjectMergeRule.INSTANCE,
-//            // remove identity project
-//            ProjectRemoveRule.INSTANCE,
-//            // reorder sort and projection
-//            SortProjectTransposeRule.INSTANCE, ProjectSortTransposeRule.INSTANCE,
+            // push a projection past a filter or vice versa
+            ProjectFilterTransposeRule.INSTANCE, FilterProjectTransposeRule.INSTANCE,
+            // push a projection to the children of a join
+            // push all expressions to handle the time indicator correctly
+            new ProjectJoinTransposeRule(PushProjector.ExprCondition.FALSE, RelFactories.LOGICAL_BUILDER),
+            // merge projections
+            ProjectMergeRule.INSTANCE,
+            // remove identity project
+            ProjectRemoveRule.INSTANCE,
+            // reorder sort and projection
+            SortProjectTransposeRule.INSTANCE, ProjectSortTransposeRule.INSTANCE,
 
             // join rules
             JoinPushExpressionsRule.INSTANCE,
 
 //            // remove union with only a single child
-//            UnionEliminatorRule.INSTANCE,
-//            // convert non-all union into all-union + distinct
-//            UnionToDistinctRule.INSTANCE,
-//
-//            // remove aggregation if it does not aggregate and input is already distinct
-//            AggregateRemoveRule.INSTANCE,
-//            // push aggregate through join
-//            AggregateJoinTransposeRule.EXTENDED,
-//            // aggregate union rule
-//            AggregateUnionAggregateRule.INSTANCE,
-//
-//            // reduce aggregate functions like AVG, STDDEV_POP etc.
-//            AggregateReduceFunctionsRule.INSTANCE,
+            UnionEliminatorRule.INSTANCE,
+            // convert non-all union into all-union + distinct
+            UnionToDistinctRule.INSTANCE,
 
-//            // remove unnecessary sort rule
-//            SortRemoveRule.INSTANCE,
-//
-//            // prune empty results rules
-//            PruneEmptyRules.AGGREGATE_INSTANCE, PruneEmptyRules.FILTER_INSTANCE,
-//            PruneEmptyRules.JOIN_LEFT_INSTANCE, PruneEmptyRules.JOIN_RIGHT_INSTANCE,
-//            PruneEmptyRules.PROJECT_INSTANCE, PruneEmptyRules.SORT_INSTANCE,
-//            PruneEmptyRules.UNION_INSTANCE,
-//
-//            // calc rules
-//            FilterCalcMergeRule.INSTANCE, ProjectCalcMergeRule.INSTANCE, FilterToCalcRule.INSTANCE,
-//            ProjectToCalcRule.INSTANCE, CalcMergeRule.INSTANCE
+            // remove aggregation if it does not aggregate and input is already distinct
+            AggregateRemoveRule.INSTANCE,
+            // push aggregate through join
+            AggregateJoinTransposeRule.EXTENDED,
+            // aggregate union rule
+            AggregateUnionAggregateRule.INSTANCE,
 
-            // scan optimization
-            //  PushProjectIntoTableSourceScanRule.INSTANCE,
-            //  PushFilterIntoTableSourceScanRule.INSTANCE,
+            // reduce aggregate functions like AVG, STDDEV_POP etc.
+//            AggregateReduceFunctionsRule.INSTANCE, // failed
 
-            // unnest rule
-            //  LogicalUnnestRule.INSTANCE,
+            // remove unnecessary sort rule
+            SortRemoveRule.INSTANCE,
+
+            // prune empty results rules
+            PruneEmptyRules.AGGREGATE_INSTANCE, PruneEmptyRules.FILTER_INSTANCE,
+            PruneEmptyRules.JOIN_LEFT_INSTANCE, PruneEmptyRules.JOIN_RIGHT_INSTANCE,
+            PruneEmptyRules.PROJECT_INSTANCE, PruneEmptyRules.SORT_INSTANCE,
+            PruneEmptyRules.UNION_INSTANCE,
+
+            // calc rules
+            FilterCalcMergeRule.INSTANCE, ProjectCalcMergeRule.INSTANCE, FilterToCalcRule.INSTANCE,
+            ProjectToCalcRule.INSTANCE, CalcMergeRule.INSTANCE,
+
+//             scan optimization
+//              PushProjectIntoTableSourceScanRule.INSTANCE,
+//              PushFilterIntoTableSourceScanRule.INSTANCE,
+
+//             unnest rule
+//              LogicalUnnestRule.INSTANCE,
 
             // translate to beam logical rel nodes
             BeamAggregationRule.INSTANCE,

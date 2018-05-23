@@ -159,9 +159,16 @@ task runPojoExample(type: JavaExec) {
   args = ["--runner=DirectRunner"]
 }
 
-task runTPCExample(type: JavaExec) {
+task runTPCHExample(type: JavaExec) {
   description = "Run TPC-DS SQL query example"
   main = "org.apache.beam.sdk.extensions.sql.example.TPC_H"
+  classpath = sourceSets.main.runtimeClasspath
+  args = ["--runner=DirectRunner"]
+}
+
+task runTPCDSExample(type: JavaExec) {
+  description = "Run TPC-DS SQL query example"
+  main = "org.apache.beam.sdk.extensions.sql.example.TPCdsSql"
   classpath = sourceSets.main.runtimeClasspath
   args = ["--runner=DirectRunner"]
 }
