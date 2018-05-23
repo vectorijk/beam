@@ -18,10 +18,12 @@
 package org.apache.beam.sdk.extensions.sql.impl.planner;
 
 import org.apache.beam.sdk.extensions.sql.impl.BeamSqlEnv;
+import org.apache.beam.sdk.extensions.sql.impl.rel.BeamIOSinkRel;
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamRelNode;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamAggregationRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamEnumerableConverterRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamFilterRule;
+import org.apache.beam.sdk.extensions.sql.impl.rule.BeamIOSinkRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamIntersectRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamMinusRule;
@@ -95,7 +97,7 @@ public class BeamRuleSets {
 //            SortProjectTransposeRule.INSTANCE, ProjectSortTransposeRule.INSTANCE,
 
             // join rules
-            JoinPushExpressionsRule.INSTANCE
+            JoinPushExpressionsRule.INSTANCE,
 
 //            // remove union with only a single child
 //            UnionEliminatorRule.INSTANCE,
@@ -132,7 +134,19 @@ public class BeamRuleSets {
             // unnest rule
             //  LogicalUnnestRule.INSTANCE,
 
-            // translate to flink logical rel nodes
+            // translate to beam logical rel nodes
+            BeamAggregationRule.INSTANCE,
+            BeamEnumerableConverterRule.INSTANCE,
+            BeamFilterRule.INSTANCE,
+            BeamIntersectRule.INSTANCE,
+            BeamIOSinkRule.INSTANCE,
+            BeamJoinRule.INSTANCE,
+            BeamMinusRule.INSTANCE,
+            BeamProjectRule.INSTANCE,
+            BeamSortRule.INSTANCE,
+            BeamUnionRule.INSTANCE,
+            BeamValuesRule.INSTANCE
+
  /* FlinkLogicalAggregate.CONVERTER,
   FlinkLogicalWindowAggregate.CONVERTER,
   FlinkLogicalOverWindow.CONVERTER,

@@ -185,7 +185,7 @@ public class BeamQueryPlanner {
     RelNode optLogicPlanRelNode = optimizeLogicPlan(relNode);
     System.out.println("OptimizeRelNode:\n" + optLogicPlanRelNode.toString());
 
-    return convertToBeamRel(relNode);
+    return convertToBeamRel(optLogicPlanRelNode);
   }
 
   /**
@@ -219,7 +219,8 @@ public class BeamQueryPlanner {
   private RelNode optimizeLogicPlan(RelNode relNode) throws Exception {
     RuleSet logicalOptRuleSet = getLogicOptRuleSet();
     RelTraitSet logicalOutputProps = relNode.getTraitSet();
-      Convention LOGICAL = new Convention.Impl("BEAM-LOGICAL", BeamRelNode.class);
+//      Convention LOGICAL = new Convention.Impl("BEAM-LOGICAL", BeamRelNode.class);
+      Convention LOGICAL = BeamLogicalConvention.INSTANCE;
 //    RelTraitSet logicalOutputProps = relNode.getTraitSet()
     RelTraitSet tmp = RelTraitSet.createEmpty()
             .plus(logicalOutputProps.getTrait(0))

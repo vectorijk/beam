@@ -49,7 +49,7 @@ public class BeamIOSourceRel extends TableScan implements BeamRelNode {
   @Override
   public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
     double rowCnt = mq.getRowCount(this);
-    return planner.getCostFactory().makeCost(rowCnt, rowCnt, rowCnt * estimateRowCount(mq));
+    return planner.getCostFactory().makeCost(rowCnt, rowCnt, rowCnt * estimateRowSize(getRowType()));
   }
 
   @Override

@@ -107,8 +107,8 @@ class TPC_H {
 
     String nationFilePath = rootPath + "nation.tbl";
     String lineitemFilePath = rootPath + "lineitem.tbl";
-    String orderFilePath = rootPath + "order.tbl";
-    String customerFilePath = rootPath + "customer.tbl";
+    String orderFilePath = rootPath + "orders_c.tbl";
+    String customerFilePath = rootPath + "customer_c.tbl";
 
     String query10 = "select c_custkey,\n" + "    c_name,\n"
         + "    sum(l_extendedprice * (1 - l_discount)) as revenue,\n" + "    c_acctbal,\n"
@@ -127,8 +127,8 @@ class TPC_H {
         + "    orders\n"
 //        + "    orders\n";
         + " WHERE \n"
-        + "    c_custkey = o_custkey"
-        + " AND c_custkey < 5 ";
+        + "    c_custkey = o_custkey and c_custkey >= 3"
+        + " ";
 
     PCollection<Row> orderTable =
           new BeamTextCSVTable(orderSchema, orderFilePath, format)
@@ -145,15 +145,15 @@ class TPC_H {
                     .buildIOReader(pipeline)
                     .setCoder(nationSchema.getRowCoder());
 
-    PCollection<Row> lineitemTable =
-            new BeamTextCSVTable(lineitemSchema, lineitemFilePath, format)
-                    .buildIOReader(pipeline)
-                    .setCoder(lineitemSchema.getRowCoder());
+//    PCollection<Row> lineitemTable =
+//            new BeamTextCSVTable(lineitemSchema, lineitemFilePath, format)
+//                    .buildIOReader(pipeline)
+//                    .setCoder(lineitemSchema.getRowCoder());
 
     PCollectionTuple tables = PCollectionTuple
             .of(new TupleTag<>("nation"), nationTable)
             .and(new TupleTag<>("customer"), customerTable)
-            .and(new TupleTag<>("lineitem"), lineitemTable)
+//            .and(new TupleTag<>("lineitem"), lineitemTable)
             .and(new TupleTag<>("orders"), orderTable);
 
 
