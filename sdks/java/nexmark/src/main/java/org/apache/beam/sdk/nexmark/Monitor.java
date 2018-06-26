@@ -32,7 +32,7 @@ import org.apache.beam.sdk.values.PCollection;
  *
  * @param <T> Type of element we are monitoring.
  */
-public class Monitor<T extends KnownSize> implements Serializable {
+public class Monitor<T> implements Serializable {
   private class MonitorDoFn extends DoFn<T, T> {
     final Counter elementCounter = Metrics.counter(name, prefix + ".elements");
     final Counter bytesCounter = Metrics.counter(name, prefix + ".bytes");
@@ -44,7 +44,11 @@ public class Monitor<T extends KnownSize> implements Serializable {
     @ProcessElement
     public void processElement(ProcessContext c) {
       elementCounter.inc();
-      bytesCounter.inc(c.element().sizeInBytes());
+        if (c.element() instanceof KnownSize) {
+            bytesCounter.inc(((KnownSize) c.element()).sizeInBytes());
+        } else {
+            bytesCounter.inc(0);
+        }
       long now = System.currentTimeMillis();
       startTime.update(now);
       endTime.update(now);
