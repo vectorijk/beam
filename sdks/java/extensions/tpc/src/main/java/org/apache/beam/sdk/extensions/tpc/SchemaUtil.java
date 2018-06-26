@@ -1,24 +1,31 @@
 package org.apache.beam.sdk.extensions.tpc;
 
 import com.google.common.collect.ImmutableMap;
-// import io.airlift.tpch.TpchColumn;
-// import io.airlift.tpch.TpchEntity;
-import io.airlift.tpch.TpchColumn;
-import io.airlift.tpch.TpchEntity;
-import io.airlift.tpch.TpchTable;
 import net.hydromatic.tpcds.TpcdsColumn;
-import net.hydromatic.tpcds.TpcdsEntity;
 import net.hydromatic.tpcds.TpcdsTable;
 import org.apache.beam.sdk.schemas.Schema;
-
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
-// import org.apache.calcite.rel.type.RelDataType;
-// import org.apache.calcite.rel.type.RelDataTypeFactory;
-// import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
+//import org.apache.beam.sdk.transforms.FlatMapElements;
+//import org.apache.beam.sdk.transforms.MapElements;
+//import org.apache.beam.sdk.transforms.PTransform;
+//import org.apache.beam.sdk.values.PCollection;
+//import org.apache.beam.sdk.values.Row;
+//import org.apache.beam.sdk.values.TypeDescriptors;
+//import java.io.Serializable;
+//import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTable;
+//import net.hydromatic.tpcds.TpcdsEntity;
+// import org.apache.calcite.rel.type.RelDataType;
+// import org.apache.calcite.rel.type.RelDataTypeFactory;
+// import org.apache.calcite.rel.type.RelDataTypeField;
+// import io.airlift.tpch.TpchColumn;
+// import io.airlift.tpch.TpchEntity;
+//import io.airlift.tpch.TpchColumn;
+//import io.airlift.tpch.TpchEntity;
+//import io.airlift.tpch.TpchTable;
 
 /** Tpc Schema. */
 public class SchemaUtil {
@@ -194,7 +201,8 @@ public class SchemaUtil {
     }
     return builder.build();
   }
-  //
+}
+//
   //    private Class<?> realType(TpchColumn<? extends TpchEntity> column) {
   //        if (column.getColumnName().endsWith("date")) {
   //            return java.sql.Date.class;
@@ -221,4 +229,4 @@ public class SchemaUtil {
   //          Table tpcdsTable = tpcdsschema.getTable(tableName);
   //          return CalciteUtils.toBeamSchema(tpcdsTable.getRowType(TYPE_FACTORY));
   //      }
-}
+

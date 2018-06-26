@@ -112,7 +112,8 @@
 //        if (typeName != null) {
 //          return typeName;
 //        } else {
-//          // This will happen e.g. if looking up a STRING type, and metadata isn't set to say which
+//          // This will happen e.g. if looking up a STRING type, and metadata
+// isn't set to say which
 //          // type of SQL string we want. In this case, use the default mapping.
 //          return BEAM_TO_CALCITE_DEFAULT_MAPPING.get(type);
 //        }

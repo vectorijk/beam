@@ -1,12 +1,10 @@
 package org.apache.beam.sdk.extensions.tpc;
 
+import javax.annotation.Nullable;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.extensions.sql.SqlTransform;
 import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTable;
-import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTableProvider.RowToCsv;
-import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTableProvider.CsvToRow;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-//import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.values.PCollection;
@@ -14,8 +12,10 @@ import org.apache.beam.sdk.values.PCollectionTuple;
 import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.commons.csv.CSVFormat;
-
-import javax.annotation.Nullable;
+//import org.apache.beam.sdk.extensions.tpc.CsvToRow;
+//import org.apache.beam.sdk.extensions.tpc.RowToCsv;
+//import org.apache.beam.sdk.schemas.Schema;
+//import org.apache.beam.sdk.schemas.Schema;
 
 /** Test now. */
 public class BeamTpc {
@@ -28,6 +28,7 @@ public class BeamTpc {
 //            .addStringField("r_reason_desc")
 //            .build();
 
+    // Option for lanunch Tpc benchmark.
     TpcOptions tpcOptions =
         PipelineOptionsFactory.fromArgs(args).withValidation().as(TpcOptions.class);
 
