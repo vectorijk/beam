@@ -29,7 +29,6 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.AvroCoder;
 import org.apache.beam.sdk.coders.ByteArrayCoder;
 import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.coders.CoderException;
 import org.apache.beam.sdk.coders.CoderRegistry;
 import org.apache.beam.sdk.coders.CustomCoder;
 import org.apache.beam.sdk.coders.SerializableCoder;
@@ -90,21 +89,23 @@ public class NexmarkUtils {
    */
   public enum SourceType {
     /**
-     * Produce events directly.
-     */
-    DIRECT,
-    /**
      * Read events from an Avro file.
      */
     AVRO,
-    /**
-     * Read from a PubSub topic. It will be fed the same synthetic events by this pipeline.
-     */
-    PUBSUB,
+      // only read csv file from generated tpc data
+      CSV,
+      /**
+       * Produce events directly.
+       */
+      DIRECT,
     /**
      * Read events from a Kafka topic. It will be fed the same synthetic events by this pipeline.
      */
-    KAFKA
+    KAFKA,
+    /**
+     * Read from a PubSub topic. It will be fed the same synthetic events by this pipeline.
+     */
+    PUBSUB
   }
 
   /**
@@ -174,7 +175,8 @@ public class NexmarkUtils {
     /**
      * Java serialization.
      */
-    JAVA
+    JAVA,
+      CSV
   }
 
   /**
@@ -415,6 +417,10 @@ public class NexmarkUtils {
       case JAVA:
         registry.registerCoderProvider(SerializableCoder.getCoderProvider());
         break;
+        case CSV:
+//        Schema reasonSchema = new TpcUtil().getDSschema("REASON");
+//        registry.registerCoderForType(reasonSchema.wait(), reasonSchema.getRowCoder().);
+            break;
     }
   }
 
@@ -691,16 +697,14 @@ public class NexmarkUtils {
     }
 
     @Override
-    public void encode(KnownSize value, OutputStream outStream)
-        throws CoderException, IOException {
+    public void encode(KnownSize value, OutputStream outStream) throws IOException {
       @SuppressWarnings("unchecked")
       T typedValue = (T) value;
       trueCoder.encode(typedValue, outStream);
     }
 
     @Override
-    public KnownSize decode(InputStream inStream)
-        throws CoderException, IOException {
+    public KnownSize decode(InputStream inStream) throws IOException {
       return trueCoder.decode(inStream);
     }
   }

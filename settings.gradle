@@ -94,6 +94,8 @@ include "beam-sdks-java-extensions-sql"
 project(":beam-sdks-java-extensions-sql").dir = file("sdks/java/extensions/sql")
 include "beam-sdks-java-extensions-sql-jdbc"
 project(":beam-sdks-java-extensions-sql-jdbc").dir = file("sdks/java/extensions/sql/jdbc")
+include "beam-sdks-java-extensions-tpc"
+project(":beam-sdks-java-extensions-tpc").dir = file("sdks/java/extensions/tpc")
 include "beam-sdks-java-fn-execution"
 project(":beam-sdks-java-fn-execution").dir = file("sdks/java/fn-execution")
 include "beam-sdks-java-harness"

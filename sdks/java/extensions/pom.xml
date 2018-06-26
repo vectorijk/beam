@@ -39,6 +39,7 @@
     <module>sketching</module>
     <module>sorter</module>
     <module>sql</module>
+    <module>tpc</module>
   </modules>
 
 </project>

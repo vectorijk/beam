@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
+import org.apache.beam.sdk.extensions.sql.meta.provider.text.BeamTextCSVTable;
 import org.apache.beam.sdk.io.AvroIO;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
@@ -50,6 +51,8 @@ import org.apache.beam.sdk.metrics.MetricResult;
 import org.apache.beam.sdk.metrics.MetricsFilter;
 import org.apache.beam.sdk.nexmark.NexmarkUtils.PubSubMode;
 import org.apache.beam.sdk.nexmark.NexmarkUtils.SourceType;
+import org.apache.beam.sdk.nexmark.TPC.queries.H.HQuery1;
+import org.apache.beam.sdk.nexmark.TPC.queries.TpcQuery;
 import org.apache.beam.sdk.nexmark.model.Auction;
 import org.apache.beam.sdk.nexmark.model.Bid;
 import org.apache.beam.sdk.nexmark.model.Event;
@@ -87,6 +90,7 @@ import org.apache.beam.sdk.nexmark.queries.sql.SqlQuery2;
 import org.apache.beam.sdk.nexmark.queries.sql.SqlQuery3;
 import org.apache.beam.sdk.nexmark.queries.sql.SqlQuery5;
 import org.apache.beam.sdk.nexmark.queries.sql.SqlQuery7;
+import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
@@ -94,9 +98,11 @@ import org.apache.beam.sdk.util.CoderUtils;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionTuple;
+import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TimestampedValue;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TupleTagList;
+import org.apache.commons.csv.CSVFormat;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.LongDeserializer;
@@ -351,18 +357,35 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
       Monitor<?> resultMonitor) {
     NexmarkPerf perf = new NexmarkPerf();
 
-    long numEvents =
-      getCounterMetric(result, eventMonitor.name, eventMonitor.prefix + ".elements", -1);
-    long numEventBytes =
-      getCounterMetric(result, eventMonitor.name, eventMonitor.prefix + ".bytes", -1);
-    long eventStart =
-      getTimestampMetric(now,
-        getDistributionMetric(result, eventMonitor.name, eventMonitor.prefix + ".startTime",
-          DistributionType.MIN, -1));
-    long eventEnd =
-      getTimestampMetric(now,
-        getDistributionMetric(result, eventMonitor.name, eventMonitor.prefix + ".endTime",
-          DistributionType.MAX, -1));
+    long numEvents = -1;
+    long numEventBytes = -1;
+    long eventStart = -1;
+    long eventEnd = -1;
+
+    if (eventMonitor != null) {
+      numEvents =
+              getCounterMetric(result, eventMonitor.name, eventMonitor.prefix + ".elements", -1);
+      numEventBytes =
+              getCounterMetric(result, eventMonitor.name, eventMonitor.prefix + ".bytes", -1);
+      eventStart =
+              getTimestampMetric(
+                      now,
+                      getDistributionMetric(
+                              result,
+                              eventMonitor.name,
+                              eventMonitor.prefix + ".startTime",
+                              DistributionType.MIN,
+                              -1));
+      eventEnd =
+              getTimestampMetric(
+                      now,
+                      getDistributionMetric(
+                              result,
+                              eventMonitor.name,
+                              eventMonitor.prefix + ".endTime",
+                              DistributionType.MAX,
+                              -1));
+    }
 
     long numResults =
       getCounterMetric(result, resultMonitor.name, resultMonitor.prefix + ".elements", -1);
@@ -522,8 +545,8 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
     long endMsSinceEpoch = -1;
     if (options.getRunningTimeMinutes() != null) {
       endMsSinceEpoch = startMsSinceEpoch
-                        + Duration.standardMinutes(options.getRunningTimeMinutes()).getMillis()
-                        - Duration.standardSeconds(configuration.preloadSeconds).getMillis();
+              + Duration.standardMinutes(options.getRunningTimeMinutes()).getMillis()
+              - Duration.standardSeconds(configuration.preloadSeconds).getMillis();
     }
     long lastActivityMsSinceEpoch = -1;
     NexmarkPerf perf = null;
@@ -555,12 +578,12 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
 
       PipelineResult.State state = job.getState();
       NexmarkUtils.console("%s %s%s", state, queryName,
-          waitingForShutdown ? " (waiting for shutdown)" : "");
+              waitingForShutdown ? " (waiting for shutdown)" : "");
 
       NexmarkPerf currPerf;
       if (configuration.debug) {
         currPerf = currentPerf(startMsSinceEpoch, now, job, snapshots,
-                               query.eventMonitor, query.resultMonitor);
+                query.eventMonitor, query.resultMonitor);
       } else {
         currPerf = null;
       }
@@ -578,8 +601,8 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
           waitingForShutdown = true;
           cancelJob = true;
         } else if (configuration.debug && configuration.numEvents > 0
-                   && currPerf.numEvents == configuration.numEvents
-                   && currPerf.numResults >= 0 && quietFor.isLongerThan(DONE_DELAY)) {
+                && currPerf.numEvents == configuration.numEvents
+                && currPerf.numResults >= 0 && quietFor.isLongerThan(DONE_DELAY)) {
           NexmarkUtils.console("streaming query appears to have finished waiting for completion.");
           waitingForShutdown = true;
         } else if (quietFor.isLongerThan(STUCK_TERMINATE_DELAY)) {
@@ -589,9 +612,175 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
           cancelJob = true;
         } else if (quietFor.isLongerThan(STUCK_WARNING_DELAY)) {
           NexmarkUtils.console("WARNING: streaming query appears to have been stuck for %d min.",
-              quietFor.getStandardMinutes());
+                  quietFor.getStandardMinutes());
           errors.add(
-              String.format("Streaming query was stuck for %d min", quietFor.getStandardMinutes()));
+                  String.format("Streaming query was stuck for %d min", quietFor.getStandardMinutes()));
+        }
+
+        if (cancelJob) {
+          try {
+            job.cancel();
+          } catch (IOException e) {
+            throw new RuntimeException("Unable to cancel main job: ", e);
+          }
+        }
+      }
+
+      perf = currPerf;
+
+      boolean running = true;
+      switch (state) {
+        case UNKNOWN:
+        case STOPPED:
+        case RUNNING:
+          // Keep going.
+          break;
+        case DONE:
+          // All done.
+          running = false;
+          break;
+        case CANCELLED:
+          running = false;
+          if (!cancelJob) {
+            errors.add("Job was unexpectedly cancelled");
+          }
+          break;
+        case FAILED:
+        case UPDATED:
+          // Abnormal termination.
+          running = false;
+          errors.add("Job was unexpectedly updated");
+          break;
+      }
+
+      if (!running) {
+        break;
+      }
+
+      if (lastActivityMsSinceEpoch == now) {
+        NexmarkUtils.console("new perf %s", perf);
+      } else {
+        NexmarkUtils.console("no activity");
+      }
+
+      try {
+        Thread.sleep(PERF_DELAY.getMillis());
+      } catch (InterruptedException e) {
+        Thread.interrupted();
+        NexmarkUtils.console("Interrupted: pipeline is still running");
+      }
+    }
+
+    perf.errors = errors;
+    perf.snapshots = snapshots;
+
+    if (publisherResult != null) {
+      NexmarkUtils.console("Shutting down publisher pipeline.");
+      try {
+        if (!publisherCancelled) {
+          publisherJob.cancel();
+        }
+        publisherJob.waitUntilFinish(Duration.standardMinutes(5));
+      } catch (IOException e) {
+        throw new RuntimeException("Unable to cancel publisher job: ", e);
+      }
+    }
+
+    return perf;
+  }
+
+  /**
+   * Monitor the Tpc query performance and progress of a running job.
+   */
+  @Nullable
+  private NexmarkPerf monitorTpc(TpcQuery query) {
+    if (!options.getMonitorJobs()) {
+      return null;
+    }
+
+    if (configuration.debug) {
+      NexmarkUtils.console("Waiting for main pipeline to 'finish'");
+    } else {
+      NexmarkUtils.console("--debug=false, so job will not self-cancel");
+    }
+
+    PipelineResult job = mainResult;
+    PipelineResult publisherJob = publisherResult;
+    List<NexmarkPerf.ProgressSnapshot> snapshots = new ArrayList<>();
+    long startMsSinceEpoch = System.currentTimeMillis();
+    long endMsSinceEpoch = -1;
+    if (options.getRunningTimeMinutes() != null) {
+      endMsSinceEpoch = startMsSinceEpoch
+              + Duration.standardMinutes(options.getRunningTimeMinutes()).getMillis()
+              - Duration.standardSeconds(configuration.preloadSeconds).getMillis();
+    }
+    long lastActivityMsSinceEpoch = -1;
+    NexmarkPerf perf = null;
+    boolean waitingForShutdown = false;
+    boolean cancelJob = false;
+    boolean publisherCancelled = false;
+    List<String> errors = new ArrayList<>();
+
+    while (true) {
+      long now = System.currentTimeMillis();
+      if (endMsSinceEpoch >= 0 && now > endMsSinceEpoch && !waitingForShutdown) {
+        NexmarkUtils.console("Reached end of test, cancelling job");
+        try {
+          cancelJob = true;
+          job.cancel();
+        } catch (IOException e) {
+          throw new RuntimeException("Unable to cancel main job: ", e);
+        }
+        if (publisherResult != null) {
+          try {
+            publisherJob.cancel();
+          } catch (IOException e) {
+            throw new RuntimeException("Unable to cancel publisher job: ", e);
+          }
+          publisherCancelled = true;
+        }
+        waitingForShutdown = true;
+      }
+
+      PipelineResult.State state = job.getState();
+      NexmarkUtils.console("%s %s%s", state, queryName,
+              waitingForShutdown ? " (waiting for shutdown)" : "");
+
+      NexmarkPerf currPerf;
+      if (configuration.debug) {
+        currPerf = currentPerf(startMsSinceEpoch, now, job, snapshots,
+                null, query.resultMonitor);
+      } else {
+        currPerf = null;
+      }
+
+      if (perf == null || perf.anyActivity(currPerf)) {
+        lastActivityMsSinceEpoch = now;
+      }
+
+      if (options.isStreaming() && !waitingForShutdown) {
+        Duration quietFor = new Duration(lastActivityMsSinceEpoch, now);
+        long fatalCount = getCounterMetric(job, query.getName(), "fatal", 0);
+        if (fatalCount > 0) {
+          NexmarkUtils.console("job has fatal errors, cancelling.");
+          errors.add(String.format("Pipeline reported %s fatal errors", fatalCount));
+          waitingForShutdown = true;
+          cancelJob = true;
+        } else if (configuration.debug && configuration.numEvents > 0
+                && currPerf.numEvents == configuration.numEvents
+                && currPerf.numResults >= 0 && quietFor.isLongerThan(DONE_DELAY)) {
+          NexmarkUtils.console("streaming query appears to have finished waiting for completion.");
+          waitingForShutdown = true;
+        } else if (quietFor.isLongerThan(STUCK_TERMINATE_DELAY)) {
+          NexmarkUtils.console("streaming query appears to have gotten stuck, cancelling job.");
+          errors.add("Cancelling streaming job since it appeared stuck");
+          waitingForShutdown = true;
+          cancelJob = true;
+        } else if (quietFor.isLongerThan(STUCK_WARNING_DELAY)) {
+          NexmarkUtils.console("WARNING: streaming query appears to have been stuck for %d min.",
+                  quietFor.getStandardMinutes());
+          errors.add(
+                  String.format("Streaming query was stuck for %d min", quietFor.getStandardMinutes()));
         }
 
         if (cancelJob) {
@@ -879,6 +1068,32 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
         .apply("OutputWithTimestamp", NexmarkQuery.EVENT_TIMESTAMP_FROM_DATA);
   }
 
+  private PCollection<Row> sourceTpcFromCSV(Pipeline p) {
+    String filename = options.getInputPath();
+    if (Strings.isNullOrEmpty(filename)) {
+      throw new RuntimeException("Missing --inputPath");
+    }
+    NexmarkUtils.console(filename);
+
+//        Schema reasonSchema = new TpcUtil().getDSschema("REASON");
+    Schema reasonSchema =
+            Schema.builder()
+                    .addInt32Field("r_reason_sk")
+                    .addStringField("r_reason_id")
+                    .addStringField("r_reason_desc")
+                    .build();
+
+//    String filePath = "";
+    CSVFormat format = CSVFormat.MYSQL.withDelimiter('|').withNullString("");
+    NexmarkUtils.console("Reading events from csv files at %s", filename);
+//    return p.apply(queryName + ".ReadCSVFiles", TextIO.read().from(filename))
+//            .apply("parseCSVLine", new BeamTextCSVTableIOReader(reasonSchema, filename, format))
+//            .setCoder(reasonSchema.getRowCoder());
+    return new BeamTextCSVTable(reasonSchema, filename, format)
+            .buildIOReader(p.begin())
+            .setCoder(reasonSchema.getRowCoder());
+  }
+
   /**
    * Send {@code events} to Pubsub.
    */
@@ -1051,6 +1266,8 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
         break;
       case AVRO:
         source = sourceEventsFromAvro(p);
+        break;
+      case CSV:
         break;
       case KAFKA:
       case PUBSUB:
@@ -1258,48 +1475,78 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
       NexmarkUtils.setupPipeline(configuration.coderStrategy, p);
 
       // Generate events.
-      PCollection<Event> source = createSource(p, now);
+      if (configuration.sourceType != SourceType.CSV) {
+        PCollection<Event> source = createSource(p, now);
 
-      if (options.getLogEvents()) {
-        source = source.apply(queryName + ".Events.Log", NexmarkUtils.log(queryName + ".Events"));
-      }
-
-      // Source will be null if source type is PUBSUB and mode is PUBLISH_ONLY.
-      // In that case there's nothing more to add to pipeline.
-      if (source != null) {
-        // Optionally sink events in Avro format.
-        // (Query results are ignored).
-        if (configuration.sinkType == NexmarkUtils.SinkType.AVRO) {
-          sinkEventsToAvro(source);
+        if (options.getLogEvents()) {
+          source = source.apply(queryName + ".Events.Log", NexmarkUtils.log(queryName + ".Events"));
         }
 
-        // Query 10 logs all events to Google Cloud storage files. It could generate a lot of logs,
-        // so, set parallelism. Also set the output path where to write log files.
-        if (configuration.query == 10) {
-          String path = null;
-          if (options.getOutputPath() != null && !options.getOutputPath().isEmpty()) {
-            path = logsDir(now.getMillis());
+        // Source will be null if source type is PUBSUB and mode is PUBLISH_ONLY.
+        // In that case there's nothing more to add to pipeline.
+        if (source != null) {
+          // Optionally sink events in Avro format.
+          // (Query results are ignored).
+          if (configuration.sinkType == NexmarkUtils.SinkType.AVRO) {
+            sinkEventsToAvro(source);
           }
-          ((Query10) query).setOutputPath(path);
-          ((Query10) query).setMaxNumWorkers(maxNumWorkers());
-        }
 
-        // Apply query.
-        PCollection<TimestampedValue<KnownSize>> results = source.apply(query);
-
-        if (options.getAssertCorrectness()) {
-          if (model == null) {
-            throw new RuntimeException(String.format("No model for %s", queryName));
+          // Query 10 logs all events to Google Cloud storage files. It could generate a lot of
+          // logs,
+          // so, set parallelism. Also set the output path where to write log files.
+          if (configuration.query == 10) {
+            String path = null;
+            if (options.getOutputPath() != null && !options.getOutputPath().isEmpty()) {
+              path = logsDir(now.getMillis());
+            }
+            ((Query10) query).setOutputPath(path);
+            ((Query10) query).setMaxNumWorkers(maxNumWorkers());
           }
-          // We know all our streams have a finite number of elements.
-          results.setIsBoundedInternal(PCollection.IsBounded.BOUNDED);
-          // If we have a finite number of events then assert our pipeline's
-          // results match those of a model using the same sequence of events.
-          PAssert.that(results).satisfies(model.assertionFor());
-        }
 
-        // Output results.
-        sink(results, now.getMillis());
+          // Apply query.
+          PCollection<TimestampedValue<KnownSize>> results = source.apply(query);
+
+          if (options.getAssertCorrectness()) {
+            if (model == null) {
+              throw new RuntimeException(String.format("No model for %s", queryName));
+            }
+            // We know all our streams have a finite number of elements.
+            results.setIsBoundedInternal(PCollection.IsBounded.BOUNDED);
+            // If we have a finite number of events then assert our pipeline's
+            // results match those of a model using the same sequence of events.
+            PAssert.that(results).satisfies(model.assertionFor());
+          }
+
+          // Output results.
+          sink(results, now.getMillis());
+        }
+      } else {
+        PCollection<Row> source = sourceTpcFromCSV(p);
+        PCollectionTuple tables =
+                PCollectionTuple.of(new TupleTag<>("reason"), source);
+//            String query0 = "SElECT * FROM reason";
+
+        TpcQuery query0 = new TpcQuery(configuration, "query0", new HQuery1());
+
+        PCollection<Row> results = source
+                .apply(query0);
+//                 .apply(
+//                  "transform to string",
+//                  MapElements.via(
+//                          new SimpleFunction<Row, TimestampedValue<Done>>() {
+//                            @Override
+//                            public TimestampedValue<Done> apply(Row input) {
+//                              // expect output:
+//                              //  PCOLLECTION: [3, row, 3.0]
+//                              return TimestampedValue.atMinimumTimestamp(new Done("row: " + input.getValues()));
+//                            }
+//                          })
+//                 );
+
+        results.apply(queryName + ".DevNull", NexmarkUtils.devNull(queryName));
+        mainResult = p.run();
+        mainResult.waitUntilFinish(Duration.standardSeconds(configuration.streamTimeout));
+        return monitorTpc(query0);
       }
 
       mainResult = p.run();
