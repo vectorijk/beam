@@ -1,11 +1,10 @@
 package org.apache.beam.sdk.extensions.tpc;
 
 import com.google.common.collect.ImmutableMap;
-//import net.hydromatic.tpcds.TpcdsTable;
 import org.apache.beam.sdk.schemas.Schema;
-import org.apache.calcite.adapter.java.JavaTypeFactory;
-import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
-import org.apache.calcite.rel.type.RelDataTypeSystem;
+//import org.apache.calcite.adapter.java.JavaTypeFactory;
+//import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
+//import org.apache.calcite.rel.type.RelDataTypeSystem;
 //import org.apache.beam.sdk.transforms.FlatMapElements;
 //import org.apache.beam.sdk.transforms.MapElements;
 //import org.apache.beam.sdk.transforms.PTransform;
@@ -23,11 +22,12 @@ import org.apache.calcite.rel.type.RelDataTypeSystem;
 //import io.airlift.tpch.TpchColumn;
 //import io.airlift.tpch.TpchEntity;
 //import io.airlift.tpch.TpchTable;
+// import net.hydromatic.tpcds.TpcdsTable;
 
 /** Tpc Schema. */
 public class SchemaUtil {
-  private static final JavaTypeFactory TYPE_FACTORY =
-      new JavaTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
+//  private static final JavaTypeFactory TYPE_FACTORY =
+//      new JavaTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
 //  private final ImmutableMap<String, TpcdsTable> tableHMap;
   private final ImmutableMap<String, String> columnPrefixes;
 
