@@ -37,7 +37,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
-import org.apache.beam.sdk.extensions.sql.meta.provider.text.BeamTextCSVTable;
 import org.apache.beam.sdk.io.AvroIO;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
@@ -1089,9 +1088,14 @@ public class NexmarkLauncher<OptionT extends NexmarkOptions> {
 //    return p.apply(queryName + ".ReadCSVFiles", TextIO.read().from(filename))
 //            .apply("parseCSVLine", new BeamTextCSVTableIOReader(reasonSchema, filename, format))
 //            .setCoder(reasonSchema.getRowCoder());
-    return new BeamTextCSVTable(reasonSchema, filename, format)
-            .buildIOReader(p.begin())
-            .setCoder(reasonSchema.getRowCoder());
+//    return new TextTable(
+//            SchemaUtil.customerSchema,
+//            customerFilePath,
+//            new CsvToRow(SchemaUtil.customerSchema, csvFormat),
+//            new RowToCsv(csvFormat))
+//            .buildIOReader(pipeline.begin())
+//            .setCoder(SchemaUtil.customerSchema.getRowCoder());
+    return null;
   }
 
   /**
