@@ -123,7 +123,7 @@ public class SchemaUtil {
           .addInt32Field("o_custkey")
           .addStringField("o_orderstatus")
           .addFloatField("o_totalprice")
-          .addStringField("o_orderdate")
+          .addDateTimeField("o_orderdate")
           .addStringField("o_orderpriority")
           .addStringField("o_clerk")
           .addInt32Field("o_shippriority")
@@ -154,13 +154,62 @@ public class SchemaUtil {
           .addFloatField("l_tax")
           .addStringField("l_returnflag")
           .addStringField("l_linestatus")
-          .addStringField("l_shipdate")
+          .addDateTimeField("l_shipdate")
           .addStringField("l_commitdate")
           .addStringField("l_receiptdate")
           .addStringField("l_shipinstruct")
           .addStringField("l_shipmode")
           .addStringField("l_comment")
           .build();
+
+  public static Schema partsuppSchema =
+          Schema.builder()
+                  .addInt32Field("ps_partkey") //identifier
+                  .addInt32Field("ps_suppkey") //identifier
+                  .addInt32Field("ps_availqty") //integer
+                  .addFloatField("ps_supplycost") //decimal
+                  .addStringField("ps_comment") //variable text, size 199
+                  .build();
+
+  public static Schema regionSchema =
+          Schema.builder()
+                  .addInt32Field("r_regionkey") //identifier
+                  .addStringField("r_name") //fixed text, size 25
+                  .addStringField("r_comment") //variable text, size 152
+                  .build();
+
+  public static Schema supplierSchema =
+          Schema.builder()
+                  .addInt32Field("s_suppkey") // identifier
+                  .addStringField("s_name") // fixed text, size 25
+                  .addStringField("s_address") //variable text, size 40
+                  .addInt32Field("s_nationkey") //identifier
+                  .addStringField("s_phone") //fixed text, size 15
+                  .addFloatField("s_acctbal") //decimal
+                  .addStringField("s_comment") //variable text, size 101
+                  .build();
+
+  public static Schema partSchema =
+          Schema.builder()
+                  .addInt32Field("p_partkey")
+                  .addStringField("p_name")
+                  .addStringField("p_mfgr")
+                  .addStringField("p_brand")
+                  .addStringField("p_type")
+                  .addInt32Field("p_size")
+                  .addStringField("p_container")
+                  .addFloatField("p_retailprice")
+                  .addStringField("p_comment")
+                  .build();
+
+
+  public static Schema nationSchema =
+          Schema.builder()
+                  .addInt32Field("n_nationkey")
+                  .addStringField("n_name")
+                  .addInt32Field("n_regionkey")
+                  .addStringField("n_comment")
+                  .build();
 
   public SchemaUtil() {
 //    final ImmutableMap.Builder<String, TpcdsTable> builder = ImmutableMap.builder();
