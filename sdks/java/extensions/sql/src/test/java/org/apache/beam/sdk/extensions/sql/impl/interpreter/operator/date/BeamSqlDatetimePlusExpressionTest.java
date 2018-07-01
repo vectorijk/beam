@@ -53,13 +53,6 @@ public class BeamSqlDatetimePlusExpressionTest extends BeamSqlDateExpressionTest
   private static final DateTime DATETIME_PLUS_2_MONTHS = DATETIME.plusMonths(2);
   private static final DateTime DATETIME_PLUS_11_YEARS = DATETIME.plusYears(11);
 
-  private static final DateTime DATE_PLUS_15_SECONDS = DATE.plusSeconds(15);
-  private static final DateTime DATE_PLUS_10_MINUTES = DATE.plusMinutes(10);
-  private static final DateTime DATE_PLUS_7_HOURS = DATE.plusHours(7);
-  private static final DateTime DATE_PLUS_3_DAYS = DATE.plusDays(3);
-  private static final DateTime DATE_PLUS_2_MONTHS = DATE.plusMonths(2);
-  private static final DateTime DATE_PLUS_11_YEARS = DATE.plusYears(11);
-
   private static final BeamSqlExpression SQL_INTERVAL_15_SECONDS =
       interval(SqlTypeName.INTERVAL_SECOND, 15);
   private static final BeamSqlExpression SQL_INTERVAL_10_MINUTES =
@@ -132,13 +125,6 @@ public class BeamSqlDatetimePlusExpressionTest extends BeamSqlDateExpressionTest
     assertEquals(DATETIME_PLUS_3_DAYS, evalDatetimePlus(SQL_TIMESTAMP, SQL_INTERVAL_3_DAYS));
     assertEquals(DATETIME_PLUS_2_MONTHS, evalDatetimePlus(SQL_TIMESTAMP, SQL_INTERVAL_2_MONTHS));
     assertEquals(DATETIME_PLUS_11_YEARS, evalDatetimePlus(SQL_TIMESTAMP, SQL_INTERVAL_11_YEARS));
-
-    assertEquals(DATE_PLUS_15_SECONDS, evalDatetimePlus(SQL_DATE, SQL_INTERVAL_15_SECONDS));
-    assertEquals(DATE_PLUS_10_MINUTES, evalDatetimePlus(SQL_DATE, SQL_INTERVAL_10_MINUTES));
-    assertEquals(DATE_PLUS_7_HOURS, evalDatetimePlus(SQL_DATE, SQL_INTERVAL_7_HOURS));
-    assertEquals(DATE_PLUS_3_DAYS, evalDatetimePlus(SQL_DATE, SQL_INTERVAL_3_DAYS));
-    assertEquals(DATE_PLUS_2_MONTHS, evalDatetimePlus(SQL_DATE, SQL_INTERVAL_2_MONTHS));
-    assertEquals(DATE_PLUS_11_YEARS, evalDatetimePlus(SQL_DATE, SQL_INTERVAL_11_YEARS));
   }
 
   @Test

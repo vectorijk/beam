@@ -31,7 +31,6 @@ public class BeamSqlDateExpressionTestBase extends BeamSqlFnExecutorTestBase {
   }
 
   static DateTime str2Date(String dateStr) {
-    DateTimeFormatter format = DateTimeFormat.forPattern("yyyy-MM-dd").withZoneUTC();
-    return format.parseDateTime(dateStr);
+    return DateTime.parse(dateStr);
   }
 }
