@@ -44,11 +44,11 @@ public class Monitor<T> implements Serializable {
     @ProcessElement
     public void processElement(ProcessContext c) {
       elementCounter.inc();
-        if (c.element() instanceof KnownSize) {
-            bytesCounter.inc(((KnownSize) c.element()).sizeInBytes());
-        } else {
-            bytesCounter.inc(0);
-        }
+      if (c.element() instanceof KnownSize) {
+        bytesCounter.inc(((KnownSize) c.element()).sizeInBytes());
+      } else {
+        bytesCounter.inc(0);
+      }
       long now = System.currentTimeMillis();
       startTime.update(now);
       endTime.update(now);

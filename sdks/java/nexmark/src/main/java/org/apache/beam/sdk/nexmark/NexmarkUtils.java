@@ -349,10 +349,10 @@ public class NexmarkUtils {
       case JAVA:
         registry.registerCoderProvider(SerializableCoder.getCoderProvider());
         break;
-        case CSV:
-//        Schema reasonSchema = new TpcUtil().getDSschema("REASON");
-//        registry.registerCoderForType(reasonSchema.wait(), reasonSchema.getRowCoder().);
-            break;
+      case CSV:
+        //        Schema reasonSchema = new TpcUtil().getDSschema("REASON");
+        //        registry.registerCoderForType(reasonSchema.wait(), reasonSchema.getRowCoder().);
+        break;
     }
   }
 
