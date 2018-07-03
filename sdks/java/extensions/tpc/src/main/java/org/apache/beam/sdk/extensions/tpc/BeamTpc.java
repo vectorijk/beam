@@ -23,7 +23,7 @@ import org.apache.commons.csv.CSVFormat;
 public class BeamTpc {
   private static PCollectionTuple getHTables(
       Pipeline pipeline, CSVFormat csvFormat, TpcOptions tpcOptions) {
-    ImmutableMap<String, Schema> HSchemas =
+    ImmutableMap<String, Schema> hSchemas =
         ImmutableMap.<String, Schema>builder()
             .put("customer", SchemaUtil.customerSchema)
             .put("lineitem", SchemaUtil.lineitemSchema)
@@ -37,7 +37,7 @@ public class BeamTpc {
 
     PCollectionTuple tables = PCollectionTuple.empty(pipeline);
 
-    for (Map.Entry<String, Schema> tableSchema : HSchemas.entrySet()) {
+    for (Map.Entry<String, Schema> tableSchema : hSchemas.entrySet()) {
       String filePattern = tpcOptions.getInputFile() + tableSchema.getKey() + ".tbl";
 
       PCollection<Row> table =

@@ -1,4 +1,4 @@
-package org.apache.beam.sdk.nexmark.TPC.queries.H;
+package org.apache.beam.sdk.nexmark.queries;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -16,6 +16,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PInput;
 import org.apache.beam.sdk.values.Row;
 
+/** comment. */
 public class HQuery1 extends PTransform<PCollection<Row>, PCollection<Row>> {
 
   private static final PTransform<PInput, PCollection<Row>> QUERY =
