@@ -1,4 +1,4 @@
-package org.apache.beam.sdk.nexmark.TPC.queries;
+package org.apache.beam.sdk.nexmark.queries;
 
 import org.apache.beam.sdk.nexmark.Monitor;
 import org.apache.beam.sdk.nexmark.NexmarkConfiguration;
@@ -7,6 +7,7 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.Row;
 
+/** comment. */
 public class TpcQuery extends PTransform<PCollection<Row>, PCollection<Row>> {
   final NexmarkConfiguration configuration;
   public final Monitor<Row> resultMonitor;
