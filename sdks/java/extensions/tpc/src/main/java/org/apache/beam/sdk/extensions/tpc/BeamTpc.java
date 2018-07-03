@@ -372,20 +372,20 @@ public class BeamTpc {
     CSVFormat csvFormat = CSVFormat.MYSQL.withDelimiter('|').withNullString("");
 
     PCollectionTuple tables = getHTables(pipeline, csvFormat, tpcOptions);
-    String queryh =
-        "select\n"
-            + "\tcount(*) as count_order\n"
-            + "from\n"
-            + "\tlineitem\n"
-            + "where\n"
-            + "\tl_shipdate <= date '1998-09-01' + interval '90' day (3) ";
 
     String outputPath = tpcOptions.getOutput();
     System.out.println(tpcOptions.getInputFile());
     System.out.println(outputPath);
 
+    Monitor<?> eventMonitor = new Monitor<>(".Events", "event");
+    Monitor<?> resultMonitor = new Monitor<>(".Results", "result");
+
     tables
-        .apply(SqlTransform.query(Hquery.QUERYTEST))
+        .apply(".Monitor", eventMonitor.getTransform())
+        .apply(
+            "SqlTransform " + tpcOptions.getTable() + ":" + tpcOptions.getQuery(),
+            SqlTransform.query(Hquery.QUERYTEST))
+
         .apply(
             "exp_table",
             MapElements.into(TypeDescriptors.strings())
