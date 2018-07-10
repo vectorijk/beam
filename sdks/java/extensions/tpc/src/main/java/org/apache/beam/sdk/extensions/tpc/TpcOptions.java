@@ -37,9 +37,9 @@ public interface TpcOptions extends PipelineOptions {
 
   @Description("Query no.")
   @Validation.Required
-  String getQuery();
+  Integer getQuery();
 
-  void setQuery(String value);
+  void setQuery(Integer value);
 
   /** Set this required option to specify where to write the output. */
   @Description("Path of the file to write to")

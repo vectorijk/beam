@@ -33,31 +33,25 @@ import org.apache.beam.sdk.values.PCollection;
  */
 public class Monitor<T> implements Serializable {
   private class MonitorDoFn extends DoFn<T, T> {
-    final Counter elementCounter = Metrics.counter(name, prefix + ".elements");
-    final Distribution startTime = Metrics.distribution(name, prefix + ".startTime");
-    final Distribution endTime = Metrics.distribution(name, prefix + ".endTime");
-    final Distribution startTimestamp = Metrics.distribution(name, prefix + ".startTimestamp");
-    final Distribution endTimestamp = Metrics.distribution(name, prefix + ".endTimestamp");
+    final Counter elementCounter = Metrics.counter(namespace, prefix + ".elements");
+    final Distribution timestamp = Metrics.distribution(namespace, prefix + ".timestamp");
 
     @ProcessElement
     public void processElement(ProcessContext c) {
       elementCounter.inc();
       long now = System.currentTimeMillis();
-      startTime.update(now);
-      endTime.update(now);
-      startTimestamp.update(c.timestamp().getMillis());
-      endTimestamp.update(c.timestamp().getMillis());
+      timestamp.update(now);
       c.output(c.element());
     }
   }
 
-  public final String name;
+  public final String namespace;
   public final String prefix;
   private final MonitorDoFn doFn;
   private final PTransform<PCollection<? extends T>, PCollection<T>> transform;
 
-  public Monitor(String name, String prefix) {
-    this.name = name;
+  public Monitor(String namespace, String prefix) {
+    this.namespace = namespace;
     this.prefix = prefix;
     doFn = new MonitorDoFn();
     transform = ParDo.of(doFn);
