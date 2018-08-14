@@ -18,13 +18,36 @@
 
 package org.apache.beam.runners.kafka.translation;
 
+import com.google.common.collect.Iterables;
+import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
+import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.runners.AppliedPTransform;
+import org.apache.beam.sdk.runners.TransformHierarchy;
+import org.apache.beam.sdk.values.PValue;
 
-/**
- * Helper.
- */
-class TranslationContext {
-  public TranslationContext(
-      KafkaStreamsPipelineOptions options) {
+/** Helper. */
+public class TranslationContext {
+  private final KafkaStreamsPipelineOptions pipelineOptions;
+  private AppliedPTransform<?, ?, ?> currentTransform;
+
+  public TranslationContext(KafkaStreamsPipelineOptions options) {
+    this.pipelineOptions = options;
+  }
+
+  public void setCurrentTransform(TransformHierarchy.Node treeNode, Pipeline pipeline) {
+    this.currentTransform = treeNode.toAppliedPTransform(pipeline);
+  }
+
+  public PValue getInput() {
+    return Iterables.getOnlyElement(TransformInputs.nonAdditionalInputs(getCurrentTransform()));
+  }
+
+  public PValue getOutput() {
+    return null;
+  }
+
+  public AppliedPTransform<?, ?, ?> getCurrentTransform() {
+    return currentTransform;
   }
 }

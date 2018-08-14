@@ -18,10 +18,11 @@
 
 package org.apache.beam.runners.kafka.translation;
 
+import java.io.Serializable;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
 
-/** Interface of Kafka Streams translator for BEAM {@link PTransform}. */
-interface TransformTranslator<T extends PTransform<?, ?>> {
+/** Interface of Kafka Streams DSL translate to BEAM {@link PTransform}. */
+public interface TransformTranslator<T extends PTransform<?, ?>> extends Serializable {
   void translate(T transform, TransformHierarchy.Node node, TranslationContext ctx);
 }
