@@ -16,28 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.beam.runners.kafka;
+package org.apache.beam.runners.kafka.translation;
 
-import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.PipelineRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * A {@link PipelineRunner} that executes the operations in the {@link Pipeline} into an equivalent
- * Kafka Streams plan.
- */
-public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResult> {
-  private static final Logger LOG = LoggerFactory.getLogger(KafkaStreamsRunner.class);
+public class KafkaStreamsPipelineTranslator {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaStreamsPipelineTranslator.class);
 
-  private final KafkaStreamsPipelineOptions options;
-
-  public KafkaStreamsRunner(KafkaStreamsPipelineOptions options) {
-    this.options = options;
-  }
-
-  @Override
-  public KafkaStreamsPipelineResult run(Pipeline pipeline) {
-    return null;
-  }
+    private KafkaStreamsPipelineTranslator() {}
 }
