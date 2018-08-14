@@ -54,6 +54,8 @@ include ":beam-runners-google-cloud-dataflow-java-examples-streaming"
 project(":beam-runners-google-cloud-dataflow-java-examples-streaming").dir = file("runners/google-cloud-dataflow-java/examples-streaming")
 include "beam-runners-java-fn-execution"
 project(":beam-runners-java-fn-execution").dir = file("runners/java-fn-execution")
+include "beam-runners-kafka-streams"
+project(":beam-runners-kafka-streams").dir = file("runners/kafka-streams")
 include "beam-runners-local-java-core"
 project(":beam-runners-local-java-core").dir = file("runners/local-java")
 include "beam-runners-reference-java"
