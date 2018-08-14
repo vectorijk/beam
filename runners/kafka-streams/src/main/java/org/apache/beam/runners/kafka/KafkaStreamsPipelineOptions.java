@@ -18,5 +18,6 @@
 
 package org.apache.beam.runners.kafka;
 
-public interface KafkaStreamsPipelineOptions {
-}
+import org.apache.beam.sdk.options.PipelineOptions;
+
+public interface KafkaStreamsPipelineOptions extends PipelineOptions {}

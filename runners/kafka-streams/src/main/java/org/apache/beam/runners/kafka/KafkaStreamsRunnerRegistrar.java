@@ -18,5 +18,31 @@
 
 package org.apache.beam.runners.kafka;
 
+import com.google.auto.service.AutoService;
+import com.google.common.collect.ImmutableList;
+import org.apache.beam.sdk.PipelineRunner;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.options.PipelineOptionsRegistrar;
+import org.apache.beam.sdk.runners.PipelineRunnerRegistrar;
+
 public class KafkaStreamsRunnerRegistrar {
+  private KafkaStreamsRunnerRegistrar() {}
+
+  /** Pipeline runner registrar. */
+  @AutoService(PipelineRunnerRegistrar.class)
+  public static class Runner implements PipelineRunnerRegistrar {
+    @Override
+    public Iterable<Class<? extends PipelineRunner<?>>> getPipelineRunners() {
+      return ImmutableList.of(KafkaStreamsRunner.class, TestKafkaStreamsRunner.class);
+    }
+  }
+
+  /** Pipeline options registrar. */
+  @AutoService(PipelineOptionsRegistrar.class)
+  public static class Options implements PipelineOptionsRegistrar {
+    @Override
+    public Iterable<Class<? extends PipelineOptions>> getPipelineOptions() {
+      return ImmutableList.of(KafkaStreamsPipelineOptions.class);
+    }
+  }
 }

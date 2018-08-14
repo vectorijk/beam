@@ -26,8 +26,8 @@ import org.apache.beam.sdk.PipelineRunner;
  * Kafka Streams plan.
  */
 public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResult> {
-    @Override
-    public KafkaStreamsPipelineResult run(Pipeline pipeline) {
-        return null;
-    }
+  @Override
+  public KafkaStreamsPipelineResult run(Pipeline pipeline) {
+    return null;
+  }
 }
