@@ -18,6 +18,17 @@
 
 package org.apache.beam.runners.kafka;
 
+import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptions;
 
-public interface KafkaStreamsPipelineOptions extends PipelineOptions {}
+public interface KafkaStreamsPipelineOptions extends PipelineOptions {
+  @Description("Kafka streams application id.")
+  String getApplicationId();
+
+  void setApplicationId(String applicationId);
+
+  @Description("Kafka Bootstrap servers.")
+  String getBootstrapServers();
+
+  void setBootstrapServers(String bootstrapServers);
+}

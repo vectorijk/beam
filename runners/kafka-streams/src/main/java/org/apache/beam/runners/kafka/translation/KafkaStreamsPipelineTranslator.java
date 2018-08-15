@@ -21,6 +21,7 @@ package org.apache.beam.runners.kafka.translation;
 import com.google.common.collect.ImmutableMap;
 import java.util.Map;
 import org.apache.beam.runners.core.construction.PTransformTranslation;
+import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
@@ -44,7 +45,11 @@ public class KafkaStreamsPipelineTranslator {
           .put(PTransformTranslation.FLATTEN_TRANSFORM_URN, new FlattenPCollectionsTranslator())
           .build();
 
-  public void translator() {}
+  public void translator(Pipeline pipeline, KafkaStreamsPipelineOptions options) {
+    final TranslationContext ctxt = new TranslationContext(options);
+    final TranslationVisitor visitor = new TranslationVisitor(ctxt);
+    pipeline.traverseTopologically(visitor);
+  }
 
   public class TranslationVisitor extends Pipeline.PipelineVisitor.Defaults {
     private final Logger LOG = LoggerFactory.getLogger(TranslationVisitor.class);
@@ -68,6 +73,9 @@ public class KafkaStreamsPipelineTranslator {
     @Override
     public void visitPrimitiveTransform(TransformHierarchy.Node node) {
       LOG.debug("Visiting primitive transform {}", node.getTransform());
+      final String urn = getUrnForTransform(node.getTransform());
+
+      applyTransform(node.getTransform(), node, TRANSLATORS.get(urn));
     }
 
     @Override
@@ -75,7 +83,23 @@ public class KafkaStreamsPipelineTranslator {
       LOG.debug("Visiting value {}", value);
     }
 
-    private boolean canTranslate(String urn, PTransform<?, ?> transform) {
+    private <T extends PTransform<?, ?>> void applyTransform(
+        T transform, TransformHierarchy.Node node, TransformTranslator<?> translator) {
+
+      ctxt.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
+
+      @SuppressWarnings("unchecked")
+      final TransformTranslator<T> typedTranslator = (TransformTranslator<T>) translator;
+      typedTranslator.translate(transform, node, ctxt);
+
+      ctxt.clearCurrentTransform();
+    }
+
+    private String getUrnForTransform(PTransform<?, ?> transform) {
+      return transform == null ? null : PTransformTranslation.urnForTransformOrNull(transform);
+    }
+
+    private boolean canTranslate(String urn) {
       return TRANSLATORS.containsKey(urn);
     }
   }

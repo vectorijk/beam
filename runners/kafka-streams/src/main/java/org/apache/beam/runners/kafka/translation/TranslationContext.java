@@ -19,12 +19,14 @@
 package org.apache.beam.runners.kafka.translation;
 
 import com.google.common.collect.Iterables;
+import java.util.Map;
 import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.sdk.values.TupleTag;
 
 /** Helper. */
 public class TranslationContext {
@@ -39,12 +41,20 @@ public class TranslationContext {
     this.currentTransform = treeNode.toAppliedPTransform(pipeline);
   }
 
+  public Map<TupleTag<?>, PValue> getInputs() {
+    return getCurrentTransform().getInputs();
+  }
+
   public PValue getInput() {
     return Iterables.getOnlyElement(TransformInputs.nonAdditionalInputs(getCurrentTransform()));
   }
 
+  public Map<TupleTag<?>, PValue> getOutputs() {
+    return getCurrentTransform().getOutputs();
+  }
+
   public PValue getOutput() {
-    return null;
+    return Iterables.getOnlyElement(getCurrentTransform().getOutputs().values());
   }
 
   public AppliedPTransform<?, ?, ?> getCurrentTransform() {
