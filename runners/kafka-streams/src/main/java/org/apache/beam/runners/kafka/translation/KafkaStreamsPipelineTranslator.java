@@ -26,6 +26,7 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.kafka.streams.Topology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,8 +46,12 @@ public class KafkaStreamsPipelineTranslator {
           .put(PTransformTranslation.FLATTEN_TRANSFORM_URN, new FlattenPCollectionsTranslator())
           .build();
 
-  public void translator(Pipeline pipeline, KafkaStreamsPipelineOptions options) {
-    final TranslationContext ctxt = new TranslationContext(options);
+  public void translator(Pipeline pipeline,
+                         KafkaStreamsPipelineOptions options,
+                         Topology topology,
+                         Map<PValue, String> idMap,
+                         PValue naiveSource) {
+    final TranslationContext ctxt = new TranslationContext(options, topology);
     final TranslationVisitor visitor = new TranslationVisitor(ctxt);
     pipeline.traverseTopologically(visitor);
   }
@@ -54,6 +59,7 @@ public class KafkaStreamsPipelineTranslator {
   public class TranslationVisitor extends Pipeline.PipelineVisitor.Defaults {
     private final Logger LOG = LoggerFactory.getLogger(TranslationVisitor.class);
     private final TranslationContext ctxt;
+    private int topologicalId = 0;
 
     public TranslationVisitor(TranslationContext ctxt) {
       this.ctxt = ctxt;
@@ -87,6 +93,7 @@ public class KafkaStreamsPipelineTranslator {
         T transform, TransformHierarchy.Node node, TransformTranslator<?> translator) {
 
       ctxt.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
+      ctxt.setCurrentTopologicalId(topologicalId++);
 
       @SuppressWarnings("unchecked")
       final TransformTranslator<T> typedTranslator = (TransformTranslator<T>) translator;

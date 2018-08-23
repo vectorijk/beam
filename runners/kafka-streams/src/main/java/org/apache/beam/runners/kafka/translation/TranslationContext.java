@@ -19,6 +19,8 @@
 package org.apache.beam.runners.kafka.translation;
 
 import com.google.common.collect.Iterables;
+
+import java.util.HashMap;
 import java.util.Map;
 import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
@@ -27,18 +29,33 @@ import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.processor.Processor;
+import org.apache.kafka.streams.processor.internals.ProcessorNode;
 
 /** Helper. */
 public class TranslationContext {
   private final KafkaStreamsPipelineOptions pipelineOptions;
   private AppliedPTransform<?, ?, ?> currentTransform;
+  private Map<PValue, ProcessorNode<?, ?>> processorStreams = new HashMap<>();
+  private Topology topology;
 
-  public TranslationContext(KafkaStreamsPipelineOptions options) {
+  public TranslationContext(KafkaStreamsPipelineOptions options,
+                            Topology topology) {
     this.pipelineOptions = options;
+    this.topology = topology;
   }
 
-  public void setCurrentTransform(TransformHierarchy.Node treeNode, Pipeline pipeline) {
-    this.currentTransform = treeNode.toAppliedPTransform(pipeline);
+  public void setCurrentTransform(AppliedPTransform<?, ?, ?> transform) {
+    this.currentTransform = transform;
+  }
+
+  public <OutT> void registerMessageStream(PValue pvalue, ProcessorNode<?, ?> processorNode) {
+    if (processorStreams.containsKey(pvalue)) {
+      throw new IllegalArgumentException("Stream already registered for pvalue: " + pvalue);
+    }
+
+    processorStreams.put(pvalue, processorNode);
   }
 
   public Map<TupleTag<?>, PValue> getInputs() {
@@ -60,4 +77,14 @@ public class TranslationContext {
   public AppliedPTransform<?, ?, ?> getCurrentTransform() {
     return currentTransform;
   }
+
+  public void setCurrentTopologicalId(int topologicalId) {
+
+  }
+
+  public void clearCurrentTransform() {
+
+  }
+
+  public <T>
 }
