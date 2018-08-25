@@ -6,5 +6,7 @@ import org.apache.beam.sdk.transforms.Flatten;
 class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PCollections<T>> {
   @Override
   public void translate(
-      Flatten.PCollections<T> transform, TransformHierarchy.Node node, TranslationContext ctx) {}
+      Flatten.PCollections<T> transform, TransformHierarchy.Node node, TranslationContext ctx) {
+
+  }
 }

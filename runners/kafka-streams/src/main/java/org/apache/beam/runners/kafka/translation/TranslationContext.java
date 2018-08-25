@@ -31,6 +31,7 @@ import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.Processor;
+import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 
 /** Helper. */
@@ -38,10 +39,9 @@ public class TranslationContext {
   private final KafkaStreamsPipelineOptions pipelineOptions;
   private AppliedPTransform<?, ?, ?> currentTransform;
   private Map<PValue, ProcessorNode<?, ?>> processorStreams = new HashMap<>();
-  private Topology topology;
+  private InternalTopologyBuilder topology;
 
-  public TranslationContext(KafkaStreamsPipelineOptions options,
-                            Topology topology) {
+  public TranslationContext(KafkaStreamsPipelineOptions options, InternalTopologyBuilder topology) {
     this.pipelineOptions = options;
     this.topology = topology;
   }
@@ -78,13 +78,7 @@ public class TranslationContext {
     return currentTransform;
   }
 
-  public void setCurrentTopologicalId(int topologicalId) {
+  public void setCurrentTopologicalId(int topologicalId) {}
 
-  }
-
-  public void clearCurrentTransform() {
-
-  }
-
-  public <T>
+  public void clearCurrentTransform() {}
 }

@@ -26,7 +26,7 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PValue;
-import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,24 +39,25 @@ public class KafkaStreamsPipelineTranslator {
 
   private final TranslationContext translationContext;
 
-  private final Map<String, TransformTranslator<?>> TRANSLATORS =
+  private final static Map<String, TransformTranslator<?>> TRANSLATORS =
       ImmutableMap.<String, TransformTranslator<?>>builder()
           .put(PTransformTranslation.READ_TRANSFORM_URN, new ReadTranslator())
           //          .put(PTransformTranslation.PAR_DO_TRANSFORM_URN, new ParDoBoundTranslator())
           .put(PTransformTranslation.FLATTEN_TRANSFORM_URN, new FlattenPCollectionsTranslator())
           .build();
 
-  public void translator(Pipeline pipeline,
+  public static void translator(Pipeline pipeline,
                          KafkaStreamsPipelineOptions options,
-                         Topology topology,
-                         Map<PValue, String> idMap,
-                         PValue naiveSource) {
+                         InternalTopologyBuilder topology) {
+//                         InternalTopologyBuilder topology,
+//                         Map<PValue, String> idMap,
+//                         PValue naiveSource) {
     final TranslationContext ctxt = new TranslationContext(options, topology);
     final TranslationVisitor visitor = new TranslationVisitor(ctxt);
     pipeline.traverseTopologically(visitor);
   }
 
-  public class TranslationVisitor extends Pipeline.PipelineVisitor.Defaults {
+  public static class TranslationVisitor extends Pipeline.PipelineVisitor.Defaults {
     private final Logger LOG = LoggerFactory.getLogger(TranslationVisitor.class);
     private final TranslationContext ctxt;
     private int topologicalId = 0;
