@@ -39,19 +39,18 @@ public class KafkaStreamsPipelineTranslator {
 
   private final TranslationContext translationContext;
 
-  private final static Map<String, TransformTranslator<?>> TRANSLATORS =
+  private static final Map<String, TransformTranslator<?>> TRANSLATORS =
       ImmutableMap.<String, TransformTranslator<?>>builder()
           .put(PTransformTranslation.READ_TRANSFORM_URN, new ReadTranslator())
           //          .put(PTransformTranslation.PAR_DO_TRANSFORM_URN, new ParDoBoundTranslator())
           .put(PTransformTranslation.FLATTEN_TRANSFORM_URN, new FlattenPCollectionsTranslator())
           .build();
 
-  public static void translator(Pipeline pipeline,
-                         KafkaStreamsPipelineOptions options,
-                         InternalTopologyBuilder topology) {
-//                         InternalTopologyBuilder topology,
-//                         Map<PValue, String> idMap,
-//                         PValue naiveSource) {
+  public static void translator(
+      Pipeline pipeline, KafkaStreamsPipelineOptions options, InternalTopologyBuilder topology) {
+    //                         InternalTopologyBuilder topology,
+    //                         Map<PValue, String> idMap,
+    //                         PValue naiveSource) {
     final TranslationContext ctxt = new TranslationContext(options, topology);
     final TranslationVisitor visitor = new TranslationVisitor(ctxt);
     pipeline.traverseTopologically(visitor);
@@ -68,18 +67,18 @@ public class KafkaStreamsPipelineTranslator {
 
     @Override
     public CompositeBehavior enterCompositeTransform(TransformHierarchy.Node node) {
-      LOG.debug("Entering composite transform {}", node.getTransform());
+      LOG.info("Entering composite transform {}", node.getTransform());
       return CompositeBehavior.ENTER_TRANSFORM;
     }
 
     @Override
     public void leaveCompositeTransform(TransformHierarchy.Node node) {
-      LOG.debug("Leaving composite transform {}", node.getTransform());
+      LOG.info("Leaving composite transform {}", node.getTransform());
     }
 
     @Override
     public void visitPrimitiveTransform(TransformHierarchy.Node node) {
-      LOG.debug("Visiting primitive transform {}", node.getTransform());
+      LOG.info("Visiting primitive transform {}", node.getTransform());
       final String urn = getUrnForTransform(node.getTransform());
 
       applyTransform(node.getTransform(), node, TRANSLATORS.get(urn));
@@ -87,12 +86,11 @@ public class KafkaStreamsPipelineTranslator {
 
     @Override
     public void visitValue(PValue value, TransformHierarchy.Node producer) {
-      LOG.debug("Visiting value {}", value);
+      LOG.info("Visiting value {}", value);
     }
 
     private <T extends PTransform<?, ?>> void applyTransform(
         T transform, TransformHierarchy.Node node, TransformTranslator<?> translator) {
-
       ctxt.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
       ctxt.setCurrentTopologicalId(topologicalId++);
 

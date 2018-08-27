@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import groovy.json.JsonOutput
 
 apply plugin: org.apache.beam.gradle.BeamModulePlugin
 applyJavaNature()
@@ -27,6 +28,10 @@ description = "Apache Beam :: Runners :: Kafka Streams"
  * we are attempting to reference the "sourceSets.test.output" directly.
  */
 evaluationDependsOn(":beam-sdks-java-core")
+
+configurations {
+  validatesRunner
+}
 
 def kafka_version = "2.0.0"
 
@@ -44,4 +49,37 @@ dependencies {
   shadow library.java.args4j
   shadow "org.apache.kafka:kafka-streams:$kafka_version"
   shadow "org.apache.kafka:kafka-clients:$kafka_version"
+  shadowTest project(path: ":beam-sdks-java-core", configuration: "shadowTest")
+  shadowTest project(path: ":beam-runners-core-java", configuration: "shadowTest")
+  shadowTest library.java.commons_lang3
+  shadowTest library.java.hamcrest_core
+  shadowTest library.java.junit
+  shadowTest library.java.mockito_core
+  shadowTest library.java.jackson_dataformat_yaml
+  validatesRunner project(path: ":beam-sdks-java-core", configuration: "shadowTest")
+  validatesRunner project(path: ":beam-runners-core-java", configuration: "shadowTest")
+  validatesRunner project(path: project.path, configuration: "shadow")
 }
+
+
+task validatesRunner(type: Test) {
+  group = "Verification"
+  description "Validates Kafka Streams runner"
+  systemProperty "beamTestPipelineOptions", JsonOutput.toJson([
+          "--runner=TestKafkaStreamsRunner",
+  ])
+
+  classpath = configurations.validatesRunner
+  testClassesDirs = files(project(":beam-sdks-java-core").sourceSets.test.output.classesDirs)
+  useJUnit {
+    includeCategories 'org.apache.beam.sdk.testing.ValidatesRunner'
+    excludeCategories 'org.apache.beam.sdk.testing.UsesAttemptedMetrics'
+    excludeCategories 'org.apache.beam.sdk.testing.UsesCommittedMetrics'
+    excludeCategories 'org.apache.beam.sdk.testing.UsesImpulse'
+    excludeCategories 'org.apache.beam.sdk.testing.UsesUnboundedSplittableParDo'
+    excludeCategories 'org.apache.beam.sdk.testing.UsesTestStream'
+  }
+}
+
+// Generates :beam-runners-kafka-streams:runQuickstartJavaKafkaStreams
+createJavaExamplesArchetypeValidationTask(type: 'Quickstart', runner:'KafkaStreams')

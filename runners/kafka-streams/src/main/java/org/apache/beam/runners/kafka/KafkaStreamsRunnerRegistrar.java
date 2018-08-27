@@ -28,7 +28,7 @@ import org.apache.beam.sdk.runners.PipelineRunnerRegistrar;
 public class KafkaStreamsRunnerRegistrar {
   private KafkaStreamsRunnerRegistrar() {}
 
-  /** Pipeline runner registrar. */
+  /** Kafka Streams pipeline runner registrar. */
   @AutoService(PipelineRunnerRegistrar.class)
   public static class Runner implements PipelineRunnerRegistrar {
     @Override
@@ -37,7 +37,7 @@ public class KafkaStreamsRunnerRegistrar {
     }
   }
 
-  /** Pipeline options registrar. */
+  /** Kafka Streams pipeline options registrar. */
   @AutoService(PipelineOptionsRegistrar.class)
   public static class Options implements PipelineOptionsRegistrar {
     @Override

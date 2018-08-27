@@ -15,32 +15,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-package org.apache.beam.runners.kafka;
+package org.apache.beam.runners.kafka.examples;
 
 import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.PipelineResult;
-import org.apache.beam.sdk.PipelineRunner;
+import org.apache.beam.sdk.options.Default;
+import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.sdk.options.PipelineOptionsValidator;
+import org.apache.beam.sdk.options.PipelineOptionsFactory;
 
-public class TestKafkaStreamsRunner extends PipelineRunner<PipelineResult> {
-  private final KafkaStreamsRunner delegate;
+public class WordCount {
+  public interface WordCountOptions extends PipelineOptions {
+    @Description("Path of the file to read from")
+    @Default.String("gs://beam-samples/shakespeare/kinglear.txt")
+    String getInputFile();
 
-  public TestKafkaStreamsRunner(KafkaStreamsPipelineOptions options) {
-    this.delegate = KafkaStreamsRunner.fromOptions(options);
+    void setInputFile(String value);
+
+    @Description("Path of the file to write to")
+    String getOutput();
+
+    void setOutput(String value);
   }
 
-  public static TestKafkaStreamsRunner fromOptions(PipelineOptions options) {
-    KafkaStreamsPipelineOptions KSOptions =
-        PipelineOptionsValidator.validate(KafkaStreamsPipelineOptions.class, options);
-    return new TestKafkaStreamsRunner(KSOptions);
-  }
+  public static void main(String[] args) {
+    WordCountOptions options =
+        PipelineOptionsFactory.fromArgs(args).withValidation().as(WordCountOptions.class);
+    Pipeline p = Pipeline.create(options);
 
-  @Override
-  public PipelineResult run(Pipeline pipeline) {
-    KafkaStreamsPipelineResult result = delegate.run(pipeline);
-    result.waitUntilFinish();
-    return result;
+    p.begin();
+
+    p.run().waitUntilFinish();
   }
 }

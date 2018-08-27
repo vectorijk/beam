@@ -25,12 +25,9 @@ import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsValidator;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.values.PValue;
-import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Map;
 
 /**
  * A {@link PipelineRunner} that executes the operations in the {@link Pipeline} into an equivalent
@@ -56,12 +53,15 @@ public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResul
     InternalTopologyBuilder tb = new InternalTopologyBuilder();
 
     // Add a dummy source for use in special cases (TestStream, empty flatten)
-    final PValue dummySource = pipeline.apply("Dummy Input Source", Create.of("dummy"));
+//    final PValue dummySource = pipeline.apply("Dummy Input Source", Create.of("dummy"));
 
-//    final Map<PValue, String> idMap = PViewToIdMapper.buildIdMap(pipeline);
+    //    final Map<PValue, String> idMap = PViewToIdMapper.buildIdMap(pipeline);
 
+    LOG.info("before translation.");
     KafkaStreamsPipelineTranslator.translator(pipeline, options, tb);
 
+    tb.build();
+    LOG.info("Topology: " + tb.toString());
     return null;
   }
 }
