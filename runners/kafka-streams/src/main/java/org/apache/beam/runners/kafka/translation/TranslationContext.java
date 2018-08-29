@@ -26,6 +26,7 @@ import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
 import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 
@@ -34,9 +35,9 @@ public class TranslationContext {
   private final KafkaStreamsPipelineOptions pipelineOptions;
   private AppliedPTransform<?, ?, ?> currentTransform;
   private Map<PValue, ProcessorNode<?, ?>> processorStreams = new HashMap<>();
-  private InternalTopologyBuilder topology;
+  private Topology topology;
 
-  public TranslationContext(KafkaStreamsPipelineOptions options, InternalTopologyBuilder topology) {
+  public TranslationContext(KafkaStreamsPipelineOptions options, Topology topology) {
     this.pipelineOptions = options;
     this.topology = topology;
   }
@@ -45,7 +46,7 @@ public class TranslationContext {
     this.currentTransform = transform;
   }
 
-  public <OutT> void registerMessageStream(PValue pvalue, ProcessorNode<?, ?> processorNode) {
+  public <OutT> void registerKStream(PValue pvalue, ProcessorNode<?, ?> processorNode) {
     if (processorStreams.containsKey(pvalue)) {
       throw new IllegalArgumentException("Stream already registered for pvalue: " + pvalue);
     }

@@ -18,6 +18,7 @@
 
 package org.apache.beam.runners.kafka;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.beam.runners.kafka.translation.KafkaStreamsPipelineTranslator;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineRunner;
@@ -25,9 +26,18 @@ import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsValidator;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.kafka.streams.KafkaClientSupplier;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.kstream.internals.InternalStreamsBuilder;
+import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Properties;
 
 /**
  * A {@link PipelineRunner} that executes the operations in the {@link Pipeline} into an equivalent
@@ -50,7 +60,7 @@ public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResul
 
   @Override
   public KafkaStreamsPipelineResult run(Pipeline pipeline) {
-    InternalTopologyBuilder tb = new InternalTopologyBuilder();
+    Topology itb = new Topology();
 
     // Add a dummy source for use in special cases (TestStream, empty flatten)
 //    final PValue dummySource = pipeline.apply("Dummy Input Source", Create.of("dummy"));
@@ -58,10 +68,16 @@ public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResul
     //    final Map<PValue, String> idMap = PViewToIdMapper.buildIdMap(pipeline);
 
     LOG.info("before translation.");
-    KafkaStreamsPipelineTranslator.translator(pipeline, options, tb);
+    KafkaStreamsPipelineTranslator.translator(pipeline, options, itb);
 
-    tb.build();
-    LOG.info("Topology: " + tb.toString());
+    LOG.info("Topology: " + itb.toString());
+
+    StreamsConfig config = new StreamsConfig(new HashMap<>());
+
+    KafkaClientSupplier kClientSupplier = new DefaultKafkaClientSupplier();
+
+    KafkaStreams ks = new KafkaStreams(itb, new Properties(), kClientSupplier);
+//    ks.start();
     return null;
   }
 }
