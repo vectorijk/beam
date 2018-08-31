@@ -17,6 +17,6 @@ class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PC
 
     final List<ProcessorSupplier<?, ?>> inputStreams = new ArrayList<>();
 
-    ctx.registerKStream();
+//    ctx.registerKStream();
   }
 }
