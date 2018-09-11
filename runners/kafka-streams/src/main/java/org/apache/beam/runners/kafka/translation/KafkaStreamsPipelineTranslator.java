@@ -27,7 +27,6 @@ import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,8 +42,9 @@ public class KafkaStreamsPipelineTranslator {
   private static final Map<String, TransformTranslator<?>> TRANSLATORS =
       ImmutableMap.<String, TransformTranslator<?>>builder()
           .put(PTransformTranslation.READ_TRANSFORM_URN, new ReadTranslator())
-          //          .put(PTransformTranslation.PAR_DO_TRANSFORM_URN, new ParDoBoundTranslator())
+          .put(PTransformTranslation.PAR_DO_TRANSFORM_URN, new ParDoBoundTranslator())
           .put(PTransformTranslation.FLATTEN_TRANSFORM_URN, new FlattenPCollectionsTranslator())
+              .put(PTransformTranslation.GROUP_BY_KEY_TRANSFORM_URN, new GroupByKeyTranslator())
           .build();
 
   public static void translator(
@@ -92,6 +92,7 @@ public class KafkaStreamsPipelineTranslator {
 
     private <T extends PTransform<?, ?>> void applyTransform(
         T transform, TransformHierarchy.Node node, TransformTranslator<?> translator) {
+      LOG.info("Applying transform");
       ctxt.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
       ctxt.setCurrentTopologicalId(topologicalId++);
 

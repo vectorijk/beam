@@ -1,13 +1,11 @@
 package org.apache.beam.runners.kafka.translation;
 
-import org.apache.beam.sdk.runners.TransformHierarchy;
-import org.apache.beam.sdk.transforms.Flatten;
-import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.PValue;
-import org.apache.kafka.streams.processor.ProcessorSupplier;
-
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.beam.sdk.runners.TransformHierarchy;
+import org.apache.beam.sdk.transforms.Flatten;
+import org.apache.beam.sdk.values.PValue;
+import org.apache.kafka.streams.processor.ProcessorSupplier;
 
 class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PCollections<T>> {
   @Override
@@ -17,6 +15,6 @@ class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PC
 
     final List<ProcessorSupplier<?, ?>> inputStreams = new ArrayList<>();
 
-//    ctx.registerKStream();
+    //    ctx.registerKStream();
   }
 }
