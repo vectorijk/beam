@@ -25,6 +25,7 @@ import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
+import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.kafka.streams.Topology;
 import org.slf4j.Logger;
@@ -44,7 +45,8 @@ public class KafkaStreamsPipelineTranslator {
           .put(PTransformTranslation.READ_TRANSFORM_URN, new ReadTranslator())
           .put(PTransformTranslation.PAR_DO_TRANSFORM_URN, new ParDoBoundTranslator())
           .put(PTransformTranslation.FLATTEN_TRANSFORM_URN, new FlattenPCollectionsTranslator())
-              .put(PTransformTranslation.GROUP_BY_KEY_TRANSFORM_URN, new GroupByKeyTranslator())
+          .put(PTransformTranslation.GROUP_BY_KEY_TRANSFORM_URN, new GroupByKeyTranslator())
+          .put(PTransformTranslation.CREATE_VIEW_TRANSFORM_URN, new CreatePCollectionViewTranslator())
           .build();
 
   public static void translator(

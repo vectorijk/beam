@@ -23,6 +23,7 @@ public class KafkaStreamsRunnerTest {
 
     //TODO: should not set runner below
     options.setRunner(KafkaStreamsRunner.class);
+    options.setApplicationId("beam-ks-runner");
 
     KafkaStreamsRunner.fromOptions(options).run(p);
   }
