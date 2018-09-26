@@ -27,6 +27,7 @@ import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.Topology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,11 +51,11 @@ public class KafkaStreamsPipelineTranslator {
           .build();
 
   public static void translator(
-      Pipeline pipeline, KafkaStreamsPipelineOptions options, Topology topology) {
+      Pipeline pipeline, KafkaStreamsPipelineOptions options, StreamsBuilder streamsBuilder) {
     //                         InternalTopologyBuilder topology,
     //                         Map<PValue, String> idMap,
     //                         PValue naiveSource) {
-    final TranslationContext ctxt = new TranslationContext(options, topology);
+    final TranslationContext ctxt = new TranslationContext(options, streamsBuilder);
     final TranslationVisitor visitor = new TranslationVisitor(ctxt);
     pipeline.traverseTopologically(visitor);
   }

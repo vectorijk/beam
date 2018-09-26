@@ -30,7 +30,7 @@ public class KafkaStreamsPipelineResult implements PipelineResult {
   }
 
   @Override
-  public State cancel() throws IOException {
+  public State cancel() {
     return null;
   }
 

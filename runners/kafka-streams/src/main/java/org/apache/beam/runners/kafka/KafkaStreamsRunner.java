@@ -18,18 +18,13 @@
 
 package org.apache.beam.runners.kafka;
 
-import java.util.HashMap;
-import java.util.Properties;
 import org.apache.beam.runners.kafka.translation.KafkaStreamsPipelineTranslator;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineRunner;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsValidator;
-import org.apache.kafka.streams.KafkaClientSupplier;
-import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,15 +51,17 @@ public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResul
   public KafkaStreamsPipelineResult run(Pipeline pipeline) {
     Topology itb = new Topology();
 
+    final StreamsBuilder builder = new StreamsBuilder();
+
     // Add a dummy source for use in special cases (TestStream, empty flatten)
     //    final PValue dummySource = pipeline.apply("Dummy Input Source", Create.of("dummy"));
 
     //    final Map<PValue, String> idMap = PViewToIdMapper.buildIdMap(pipeline);
 
     LOG.info("before translation.");
-    KafkaStreamsPipelineTranslator.translator(pipeline, options, itb);
+    KafkaStreamsPipelineTranslator.translator(pipeline, options, builder);
 
-    LOG.info("Topology: " + itb.toString());
+    LOG.info("Topology: " + itb.describe());
 
 //    StreamsConfig config = new StreamsConfig(new HashMap<>());
 //

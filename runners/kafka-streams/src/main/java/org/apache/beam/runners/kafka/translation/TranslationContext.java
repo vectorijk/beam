@@ -26,31 +26,44 @@ import org.apache.beam.runners.kafka.KafkaStreamsPipelineOptions;
 import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 
 /** Helper. */
 public class TranslationContext {
   private final KafkaStreamsPipelineOptions pipelineOptions;
   private AppliedPTransform<?, ?, ?> currentTransform;
-  private Map<PValue, ProcessorNode<?, ?>> processorStreams = new HashMap<>();
-  private Topology topology;
+  private Map<PValue, KStream<?, ?>> kStreamsMap = new HashMap<>();
+//  private Topology topology;
+  private StreamsBuilder streamsBuilder;
 
-  public TranslationContext(KafkaStreamsPipelineOptions options, Topology topology) {
+  public TranslationContext(KafkaStreamsPipelineOptions options, StreamsBuilder streamsBuilder) {
     this.pipelineOptions = options;
-    this.topology = topology;
+    this.streamsBuilder = streamsBuilder;
   }
 
   public void setCurrentTransform(AppliedPTransform<?, ?, ?> transform) {
     this.currentTransform = transform;
   }
 
-  public <OutT> void registerKStream(PValue pvalue, ProcessorNode<?, ?> processorNode) {
-    if (processorStreams.containsKey(pvalue)) {
-      throw new IllegalArgumentException("Stream already registered for pvalue: " + pvalue);
+  public <KT, VT> void registerKStream(PValue pvalue, KStream<KT, VT> kStream) {
+    if (kStreamsMap.containsKey(pvalue)) {
+      throw new IllegalArgumentException("KStream already registered for pvalue: " + pvalue);
     }
 
-    processorStreams.put(pvalue, processorNode);
+    kStreamsMap.put(pvalue, kStream);
+  }
+
+  public <KT, VT> KStream<KT, VT> getKStream(PValue pvalue) {
+    final KStream<KT, VT> kStream = (KStream<KT, VT>) kStreamsMap.get(pvalue);
+
+    if (null == kStream) {
+      throw new IllegalArgumentException("No KStream registered for pvalue: " + pvalue);
+    }
+
+    return kStream;
   }
 
   public Map<TupleTag<?>, PValue> getInputs() {
@@ -72,6 +85,10 @@ public class TranslationContext {
   public AppliedPTransform<?, ?, ?> getCurrentTransform() {
     return currentTransform;
   }
+
+//  public void doRegisterKS() {
+//    streamsBuilder.stream();
+//  }
 
   public void setCurrentTopologicalId(int topologicalId) {}
 
