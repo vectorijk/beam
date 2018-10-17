@@ -25,6 +25,7 @@ import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsRegistrar;
 import org.apache.beam.sdk.runners.PipelineRunnerRegistrar;
 
+/** Registrar. */
 public class KafkaStreamsRunnerRegistrar {
   private KafkaStreamsRunnerRegistrar() {}
 

@@ -46,7 +46,7 @@ public class TranslationContext {
     this.currentTransform = transform;
   }
 
-  public <KT, VT> void registerKStream(PValue pvalue, KStream<KT, VT> kStream) {
+  public <K, V> void registerKStream(PValue pvalue, KStream<K, V> kStream) {
     if (kStreamsMap.containsKey(pvalue)) {
       throw new IllegalArgumentException("KStream already registered for pvalue: " + pvalue);
     }
@@ -54,8 +54,8 @@ public class TranslationContext {
     kStreamsMap.put(pvalue, kStream);
   }
 
-  public <KT, VT> KStream<KT, VT> getKStream(PValue pvalue) {
-    final KStream<KT, VT> kStream = (KStream<KT, VT>) kStreamsMap.get(pvalue);
+  public <K, V> KStream<K, V> getKStream(PValue pvalue) {
+    final KStream<K, V> kStream = (KStream<K, V>) kStreamsMap.get(pvalue);
 
     if (null == kStream) {
       throw new IllegalArgumentException("No KStream registered for pvalue: " + pvalue);

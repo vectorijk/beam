@@ -30,8 +30,9 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** PipelineTranslator. */
 public class KafkaStreamsPipelineTranslator {
-  private static final Logger LOG = LoggerFactory.getLogger(KafkaStreamsPipelineTranslator.class);
+  private static final Logger lOG = LoggerFactory.getLogger(KafkaStreamsPipelineTranslator.class);
 
   private KafkaStreamsPipelineTranslator(TranslationContext ctxt) {
     this.translationContext = ctxt;
@@ -60,8 +61,9 @@ public class KafkaStreamsPipelineTranslator {
     pipeline.traverseTopologically(visitor);
   }
 
+  /** graph visitor. */
   public static class TranslationVisitor extends Pipeline.PipelineVisitor.Defaults {
-    private final Logger LOG = LoggerFactory.getLogger(TranslationVisitor.class);
+    private final Logger lOG = LoggerFactory.getLogger(TranslationVisitor.class);
     private final TranslationContext ctxt;
     private int topologicalId = 0;
 
@@ -71,18 +73,18 @@ public class KafkaStreamsPipelineTranslator {
 
     @Override
     public CompositeBehavior enterCompositeTransform(TransformHierarchy.Node node) {
-      LOG.info("Entering composite transform {}", node.getTransform());
+      lOG.info("Entering composite transform {}", node.getTransform());
       return CompositeBehavior.ENTER_TRANSFORM;
     }
 
     @Override
     public void leaveCompositeTransform(TransformHierarchy.Node node) {
-      LOG.info("Leaving composite transform {}", node.getTransform());
+      lOG.info("Leaving composite transform {}", node.getTransform());
     }
 
     @Override
     public void visitPrimitiveTransform(TransformHierarchy.Node node) {
-      LOG.info("Visiting primitive transform {}", node.getTransform());
+      lOG.info("Visiting primitive transform {}", node.getTransform());
       final String urn = getUrnForTransform(node.getTransform());
 
       applyTransform(node.getTransform(), node, TRANSLATORS.get(urn));
@@ -90,12 +92,12 @@ public class KafkaStreamsPipelineTranslator {
 
     @Override
     public void visitValue(PValue value, TransformHierarchy.Node producer) {
-      LOG.info("Visiting value {}", value);
+      lOG.info("Visiting value {}", value);
     }
 
     private <T extends PTransform<?, ?>> void applyTransform(
         T transform, TransformHierarchy.Node node, TransformTranslator<?> translator) {
-      LOG.info("Applying transform");
+      lOG.info("Applying transform");
       ctxt.setCurrentTransform(node.toAppliedPTransform(getPipeline()));
       ctxt.setCurrentTopologicalId(topologicalId++);
 

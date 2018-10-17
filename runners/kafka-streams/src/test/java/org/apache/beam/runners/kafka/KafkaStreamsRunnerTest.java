@@ -25,6 +25,7 @@ import org.apache.beam.sdk.transforms.Sum;
 import org.apache.beam.sdk.values.PCollection;
 import org.junit.Test;
 
+/** Test. */
 public class KafkaStreamsRunnerTest {
   @Test
   public void testParDoChaining() {

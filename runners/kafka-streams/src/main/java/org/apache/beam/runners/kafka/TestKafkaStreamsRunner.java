@@ -24,6 +24,7 @@ import org.apache.beam.sdk.PipelineRunner;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsValidator;
 
+/** Test Runner. */
 public class TestKafkaStreamsRunner extends PipelineRunner<PipelineResult> {
   private final KafkaStreamsRunner delegate;
 
@@ -32,9 +33,9 @@ public class TestKafkaStreamsRunner extends PipelineRunner<PipelineResult> {
   }
 
   public static TestKafkaStreamsRunner fromOptions(PipelineOptions options) {
-    KafkaStreamsPipelineOptions KSOptions =
+    KafkaStreamsPipelineOptions ksOptions =
         PipelineOptionsValidator.validate(KafkaStreamsPipelineOptions.class, options);
-    return new TestKafkaStreamsRunner(KSOptions);
+    return new TestKafkaStreamsRunner(ksOptions);
   }
 
   @Override

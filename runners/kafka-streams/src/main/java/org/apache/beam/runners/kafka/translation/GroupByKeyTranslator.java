@@ -23,6 +23,7 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 
+/** GroupByKeyTranslator. */
 public class GroupByKeyTranslator<K, InputT, OutputT>
     implements TransformTranslator<
         PTransform<PCollection<KV<K, InputT>>, PCollection<KV<K, OutputT>>>> {

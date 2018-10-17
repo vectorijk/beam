@@ -25,6 +25,7 @@ import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.junit.Test;
 
+/** Test. */
 public class KafkaStreamsRunnerRegistrarTest {
   @Test
   public void testFullName() {

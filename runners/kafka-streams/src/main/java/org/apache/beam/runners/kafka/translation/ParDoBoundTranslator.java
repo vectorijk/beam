@@ -21,6 +21,7 @@ package org.apache.beam.runners.kafka.translation;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.ParDo;
 
+/** ParDoBoundTranslator. */
 public class ParDoBoundTranslator<InT, OutT>
     implements TransformTranslator<ParDo.MultiOutput<InT, OutT>> {
   @Override

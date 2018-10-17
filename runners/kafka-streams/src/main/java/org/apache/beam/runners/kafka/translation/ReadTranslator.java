@@ -23,6 +23,7 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
 
+/** ReadTranslator. */
 public class ReadTranslator<T> implements TransformTranslator<PTransform<PBegin, PCollection<T>>> {
   @Override
   public void translate(

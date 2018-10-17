@@ -16,4 +16,5 @@
  * limitations under the License.
  */
 
+/** Internal implementation of the Beam runner for Apache Kafka Streams. */
 package org.apache.beam.runners.kafka.util;

@@ -21,7 +21,10 @@ package org.apache.beam.runners.kafka;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptions;
 
+/** Kafka streams pipeline options. */
 public interface KafkaStreamsPipelineOptions extends PipelineOptions {
+
+  // set kfk application id
   @Description("Kafka streams application id.")
   //  @Default.String("beam-runner-ks")
   String getApplicationId();

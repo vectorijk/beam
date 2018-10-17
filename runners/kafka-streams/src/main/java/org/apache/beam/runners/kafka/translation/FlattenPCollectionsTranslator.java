@@ -25,6 +25,7 @@ import org.apache.beam.sdk.transforms.Flatten;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.kafka.streams.kstream.KStream;
 
+/** FlattenTranslator. */
 class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PCollections<T>> {
   @Override
   public void translate(

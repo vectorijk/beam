@@ -16,36 +16,5 @@
  * limitations under the License.
  */
 
-package org.apache.beam.runners.kafka;
-
-import org.apache.beam.sdk.PipelineResult;
-import org.apache.beam.sdk.metrics.MetricResults;
-import org.joda.time.Duration;
-
-/** Kafka streams pipeline results. */
-public class KafkaStreamsPipelineResult implements PipelineResult {
-  @Override
-  public State getState() {
-    return null;
-  }
-
-  @Override
-  public State cancel() {
-    return null;
-  }
-
-  @Override
-  public State waitUntilFinish(Duration duration) {
-    return null;
-  }
-
-  @Override
-  public State waitUntilFinish() {
-    return null;
-  }
-
-  @Override
-  public MetricResults metrics() {
-    return null;
-  }
-}
+/** Internal implementation of the Beam runner for Apache Kafka Streams. */
+package org.apache.beam.runners.kafka.translation;
