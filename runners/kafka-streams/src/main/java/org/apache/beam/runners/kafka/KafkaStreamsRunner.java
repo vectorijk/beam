@@ -63,11 +63,11 @@ public class KafkaStreamsRunner extends PipelineRunner<KafkaStreamsPipelineResul
 
     LOG.info("Topology: " + itb.describe());
 
-//    StreamsConfig config = new StreamsConfig(new HashMap<>());
-//
-//    KafkaClientSupplier kClientSupplier = new DefaultKafkaClientSupplier();
-//
-//    KafkaStreams ks = new KafkaStreams(itb, new Properties(), kClientSupplier);
+    //    StreamsConfig config = new StreamsConfig(new HashMap<>());
+    //
+    //    KafkaClientSupplier kClientSupplier = new DefaultKafkaClientSupplier();
+    //
+    //    KafkaStreams ks = new KafkaStreams(itb, new Properties(), kClientSupplier);
     //    ks.start();
     return null;
   }

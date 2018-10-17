@@ -27,16 +27,14 @@ import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.processor.internals.ProcessorNode;
 
 /** Helper. */
 public class TranslationContext {
   private final KafkaStreamsPipelineOptions pipelineOptions;
   private AppliedPTransform<?, ?, ?> currentTransform;
   private Map<PValue, KStream<?, ?>> kStreamsMap = new HashMap<>();
-//  private Topology topology;
+  //  private Topology topology;
   private StreamsBuilder streamsBuilder;
 
   public TranslationContext(KafkaStreamsPipelineOptions options, StreamsBuilder streamsBuilder) {
@@ -86,9 +84,9 @@ public class TranslationContext {
     return currentTransform;
   }
 
-//  public void doRegisterKS() {
-//    streamsBuilder.stream();
-//  }
+  //  public void doRegisterKS() {
+  //    streamsBuilder.stream();
+  //  }
 
   public void setCurrentTopologicalId(int topologicalId) {}
 

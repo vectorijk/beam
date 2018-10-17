@@ -20,14 +20,10 @@ package org.apache.beam.runners.kafka.translation;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.transforms.Flatten;
 import org.apache.beam.sdk.values.PValue;
-import org.apache.beam.sdk.values.TupleTag;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.processor.ProcessorSupplier;
 
 class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PCollections<T>> {
   @Override
@@ -48,7 +44,7 @@ class FlattenPCollectionsTranslator<T> implements TransformTranslator<Flatten.PC
 
     KStream<T, T> merged = null;
 
-    for (KStream<?, ?> ks: inputStreams) {
+    for (KStream<?, ?> ks : inputStreams) {
       merged = merged.merge((KStream<T, T>) ks);
     }
 
