@@ -41,10 +41,10 @@ import org.apache.beam.sdk.extensions.sql.meta.store.InMemoryMetaStore;
 import org.apache.beam.sdk.transforms.Combine.CombineFn;
 import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Strings;
-import org.apache.calcite.jdbc.CalcitePrepare;
-import org.apache.calcite.plan.RelOptUtil;
-import org.apache.calcite.schema.Function;
-import org.apache.calcite.sql.SqlExecutableStatement;
+import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.jdbc.CalcitePrepare;
+import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.plan.RelOptUtil;
+import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.schema.Function;
+import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.sql.SqlExecutableStatement;
 
 /**
  * Contains the metadata of tables/UDF functions, and exposes APIs to
