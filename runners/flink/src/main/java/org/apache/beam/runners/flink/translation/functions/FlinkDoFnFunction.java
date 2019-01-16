@@ -17,8 +17,6 @@
  */
 package org.apache.beam.runners.flink.translation.functions;
 
-import com.google.common.collect.Lists;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.apache.beam.runners.core.DoFnRunner;
@@ -26,6 +24,7 @@ import org.apache.beam.runners.core.DoFnRunners;
 import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
 import org.apache.beam.runners.flink.FlinkPipelineOptions;
 import org.apache.beam.runners.flink.metrics.DoFnRunnerWithMetricsUpdate;
+import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.join.RawUnionValue;
@@ -35,6 +34,7 @@ import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Lists;
 import org.apache.flink.api.common.functions.RichMapPartitionFunction;
 import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.configuration.Configuration;
@@ -61,6 +61,8 @@ public class FlinkDoFnFunction<InputT, OutputT>
 
   private final Map<TupleTag<?>, Integer> outputMap;
   private final TupleTag<OutputT> mainOutputTag;
+  private final Coder<InputT> inputCoder;
+  private final Map<TupleTag<?>, Coder<?>> outputCoderMap;
 
   private transient DoFnInvoker<InputT, OutputT> doFnInvoker;
 
@@ -71,7 +73,9 @@ public class FlinkDoFnFunction<InputT, OutputT>
       Map<PCollectionView<?>, WindowingStrategy<?, ?>> sideInputs,
       PipelineOptions options,
       Map<TupleTag<?>, Integer> outputMap,
-      TupleTag<OutputT> mainOutputTag) {
+      TupleTag<OutputT> mainOutputTag,
+      Coder<InputT> inputCoder,
+      Map<TupleTag<?>, Coder<?>> outputCoderMap) {
 
     this.doFn = doFn;
     this.stepName = stepName;
@@ -80,6 +84,8 @@ public class FlinkDoFnFunction<InputT, OutputT>
     this.windowingStrategy = windowingStrategy;
     this.outputMap = outputMap;
     this.mainOutputTag = mainOutputTag;
+    this.inputCoder = inputCoder;
+    this.outputCoderMap = outputCoderMap;
   }
 
   @Override
@@ -108,8 +114,8 @@ public class FlinkDoFnFunction<InputT, OutputT>
             mainOutputTag,
             additionalOutputTags,
             new FlinkNoOpStepContext(),
-            null,
-            Collections.emptyMap(),
+            inputCoder,
+            outputCoderMap,
             windowingStrategy);
 
     if ((serializedOptions.get().as(FlinkPipelineOptions.class)).getEnableMetrics()) {

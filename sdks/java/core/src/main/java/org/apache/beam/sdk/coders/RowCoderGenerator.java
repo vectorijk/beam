@@ -15,11 +15,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.sdk.coders;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -51,8 +48,12 @@ import net.bytebuddy.implementation.bytecode.member.MethodReturn;
 import net.bytebuddy.implementation.bytecode.member.MethodVariableAccess;
 import net.bytebuddy.matcher.ElementMatchers;
 import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.sdk.schemas.Schema.Field;
+import org.apache.beam.sdk.schemas.Schema.FieldType;
 import org.apache.beam.sdk.schemas.Schema.TypeName;
 import org.apache.beam.sdk.values.Row;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Lists;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Maps;
 
 /**
  * A utility for automatically generating a {@link Coder} for {@link Row} objects corresponding to a
@@ -112,7 +113,7 @@ public abstract class RowCoderGenerator {
           MethodInvocation.invoke(
               new ForLoadedType(entry.getValue().getClass())
                   .getDeclaredMethods()
-                  .filter(ElementMatchers.named(("of")))
+                  .filter(ElementMatchers.named("of"))
                   .getOnly());
       CODER_MAP.putIfAbsent(entry.getKey(), stackManipulation);
     }
@@ -147,9 +148,13 @@ public abstract class RowCoderGenerator {
 
   private static DynamicType.Builder<Coder> implementMethods(
       Schema schema, DynamicType.Builder<Coder> builder) {
+    boolean hasNullableFields =
+        schema.getFields().stream().map(Field::getType).anyMatch(FieldType::getNullable);
     return builder
         .defineMethod("getSchema", Schema.class, Visibility.PRIVATE, Ownership.STATIC)
         .intercept(FixedValue.reference(schema))
+        .defineMethod("hasNullableFields", boolean.class, Visibility.PRIVATE, Ownership.STATIC)
+        .intercept(FixedValue.reference(hasNullableFields))
         .method(ElementMatchers.named("encode"))
         .intercept(new EncodeInstruction())
         .method(ElementMatchers.named("decode"))
@@ -176,6 +181,13 @@ public abstract class RowCoderGenerator {
                 MethodVariableAccess.REFERENCE.loadFrom(1),
                 // OutputStream.
                 MethodVariableAccess.REFERENCE.loadFrom(2),
+                // hasNullableFields
+                MethodInvocation.invoke(
+                    implementationContext
+                        .getInstrumentedType()
+                        .getDeclaredMethods()
+                        .filter(ElementMatchers.named("hasNullableFields"))
+                        .getOnly()),
                 // Call EncodeInstruction.encodeDelegate
                 MethodInvocation.invoke(
                     LOADED_TYPE
@@ -197,9 +209,10 @@ public abstract class RowCoderGenerator {
     // The encode method of the generated Coder delegates to this method to evaluate all of the
     // per-field Coders.
     @SuppressWarnings("unchecked")
-    static void encodeDelegate(Coder[] coders, Row value, OutputStream outputStream)
+    static void encodeDelegate(
+        Coder[] coders, Row value, OutputStream outputStream, boolean hasNullableFields)
         throws IOException {
-      NULL_LIST_CODER.encode(scanNullFields(value), outputStream);
+      NULL_LIST_CODER.encode(scanNullFields(value, hasNullableFields), outputStream);
       for (int idx = 0; idx < value.getFieldCount(); ++idx) {
         Object fieldValue = value.getValue(idx);
         if (value.getValue(idx) != null) {
@@ -210,11 +223,13 @@ public abstract class RowCoderGenerator {
 
     // Figure out which fields of the Row are null, and returns a BitSet. This allows us to save
     // on encoding each null field separately.
-    private static BitSet scanNullFields(Row row) {
+    private static BitSet scanNullFields(Row row, boolean hasNullableFields) {
       BitSet nullFields = new BitSet(row.getFieldCount());
-      for (int idx = 0; idx < row.getFieldCount(); ++idx) {
-        if (row.getValue(idx) == null) {
-          nullFields.set(idx);
+      if (hasNullableFields) {
+        for (int idx = 0; idx < row.getFieldCount(); ++idx) {
+          if (row.getValue(idx) == null) {
+            nullFields.set(idx);
+          }
         }
       }
       return nullFields;
@@ -327,7 +342,7 @@ public abstract class RowCoderGenerator {
       return listCoder(fieldType.getCollectionElementType());
     } else if (TypeName.MAP.equals(fieldType.getTypeName())) {
       return mapCoder(fieldType.getMapKeyType(), fieldType.getMapValueType());
-    } else if (TypeName.ROW.equals((fieldType.getTypeName()))) {
+    } else if (TypeName.ROW.equals(fieldType.getTypeName())) {
       Coder<Row> nestedCoder = generate(fieldType.getRowSchema(), UUID.randomUUID());
       return rowCoder(nestedCoder.getClass());
     } else {

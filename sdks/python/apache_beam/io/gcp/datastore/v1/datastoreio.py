@@ -22,6 +22,7 @@ from __future__ import division
 import logging
 import time
 from builtins import object
+from builtins import round
 
 from apache_beam.io.gcp.datastore.v1 import helper
 from apache_beam.io.gcp.datastore.v1 import query_splitter
@@ -114,11 +115,11 @@ class ReadFromDatastore(PTransform):
     super(ReadFromDatastore, self).__init__()
 
     if not project:
-      ValueError("Project cannot be empty")
+      raise ValueError("Project cannot be empty")
     if not query:
-      ValueError("Query cannot be empty")
+      raise ValueError("Query cannot be empty")
     if num_splits < 0:
-      ValueError("num_splits must be greater than or equal 0")
+      raise ValueError("num_splits must be greater than or equal 0")
 
     self._project = project
     # using _namespace conflicts with DisplayData._namespace

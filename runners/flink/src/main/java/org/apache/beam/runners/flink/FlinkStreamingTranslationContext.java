@@ -17,11 +17,11 @@
  */
 package org.apache.beam.runners.flink;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkNotNull;
 
-import com.google.common.collect.Iterables;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.runners.flink.translation.types.CoderTypeInformation;
 import org.apache.beam.sdk.coders.Coder;
@@ -34,6 +34,7 @@ import org.apache.beam.sdk.values.PInput;
 import org.apache.beam.sdk.values.POutput;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -90,11 +91,21 @@ class FlinkStreamingTranslationContext {
     this.currentTransform = currentTransform;
   }
 
-  public <T> Coder<WindowedValue<T>> getCoder(PCollection<T> collection) {
+  public <T> Coder<WindowedValue<T>> getWindowedInputCoder(PCollection<T> collection) {
     Coder<T> valueCoder = collection.getCoder();
 
     return WindowedValue.getFullCoder(
         valueCoder, collection.getWindowingStrategy().getWindowFn().windowCoder());
+  }
+
+  public <T> Coder<T> getInputCoder(PCollection<T> collection) {
+    return collection.getCoder();
+  }
+
+  public Map<TupleTag<?>, Coder<?>> getOutputCoders() {
+    return currentTransform.getOutputs().entrySet().stream()
+        .filter(e -> e.getValue() instanceof PCollection)
+        .collect(Collectors.toMap(e -> e.getKey(), e -> ((PCollection) e.getValue()).getCoder()));
   }
 
   @SuppressWarnings("unchecked")

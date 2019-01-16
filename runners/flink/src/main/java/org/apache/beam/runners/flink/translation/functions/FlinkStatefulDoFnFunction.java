@@ -19,8 +19,6 @@ package org.apache.beam.runners.flink.translation.functions;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
-import com.google.common.collect.Lists;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +33,7 @@ import org.apache.beam.runners.core.TimerInternals;
 import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
 import org.apache.beam.runners.flink.FlinkPipelineOptions;
 import org.apache.beam.runners.flink.metrics.DoFnRunnerWithMetricsUpdate;
+import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
@@ -46,6 +45,7 @@ import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Lists;
 import org.apache.flink.api.common.functions.RichGroupReduceFunction;
 import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.configuration.Configuration;
@@ -63,6 +63,8 @@ public class FlinkStatefulDoFnFunction<K, V, OutputT>
   private final SerializablePipelineOptions serializedOptions;
   private final Map<TupleTag<?>, Integer> outputMap;
   private final TupleTag<OutputT> mainOutputTag;
+  private final Coder<KV<K, V>> inputCoder;
+  private final Map<TupleTag<?>, Coder<?>> outputCoderMap;
   private transient DoFnInvoker doFnInvoker;
 
   public FlinkStatefulDoFnFunction(
@@ -72,7 +74,9 @@ public class FlinkStatefulDoFnFunction<K, V, OutputT>
       Map<PCollectionView<?>, WindowingStrategy<?, ?>> sideInputs,
       PipelineOptions pipelineOptions,
       Map<TupleTag<?>, Integer> outputMap,
-      TupleTag<OutputT> mainOutputTag) {
+      TupleTag<OutputT> mainOutputTag,
+      Coder<KV<K, V>> inputCoder,
+      Map<TupleTag<?>, Coder<?>> outputCoderMap) {
 
     this.dofn = dofn;
     this.stepName = stepName;
@@ -81,6 +85,8 @@ public class FlinkStatefulDoFnFunction<K, V, OutputT>
     this.serializedOptions = new SerializablePipelineOptions(pipelineOptions);
     this.outputMap = outputMap;
     this.mainOutputTag = mainOutputTag;
+    this.inputCoder = inputCoder;
+    this.outputCoderMap = outputCoderMap;
   }
 
   @Override
@@ -134,8 +140,8 @@ public class FlinkStatefulDoFnFunction<K, V, OutputT>
                 return timerInternals;
               }
             },
-            null,
-            Collections.emptyMap(),
+            inputCoder,
+            outputCoderMap,
             windowingStrategy);
 
     if ((serializedOptions.get().as(FlinkPipelineOptions.class)).getEnableMetrics()) {

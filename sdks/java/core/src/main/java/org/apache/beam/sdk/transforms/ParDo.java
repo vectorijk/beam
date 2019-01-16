@@ -17,9 +17,8 @@
  */
 package org.apache.beam.sdk.transforms;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
 
-import com.google.common.collect.ImmutableList;
 import java.io.Serializable;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
@@ -34,7 +33,9 @@ import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderRegistry;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.schemas.FieldAccessDescriptor;
+import org.apache.beam.sdk.schemas.NoSuchSchemaException;
 import org.apache.beam.sdk.schemas.SchemaCoder;
+import org.apache.beam.sdk.schemas.SchemaRegistry;
 import org.apache.beam.sdk.state.StateSpec;
 import org.apache.beam.sdk.transforms.DoFn.WindowedContext;
 import org.apache.beam.sdk.transforms.display.DisplayData;
@@ -58,6 +59,7 @@ import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TupleTagList;
 import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
 
 /**
  * {@link ParDo} is the core element-wise transform in Apache Beam, invoking a user-specified
@@ -101,6 +103,9 @@ import org.apache.beam.sdk.values.TypeDescriptor;
  *       provided, will be called on the {@link DoFn} instance.
  *   <li>If a runner will no longer use a {@link DoFn}, the {@link DoFn.Teardown} method, if
  *       provided, will be called on the discarded instance.
+ *   <li>If a bundle requested bundle finalization by registering a {@link
+ *       DoFn.BundleFinalizer.Callback bundle finalization callback}, the callback will be invoked
+ *       after the runner has successfully committed the output of a successful bundle.
  * </ol>
  *
  * <p>Note also that calls to {@link DoFn.Teardown} are best effort, and may not be called before a
@@ -629,21 +634,31 @@ public class ParDo {
 
     @Override
     public PCollection<OutputT> expand(PCollection<? extends InputT> input) {
+      SchemaRegistry schemaRegistry = input.getPipeline().getSchemaRegistry();
       CoderRegistry registry = input.getPipeline().getCoderRegistry();
       finishSpecifyingStateSpecs(fn, registry, input.getCoder());
 
       TupleTag<OutputT> mainOutput = new TupleTag<>(MAIN_OUTPUT_TAG);
       PCollection<OutputT> res =
           input.apply(withOutputTags(mainOutput, TupleTagList.empty())).get(mainOutput);
+
       try {
-        res.setCoder(
-            registry.getCoder(
-                getFn().getOutputTypeDescriptor(),
-                getFn().getInputTypeDescriptor(),
-                ((PCollection<InputT>) input).getCoder()));
-      } catch (CannotProvideCoderException e) {
-        // Ignore and leave coder unset.
+        res.setSchema(
+            schemaRegistry.getSchema(getFn().getOutputTypeDescriptor()),
+            schemaRegistry.getToRowFunction(getFn().getOutputTypeDescriptor()),
+            schemaRegistry.getFromRowFunction(getFn().getOutputTypeDescriptor()));
+      } catch (NoSuchSchemaException e) {
+        try {
+          res.setCoder(
+              registry.getCoder(
+                  getFn().getOutputTypeDescriptor(),
+                  getFn().getInputTypeDescriptor(),
+                  ((PCollection<InputT>) input).getCoder()));
+        } catch (CannotProvideCoderException e2) {
+          // Ignore and leave coder unset.
+        }
       }
+
       return res;
     }
 

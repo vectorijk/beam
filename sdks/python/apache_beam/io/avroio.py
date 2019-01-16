@@ -52,7 +52,8 @@ from functools import partial
 import avro
 from avro import io as avroio
 from avro import datafile
-from avro import schema
+from fastavro.read import block_reader
+from fastavro.write import Writer
 
 import apache_beam as beam
 from apache_beam.io import filebasedsink
@@ -61,6 +62,13 @@ from apache_beam.io import iobase
 from apache_beam.io.filesystem import CompressionTypes
 from apache_beam.io.iobase import Read
 from apache_beam.transforms import PTransform
+
+# pylint: disable=wrong-import-order, wrong-import-position, ungrouped-imports
+try:
+  from avro.schema import Parse # avro-python3 library for python3
+except ImportError:
+  from avro.schema import parse as Parse # avro library for python2
+# pylint: enable=wrong-import-order, wrong-import-position, ungrouped-imports
 
 __all__ = ['ReadFromAvro', 'ReadAllFromAvro', 'WriteToAvro']
 
@@ -310,7 +318,7 @@ class _AvroBlock(object):
     # iteration.
     self._decompressed_block_bytes = self._decompress_bytes(block_bytes, codec)
     self._num_records = num_records
-    self._schema = schema.parse(schema_string)
+    self._schema = Parse(schema_string)
     self._offset = offset
     self._size = size
 
@@ -322,20 +330,20 @@ class _AvroBlock(object):
 
   @staticmethod
   def _decompress_bytes(data, codec):
-    if codec == 'null':
+    if codec == b'null':
       return data
-    elif codec == 'deflate':
+    elif codec == b'deflate':
       # zlib.MAX_WBITS is the window size. '-' sign indicates that this is
       # raw data (without headers). See zlib and Avro documentations for more
       # details.
       return zlib.decompress(data, -zlib.MAX_WBITS)
-    elif codec == 'snappy':
+    elif codec == b'snappy':
       # Snappy is an optional avro codec.
       # See Snappy and Avro documentation for more details.
       try:
         import snappy
       except ImportError:
-        raise ValueError('Snappy does not seem to be installed.')
+        raise ValueError('python-snappy does not seem to be installed.')
 
       # Compressed data includes a 4-byte CRC32 checksum which we verify.
       # We take care to avoid extra copies of data while slicing large objects
@@ -352,8 +360,10 @@ class _AvroBlock(object):
   def records(self):
     decoder = avroio.BinaryDecoder(
         io.BytesIO(self._decompressed_block_bytes))
-    reader = avroio.DatumReader(
-        writers_schema=self._schema, readers_schema=self._schema)
+
+    writer_schema = self._schema
+    reader_schema = self._schema
+    reader = avroio.DatumReader(writer_schema, reader_schema)
 
     current_record = 0
     while current_record < self._num_records:
@@ -441,9 +451,6 @@ class _FastAvroSource(filebasedsource.FileBasedSource):
       start_offset = 0
 
     with self.open_file(file_name) as f:
-      # TODO(BEAM-4749): fastavro fails to install in MacOS.
-      from fastavro.read import block_reader  # pylint: disable=wrong-import-position
-
       blocks = block_reader(f)
       sync_marker = blocks._header['sync']
 
@@ -482,7 +489,7 @@ class WriteToAvro(beam.transforms.PTransform):
         end in a common extension, if given by file_name_suffix. In most cases,
         only this argument is specified and num_shards, shard_name_template, and
         file_name_suffix use default values.
-      schema: The schema to use, as returned by avro.schema.parse
+      schema: The schema to use, as returned by avro.schema.Parse
       codec: The codec to use for block-level compression. Any string supported
         by the Avro specification is accepted (for example 'null').
       file_name_suffix: Suffix for the files written.
@@ -597,9 +604,6 @@ class _AvroSink(filebasedsink.FileBasedSink):
 class _FastAvroSink(_AvroSink):
   """A sink for avro files that uses the `fastavro` library"""
   def open(self, temp_path):
-    # TODO(BEAM-4749): fastavro fails to install in MacOS.
-    from fastavro.write import Writer  # pylint: disable=wrong-import-position
-
     file_handle = super(_AvroSink, self).open(temp_path)
     return Writer(file_handle, self._schema.to_json(), self._codec)
 

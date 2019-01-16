@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.joinlibrary;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkNotNull;
 
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.transforms.DoFn;
@@ -57,10 +57,11 @@ public class Join {
     PCollection<KV<K, CoGbkResult>> coGbkResultCollection =
         KeyedPCollectionTuple.of(v1Tuple, leftCollection)
             .and(v2Tuple, rightCollection)
-            .apply(CoGroupByKey.create());
+            .apply("CoGBK", CoGroupByKey.create());
 
     return coGbkResultCollection
         .apply(
+            "Join",
             ParDo.of(
                 new DoFn<KV<K, CoGbkResult>, KV<K, KV<V1, V2>>>() {
                   @ProcessElement
@@ -111,10 +112,11 @@ public class Join {
     PCollection<KV<K, CoGbkResult>> coGbkResultCollection =
         KeyedPCollectionTuple.of(v1Tuple, leftCollection)
             .and(v2Tuple, rightCollection)
-            .apply(CoGroupByKey.create());
+            .apply("CoGBK", CoGroupByKey.create());
 
     return coGbkResultCollection
         .apply(
+            "Join",
             ParDo.of(
                 new DoFn<KV<K, CoGbkResult>, KV<K, KV<V1, V2>>>() {
                   @ProcessElement
@@ -169,10 +171,11 @@ public class Join {
     PCollection<KV<K, CoGbkResult>> coGbkResultCollection =
         KeyedPCollectionTuple.of(v1Tuple, leftCollection)
             .and(v2Tuple, rightCollection)
-            .apply(CoGroupByKey.create());
+            .apply("CoGBK", CoGroupByKey.create());
 
     return coGbkResultCollection
         .apply(
+            "Join",
             ParDo.of(
                 new DoFn<KV<K, CoGbkResult>, KV<K, KV<V1, V2>>>() {
                   @ProcessElement
@@ -231,10 +234,11 @@ public class Join {
     PCollection<KV<K, CoGbkResult>> coGbkResultCollection =
         KeyedPCollectionTuple.of(v1Tuple, leftCollection)
             .and(v2Tuple, rightCollection)
-            .apply(CoGroupByKey.create());
+            .apply("CoGBK", CoGroupByKey.create());
 
     return coGbkResultCollection
         .apply(
+            "Join",
             ParDo.of(
                 new DoFn<KV<K, CoGbkResult>, KV<K, KV<V1, V2>>>() {
                   @ProcessElement

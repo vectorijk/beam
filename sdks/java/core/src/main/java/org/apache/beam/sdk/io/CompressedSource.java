@@ -17,8 +17,8 @@
  */
 package org.apache.beam.sdk.io;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkNotNull;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -172,7 +172,10 @@ public class CompressedSource<T> extends FileBasedSource<T> {
    */
   private CompressedSource(
       FileBasedSource<T> sourceDelegate, DecompressingChannelFactory channelFactory) {
-    super(sourceDelegate.getFileOrPatternSpecProvider(), Long.MAX_VALUE);
+    super(
+        sourceDelegate.getFileOrPatternSpecProvider(),
+        sourceDelegate.getEmptyMatchTreatment(),
+        Long.MAX_VALUE);
     this.sourceDelegate = sourceDelegate;
     this.channelFactory = channelFactory;
   }

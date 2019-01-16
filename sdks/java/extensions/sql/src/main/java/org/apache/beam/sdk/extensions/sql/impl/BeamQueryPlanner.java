@@ -17,12 +17,11 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl;
 
-import com.google.common.collect.ImmutableList;
 import org.apache.beam.sdk.extensions.sql.impl.planner.BeamRuleSets;
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamLogicalConvention;
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamRelNode;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
 import org.apache.calcite.config.CalciteConnectionConfig;
-import org.apache.calcite.jdbc.CalciteConnection;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.Contexts;
 import org.apache.calcite.plan.ConventionTraitDef;
@@ -31,7 +30,6 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitDef;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.prepare.CalciteCatalogReader;
-import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.SqlNode;
@@ -56,9 +54,13 @@ import org.slf4j.LoggerFactory;
 class BeamQueryPlanner {
   private static final Logger LOG = LoggerFactory.getLogger(BeamQueryPlanner.class);
 
-  private final FrameworkConfig config;
+  private JdbcConnection connection;
 
-  BeamQueryPlanner(CalciteConnection connection) {
+  BeamQueryPlanner(JdbcConnection connection) {
+    this.connection = connection;
+  }
+
+  public FrameworkConfig config() {
     final CalciteConnectionConfig config = connection.config();
     final SqlParser.ConfigBuilder parserConfig =
         SqlParser.configBuilder()
@@ -74,10 +76,9 @@ class BeamQueryPlanner {
     }
 
     final SchemaPlus schema = connection.getRootSchema();
-    final SchemaPlus defaultSchema = JdbcDriver.getDefaultSchema(connection);
+    final SchemaPlus defaultSchema = connection.getCurrentSchemaPlus();
 
-    final ImmutableList<RelTraitDef> traitDefs =
-        ImmutableList.of(ConventionTraitDef.INSTANCE, RelCollationTraitDef.INSTANCE);
+    final ImmutableList<RelTraitDef> traitDefs = ImmutableList.of(ConventionTraitDef.INSTANCE);
 
     final CalciteCatalogReader catalogReader =
         new CalciteCatalogReader(
@@ -88,17 +89,16 @@ class BeamQueryPlanner {
     final SqlOperatorTable opTab0 =
         connection.config().fun(SqlOperatorTable.class, SqlStdOperatorTable.instance());
 
-    this.config =
-        Frameworks.newConfigBuilder()
-            .parserConfig(parserConfig.build())
-            .defaultSchema(defaultSchema)
-            .traitDefs(traitDefs)
-            .context(Contexts.of(connection.config()))
-            .ruleSets(BeamRuleSets.getRuleSets())
-            .costFactory(null)
-            .typeSystem(connection.getTypeFactory().getTypeSystem())
-            .operatorTable(ChainedSqlOperatorTable.of(opTab0, catalogReader))
-            .build();
+    return Frameworks.newConfigBuilder()
+        .parserConfig(parserConfig.build())
+        .defaultSchema(defaultSchema)
+        .traitDefs(traitDefs)
+        .context(Contexts.of(connection.config()))
+        .ruleSets(BeamRuleSets.getRuleSets())
+        .costFactory(null)
+        .typeSystem(connection.getTypeFactory().getTypeSystem())
+        .operatorTable(ChainedSqlOperatorTable.of(opTab0, catalogReader))
+        .build();
   }
 
   /** Parse input SQL query, and return a {@link SqlNode} as grammar tree. */
@@ -144,6 +144,6 @@ class BeamQueryPlanner {
   }
 
   private Planner getPlanner() {
-    return Frameworks.getPlanner(config);
+    return Frameworks.getPlanner(config());
   }
 }

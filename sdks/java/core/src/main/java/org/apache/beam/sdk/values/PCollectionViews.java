@@ -17,11 +17,6 @@
  */
 package org.apache.beam.sdk.values;
 
-import com.google.common.base.MoreObjects;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Multimap;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,7 +24,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.annotations.Experimental.Kind;
@@ -44,6 +38,11 @@ import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.InvalidWindows;
 import org.apache.beam.sdk.transforms.windowing.WindowMappingFn;
 import org.apache.beam.sdk.util.CoderUtils;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.MoreObjects;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ArrayListMultimap;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Multimap;
 
 /**
  * <b>For internal use only; no backwards compatibility guarantees.</b>
@@ -290,7 +289,7 @@ public class PCollectionViews {
     public Map<K, Iterable<V>> apply(MultimapView<Void, KV<K, V>> primitiveViewT) {
       // TODO: BEAM-3071 - fix this so that we aren't relying on Java equality and are
       // using structural value equality.
-      Multimap<K, V> multimap = HashMultimap.create();
+      Multimap<K, V> multimap = ArrayListMultimap.create();
       for (KV<K, V> elem : primitiveViewT.get(null)) {
         multimap.put(elem.getKey(), elem.getValue());
       }
@@ -433,7 +432,7 @@ public class PCollectionViews {
 
     @Override
     public int hashCode() {
-      return Objects.hash(tag);
+      return tag.hashCode();
     }
 
     @Override

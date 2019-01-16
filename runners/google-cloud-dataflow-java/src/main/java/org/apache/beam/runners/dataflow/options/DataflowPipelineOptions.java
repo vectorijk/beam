@@ -90,6 +90,14 @@ public interface DataflowPipelineOptions
 
   void setUpdate(boolean value);
 
+  /** If set, the snapshot from which the job should be created. */
+  @Hidden
+  @Experimental
+  @Description("If set, the snapshot from which the job should be created.")
+  String getCreateFromSnapshot();
+
+  void setCreateFromSnapshot(String value);
+
   /** Where the runner should generate a template file. Must either be local or Cloud Storage. */
   @Description(
       "Where the runner should generate a template file. "
@@ -111,8 +119,7 @@ public interface DataflowPipelineOptions
    * href="https://cloud.google.com/compute/docs/regions-zones/regions-zones">region</a> for
    * creating Dataflow jobs.
    *
-   * <p>NOTE: The Cloud Dataflow service does not yet honor this setting. However, once service
-   * support is added then users of this SDK will be able to control the region.
+   * <p>NOTE: The Cloud Dataflow now also supports the region flag.
    */
   @Hidden
   @Experimental
@@ -136,6 +143,11 @@ public interface DataflowPipelineOptions
   String getPipelineUrl();
 
   void setPipelineUrl(String urlString);
+
+  @Description("The customized dataflow worker jar")
+  String getDataflowWorkerJar();
+
+  void setDataflowWorkerJar(String dataflowWorkerJar);
 
   /** Returns a default staging location under {@link GcpOptions#getGcpTempLocation}. */
   class StagingLocationFactory implements DefaultValueFactory<String> {

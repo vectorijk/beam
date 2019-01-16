@@ -17,11 +17,11 @@
  */
 package org.apache.beam.sdk.io.gcp.bigquery;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.createJobIdToken;
 import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.getExtractJobId;
 import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.resolveTempLocation;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkState;
 
 import com.google.api.client.json.JsonFactory;
 import com.google.api.services.bigquery.model.Job;
@@ -33,13 +33,6 @@ import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
 import com.google.api.services.bigquery.model.TimePartitioning;
 import com.google.auto.value.AutoValue;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.MoreObjects;
-import com.google.common.base.Predicates;
-import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -99,6 +92,13 @@ import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TupleTagList;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.beam.sdk.values.ValueInSingleWindow;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.annotations.VisibleForTesting;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.MoreObjects;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Predicates;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Strings;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Lists;
 import org.joda.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -989,11 +989,11 @@ public class BigQueryIO {
     List<Long> counts = jobStats.getExtract().getDestinationUriFileCounts();
     if (counts.size() != 1) {
       String errorMessage =
-          (counts.isEmpty()
+          counts.isEmpty()
               ? "No destination uri file count received."
               : String.format(
                   "More than one destination uri file count received. First two are %s, %s",
-                  counts.get(0), counts.get(1)));
+                  counts.get(0), counts.get(1));
       throw new RuntimeException(errorMessage);
     }
     long filesCount = counts.get(0);
@@ -1052,6 +1052,9 @@ public class BigQueryIO {
         .setWriteDisposition(Write.WriteDisposition.WRITE_EMPTY)
         .setNumFileShards(0)
         .setMethod(Write.Method.DEFAULT)
+        .setExtendedErrorInfo(false)
+        .setSkipInvalidRows(false)
+        .setIgnoreUnknownValues(false)
         .build();
   }
 
@@ -1158,6 +1161,12 @@ public class BigQueryIO {
     @Nullable
     abstract ValueProvider<String> getCustomGcsTempLocation();
 
+    abstract boolean getExtendedErrorInfo();
+
+    abstract Boolean getSkipInvalidRows();
+
+    abstract Boolean getIgnoreUnknownValues();
+
     abstract Builder<T> toBuilder();
 
     @AutoValue.Builder
@@ -1202,6 +1211,12 @@ public class BigQueryIO {
       abstract Builder<T> setFailedInsertRetryPolicy(InsertRetryPolicy retryPolicy);
 
       abstract Builder<T> setCustomGcsTempLocation(ValueProvider<String> customGcsTempLocation);
+
+      abstract Builder<T> setExtendedErrorInfo(boolean extendedErrorInfo);
+
+      abstract Builder<T> setSkipInvalidRows(Boolean skipInvalidRows);
+
+      abstract Builder<T> setIgnoreUnknownValues(Boolean ignoreUnknownValues);
 
       abstract Write<T> build();
     }
@@ -1482,6 +1497,33 @@ public class BigQueryIO {
       return toBuilder().setCustomGcsTempLocation(customGcsTempLocation).build();
     }
 
+    /**
+     * Enables extended error information by enabling {@link WriteResult#getFailedInsertsWithErr()}
+     *
+     * <p>ATM this only works if using {@link Method#STREAMING_INSERTS}. See {@link
+     * Write#withMethod(Method)}.
+     */
+    public Write<T> withExtendedErrorInfo() {
+      return toBuilder().setExtendedErrorInfo(true).build();
+    }
+
+    /**
+     * Insert all valid rows of a request, even if invalid rows exist. This is only applicable when
+     * the write method is set to {@link Method#STREAMING_INSERTS}. The default value is false,
+     * which causes the entire request to fail if any invalid rows exist.
+     */
+    public Write<T> skipInvalidRows() {
+      return toBuilder().setSkipInvalidRows(true).build();
+    }
+
+    /**
+     * Accept rows that contain values that do not match the schema. The unknown values are ignored.
+     * Default is false, which treats unknown values as errors.
+     */
+    public Write<T> ignoreUnknownValues() {
+      return toBuilder().setIgnoreUnknownValues(true).build();
+    }
+
     @VisibleForTesting
     /** This method is for test usage only */
     public Write<T> withTestServices(BigQueryServices testServices) {
@@ -1562,8 +1604,7 @@ public class BigQueryIO {
       checkArgument(
           1
               == Iterables.size(
-                  allToArgs
-                      .stream()
+                  allToArgs.stream()
                       .filter(Predicates.notNull()::apply)
                       .collect(Collectors.toList())),
           "Exactly one of jsonTableRef, tableFunction, or " + "dynamicDestinations must be set");
@@ -1573,8 +1614,7 @@ public class BigQueryIO {
       checkArgument(
           2
               > Iterables.size(
-                  allSchemaArgs
-                      .stream()
+                  allSchemaArgs.stream()
                       .filter(Predicates.notNull()::apply)
                       .collect(Collectors.toList())),
           "No more than one of jsonSchema, schemaFromView, or dynamicDestinations may " + "be set");
@@ -1666,7 +1706,10 @@ public class BigQueryIO {
         StreamingInserts<DestinationT> streamingInserts =
             new StreamingInserts<>(getCreateDisposition(), dynamicDestinations)
                 .withInsertRetryPolicy(retryPolicy)
-                .withTestServices((getBigQueryServices()));
+                .withTestServices(getBigQueryServices())
+                .withExtendedErrorInfo(getExtendedErrorInfo())
+                .withSkipInvalidRows(getSkipInvalidRows())
+                .withIgnoreUnknownValues(getIgnoreUnknownValues());
         return rowsWithDestination.apply(streamingInserts);
       } else {
         checkArgument(
@@ -1681,13 +1724,19 @@ public class BigQueryIO {
                 dynamicDestinations,
                 destinationCoder,
                 getCustomGcsTempLocation(),
-                getLoadJobProjectId());
+                getLoadJobProjectId(),
+                getIgnoreUnknownValues());
         batchLoads.setTestServices(getBigQueryServices());
         if (getMaxFilesPerBundle() != null) {
           batchLoads.setMaxNumWritersPerBundle(getMaxFilesPerBundle());
         }
         if (getMaxFileSize() != null) {
           batchLoads.setMaxFileSize(getMaxFileSize());
+        }
+        // When running in streaming (unbounded mode) we want to retry failed load jobs
+        // indefinitely. Failing the bundle is expensive, so we set a fairly high limit on retries.
+        if (IsBounded.UNBOUNDED.equals(input.isBounded())) {
+          batchLoads.setMaxRetryJobs(1000);
         }
         batchLoads.setTriggeringFrequency(getTriggeringFrequency());
         batchLoads.setNumFileShards(getNumFileShards());

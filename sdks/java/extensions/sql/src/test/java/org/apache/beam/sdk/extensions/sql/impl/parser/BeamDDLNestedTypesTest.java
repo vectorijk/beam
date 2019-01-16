@@ -26,6 +26,7 @@ import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 import org.apache.beam.sdk.extensions.sql.impl.BeamSqlEnv;
 import org.apache.beam.sdk.extensions.sql.impl.utils.CalciteUtils;
 import org.apache.beam.sdk.extensions.sql.meta.Table;
+import org.apache.beam.sdk.extensions.sql.meta.provider.test.TestTableProvider;
 import org.apache.beam.sdk.extensions.sql.utils.QuickCheckGenerators;
 import org.apache.beam.sdk.extensions.sql.utils.QuickCheckGenerators.AnyFieldType;
 import org.apache.beam.sdk.extensions.sql.utils.QuickCheckGenerators.PrimitiveTypes;
@@ -70,7 +71,7 @@ public class BeamDDLNestedTypesTest {
 
   private Table executeCreateTableWith(String fieldType) throws SqlParseException {
     String createTable =
-        "create table tablename ( "
+        "CREATE EXTERNAL TABLE tablename ( "
             + "fieldName "
             + fieldType
             + " ) "
@@ -118,10 +119,7 @@ public class BeamDDLNestedTypesTest {
 
   private String unparseRow(FieldType fieldType) {
     return "ROW<"
-        + fieldType
-            .getRowSchema()
-            .getFields()
-            .stream()
+        + fieldType.getRowSchema().getFields().stream()
             .map(field -> field.getName() + " " + unparse(field.getType()))
             .collect(joining(","))
         + ">";

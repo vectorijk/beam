@@ -15,10 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.sdk.extensions.sql.impl.rel;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -39,6 +38,7 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.Flatten;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.SerializableFunctions;
 import org.apache.beam.sdk.transforms.Top;
 import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
@@ -133,7 +133,7 @@ public class BeamSortRel extends Sort implements BeamRelNode {
   }
 
   public boolean isLimitOnly() {
-    return fieldIndices.size() == 0;
+    return fieldIndices.isEmpty();
   }
 
   public int getCount() {
@@ -157,16 +157,17 @@ public class BeamSortRel extends Sort implements BeamRelNode {
       PCollection<Row> upstream = pinput.get(0);
 
       // There is a need to separate ORDER BY LIMIT and LIMIT:
-      //  - GroupByKey (used in Top) is not allowed on unbounded data in global window so ORDER BY ... LIMIT
+      //  - GroupByKey (used in Top) is not allowed on unbounded data in global window so ORDER BY
+      // ... LIMIT
       //    works only on bounded data.
       //  - Just LIMIT operates on unbounded data, but across windows.
-      if (fieldIndices.size() == 0) {
+      if (fieldIndices.isEmpty()) {
         // TODO(https://issues.apache.org/jira/projects/BEAM/issues/BEAM-4702)
         // Figure out which operations are per-window and which are not.
         return upstream
             .apply(Window.into(new GlobalWindows()))
             .apply(new LimitTransform<>())
-            .setCoder(CalciteUtils.toBeamSchema(getRowType()).getRowCoder());
+            .setRowSchema(CalciteUtils.toSchema(getRowType()));
       } else {
 
         WindowingStrategy<?, ?> windowingStrategy = upstream.getWindowingStrategy();
@@ -177,8 +178,8 @@ public class BeamSortRel extends Sort implements BeamRelNode {
                   GlobalWindows.class.getSimpleName(), windowingStrategy));
         }
 
-        BeamSqlRowComparator comparator =
-            new BeamSqlRowComparator(fieldIndices, orientation, nullsFirst);
+        ReversedBeamSqlRowComparator comparator =
+            new ReversedBeamSqlRowComparator(fieldIndices, orientation, nullsFirst);
 
         // first find the top (offset + count)
         PCollection<List<Row>> rawStream =
@@ -200,7 +201,10 @@ public class BeamSortRel extends Sort implements BeamRelNode {
 
         return rawStream
             .apply("flatten", Flatten.iterables())
-            .setCoder(CalciteUtils.toBeamSchema(getRowType()).getRowCoder());
+            .setSchema(
+                CalciteUtils.toSchema(getRowType()),
+                SerializableFunctions.identity(),
+                SerializableFunctions.identity());
       }
     }
   }
@@ -313,12 +317,27 @@ public class BeamSortRel extends Sort implements BeamRelNode {
           }
         }
 
-        fieldRet *= (orientation.get(i) ? -1 : 1);
+        fieldRet *= (orientation.get(i) ? 1 : -1);
+
         if (fieldRet != 0) {
           return fieldRet;
         }
       }
       return 0;
+    }
+  }
+
+  private static class ReversedBeamSqlRowComparator implements Comparator<Row>, Serializable {
+    private final BeamSqlRowComparator comparator;
+
+    public ReversedBeamSqlRowComparator(
+        List<Integer> fieldsIndices, List<Boolean> orientation, List<Boolean> nullsFirst) {
+      comparator = new BeamSqlRowComparator(fieldsIndices, orientation, nullsFirst);
+    }
+
+    @Override
+    public int compare(Row row1, Row row2) {
+      return comparator.compare(row2, row1);
     }
   }
 }

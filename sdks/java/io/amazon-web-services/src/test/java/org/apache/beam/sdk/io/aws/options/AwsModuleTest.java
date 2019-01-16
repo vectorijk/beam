@@ -15,13 +15,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.sdk.io.aws.options;
 
 import static org.hamcrest.Matchers.hasItem;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 
+import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
@@ -92,7 +92,7 @@ public class AwsModuleTest {
 
     Field field = PropertiesFileCredentialsProvider.class.getDeclaredField("credentialsFilePath");
     field.setAccessible(true);
-    String deserializedCredentialsFilePath = ((String) field.get(deserializedCredentialsProvider));
+    String deserializedCredentialsFilePath = (String) field.get(deserializedCredentialsProvider);
     assertEquals(credentialsFilePath, deserializedCredentialsFilePath);
   }
 
@@ -113,7 +113,7 @@ public class AwsModuleTest {
     Field field =
         ClasspathPropertiesFileCredentialsProvider.class.getDeclaredField("credentialsFilePath");
     field.setAccessible(true);
-    String deserializedCredentialsFilePath = ((String) field.get(deserializedCredentialsProvider));
+    String deserializedCredentialsFilePath = (String) field.get(deserializedCredentialsProvider);
     assertEquals(credentialsFilePath, deserializedCredentialsFilePath);
   }
 
@@ -181,5 +181,22 @@ public class AwsModuleTest {
         objectMapper.readValue(valueAsJson, SSEAwsKeyManagementParams.class);
     assertEquals(awsKmsKeyId, valueDes.getAwsKmsKeyId());
     assertEquals(encryption, valueDes.getEncryption());
+  }
+
+  @Test
+  public void testClientConfigurationSerializationDeserialization() throws Exception {
+    ClientConfiguration clientConfiguration = new ClientConfiguration();
+    clientConfiguration.setProxyHost("localhost");
+    clientConfiguration.setProxyPort(1234);
+    clientConfiguration.setProxyUsername("username");
+    clientConfiguration.setProxyPassword("password");
+
+    final String valueAsJson = objectMapper.writeValueAsString(clientConfiguration);
+    final ClientConfiguration valueDes =
+        objectMapper.readValue(valueAsJson, ClientConfiguration.class);
+    assertEquals("localhost", valueDes.getProxyHost());
+    assertEquals(1234, valueDes.getProxyPort());
+    assertEquals("username", valueDes.getProxyUsername());
+    assertEquals("password", valueDes.getProxyPassword());
   }
 }

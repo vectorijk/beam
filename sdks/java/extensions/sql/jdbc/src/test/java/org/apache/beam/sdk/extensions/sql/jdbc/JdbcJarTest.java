@@ -39,9 +39,13 @@ public class JdbcJarTest {
   @Rule public TemporaryFolder folder = new TemporaryFolder();
 
   private Connection getConnection() throws Exception {
-    URL jdbcUrl = new File(System.getProperty("driver.jar")).toURI().toURL();
-    ClassLoader classLoader =
-        new URLClassLoader(new URL[] {jdbcUrl}, ClassLoader.getSystemClassLoader());
+    ClassLoader classLoader = ClassLoader.getSystemClassLoader();
+    String path = System.getProperty("driver.jar");
+
+    if (path != null) {
+      URL jdbcUrl = new File(System.getProperty("driver.jar")).toURI().toURL();
+      classLoader = new URLClassLoader(new URL[] {jdbcUrl}, ClassLoader.getSystemClassLoader());
+    }
 
     ServiceLoader<Driver> loader = ServiceLoader.load(Driver.class, classLoader);
     Driver driver = loader.iterator().next();
@@ -67,7 +71,7 @@ public class JdbcJarTest {
   public void classLoader_ddl() throws Exception {
     Connection connection = getConnection();
     Statement statement = connection.createStatement();
-    assertEquals(0, statement.executeUpdate("CREATE TABLE test (id INTEGER) TYPE 'text'"));
+    assertEquals(0, statement.executeUpdate("CREATE EXTERNAL TABLE test (id INTEGER) TYPE 'text'"));
     assertEquals(0, statement.executeUpdate("DROP TABLE test"));
   }
 
@@ -80,7 +84,7 @@ public class JdbcJarTest {
     assertEquals(
         0,
         statement.executeUpdate(
-            "CREATE TABLE test (id INTEGER) TYPE 'text' LOCATION '"
+            "CREATE EXTERNAL TABLE test (id INTEGER) TYPE 'text' LOCATION '"
                 + simpleTable.getAbsolutePath()
                 + "'"));
     assertTrue(statement.execute("SELECT * FROM test"));

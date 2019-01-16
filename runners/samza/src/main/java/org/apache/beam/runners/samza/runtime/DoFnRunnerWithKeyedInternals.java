@@ -15,13 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.runners.samza.runtime;
 
-import static com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkState;
 
-import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import org.apache.beam.runners.core.DoFnRunner;
 import org.apache.beam.runners.core.DoFnRunners;
 import org.apache.beam.runners.core.KeyedWorkItem;
@@ -58,6 +57,8 @@ public class DoFnRunnerWithKeyedInternals<InputT, OutputT> implements DoFnRunner
       DoFnRunners.OutputManager outputManager,
       TupleTag<OutputT> mainOutputTag,
       List<TupleTag<?>> additionalOutputTags,
+      Coder<InputT> inputCoder,
+      Map<TupleTag<?>, Coder<?>> outputCoders,
       SamzaStoreStateInternals.Factory<?> stateInternalsFactory,
       SamzaTimerInternalsFactory<?> timerInternalsFactory,
       WindowingStrategy<?, ?> windowingStrategy,
@@ -88,9 +89,8 @@ public class DoFnRunnerWithKeyedInternals<InputT, OutputT> implements DoFnRunner
             mainOutputTag,
             additionalOutputTags,
             createStepContext(stateInternals, timerInternals),
-            // TODO: fix.
-            null,
-            Collections.emptyMap(),
+            inputCoder,
+            outputCoders,
             windowingStrategy);
 
     final DoFnRunner<InputT, OutputT> doFnRunnerWithMetrics =

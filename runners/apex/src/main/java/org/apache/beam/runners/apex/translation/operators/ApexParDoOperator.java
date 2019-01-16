@@ -17,8 +17,8 @@
  */
 package org.apache.beam.runners.apex.translation.operators;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkState;
 
 import com.datatorrent.api.Context.OperatorContext;
 import com.datatorrent.api.DefaultInputPort;
@@ -28,8 +28,6 @@ import com.datatorrent.api.annotation.OutputPortFieldAnnotation;
 import com.datatorrent.common.util.BaseOperator;
 import com.esotericsoftware.kryo.serializers.FieldSerializer.Bind;
 import com.esotericsoftware.kryo.serializers.JavaSerializer;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -65,10 +63,10 @@ import org.apache.beam.runners.core.TimerInternals;
 import org.apache.beam.runners.core.TimerInternals.TimerData;
 import org.apache.beam.runners.core.TimerInternalsFactory;
 import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
+import org.apache.beam.sdk.coders.ByteArrayCoder;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.ListCoder;
-import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.coders.VoidCoder;
 import org.apache.beam.sdk.state.TimeDomain;
 import org.apache.beam.sdk.transforms.DoFn;
@@ -87,6 +85,8 @@ import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Maps;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.slf4j.Logger;
@@ -117,7 +117,13 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
   private final List<PCollectionView<?>> sideInputs;
 
   @Bind(JavaSerializer.class)
-  private final Coder<WindowedValue<InputT>> inputCoder;
+  private final Coder<WindowedValue<InputT>> windowedInputCoder;
+
+  @Bind(JavaSerializer.class)
+  private final Coder<InputT> inputCoder;
+
+  @Bind(JavaSerializer.class)
+  private final Map<TupleTag<?>, Coder<?>> outputCoders;
 
   private StateInternalsProxy<?> currentKeyStateInternals;
   private final ApexTimerInternals<Object> currentKeyTimerInternals;
@@ -142,6 +148,7 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
       WindowingStrategy<?, ?> windowingStrategy,
       List<PCollectionView<?>> sideInputs,
       Coder<InputT> inputCoder,
+      Map<TupleTag<?>, Coder<?>> outputCoders,
       ApexStateBackend stateBackend) {
     this.pipelineOptions = new SerializablePipelineOptions(pipelineOptions);
     this.doFn = doFn;
@@ -164,15 +171,17 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
         FullWindowedValueCoder.of(inputCoder, this.windowingStrategy.getWindowFn().windowCoder());
     Coder<List<WindowedValue<InputT>>> listCoder = ListCoder.of(wvCoder);
     this.pushedBack = new ValueAndCoderKryoSerializable<>(new ArrayList<>(), listCoder);
-    this.inputCoder = wvCoder;
+    this.windowedInputCoder = wvCoder;
+    this.inputCoder = inputCoder;
+    this.outputCoders = outputCoders;
 
     TimerInternals.TimerDataCoder timerCoder =
         TimerInternals.TimerDataCoder.of(windowingStrategy.getWindowFn().windowCoder());
     this.currentKeyTimerInternals = new ApexTimerInternals<>(timerCoder);
 
     if (doFn instanceof ProcessFn) {
-      // we know that it is keyed on String
-      Coder<?> keyCoder = StringUtf8Coder.of();
+      // we know that it is keyed on byte[]
+      Coder<?> keyCoder = ByteArrayCoder.of();
       this.currentKeyStateInternals =
           new StateInternalsProxy<>(stateBackend.newStateInternalsFactory(keyCoder));
     } else {
@@ -197,7 +206,9 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
     this.sideInputs = null;
     this.pushedBack = null;
     this.sideInputStateInternals = null;
+    this.windowedInputCoder = null;
     this.inputCoder = null;
+    this.outputCoders = Collections.emptyMap();
     this.currentKeyTimerInternals = null;
   }
 
@@ -310,7 +321,7 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
         final Object key;
         final Coder<Object> keyCoder;
         @SuppressWarnings({"rawtypes", "unchecked"})
-        WindowedValueCoder<InputT> wvCoder = (WindowedValueCoder) inputCoder;
+        WindowedValueCoder<InputT> wvCoder = (WindowedValueCoder) windowedInputCoder;
         if (value instanceof KeyedWorkItem) {
           key = ((KeyedWorkItem) value).key();
           @SuppressWarnings({"rawtypes", "unchecked"})
@@ -371,7 +382,7 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
     checkState(
         minEventTimeTimer >= currentInputWatermark,
         "Event time timer processing generates new timer(s) behind watermark.");
-    //LOG.info("Processing time timer {} registered behind watermark {}", minProcessingTimeTimer,
+    // LOG.info("Processing time timer {} registered behind watermark {}", minProcessingTimeTimer,
     //    currentInputWatermark);
 
     // TODO: is this the right way to trigger processing time timers?
@@ -453,8 +464,8 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
             mainOutputTag,
             additionalOutputTags,
             stepContext,
-            null,
-            Collections.emptyMap(),
+            inputCoder,
+            outputCoders,
             windowingStrategy);
 
     doFnInvoker = DoFnInvokers.invokerFor(doFn);
@@ -485,14 +496,14 @@ public class ApexParDoOperator<InputT, OutputT> extends BaseOperator
     if (doFn instanceof ProcessFn) {
 
       @SuppressWarnings("unchecked")
-      StateInternalsFactory<String> stateInternalsFactory =
-          (StateInternalsFactory<String>) this.currentKeyStateInternals.getFactory();
+      StateInternalsFactory<byte[]> stateInternalsFactory =
+          (StateInternalsFactory<byte[]>) this.currentKeyStateInternals.getFactory();
 
       @SuppressWarnings({"rawtypes", "unchecked"})
       ProcessFn<InputT, OutputT, Object, RestrictionTracker<Object, Object>> splittableDoFn =
           (ProcessFn) doFn;
       splittableDoFn.setStateInternalsFactory(stateInternalsFactory);
-      TimerInternalsFactory<String> timerInternalsFactory = key -> currentKeyTimerInternals;
+      TimerInternalsFactory<byte[]> timerInternalsFactory = key -> currentKeyTimerInternals;
       splittableDoFn.setTimerInternalsFactory(timerInternalsFactory);
       splittableDoFn.setProcessElementInvoker(
           new OutputAndTimeBoundedSplittableProcessElementInvoker<>(

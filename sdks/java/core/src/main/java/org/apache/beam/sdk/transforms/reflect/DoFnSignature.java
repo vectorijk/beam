@@ -18,7 +18,6 @@
 package org.apache.beam.sdk.transforms.reflect;
 
 import com.google.auto.value.AutoValue;
-import com.google.common.base.Predicates;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Collections;
@@ -47,6 +46,7 @@ import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Predicates;
 
 /**
  * Describes the signature of a {@link DoFn}, in particular, which features it uses, which extra
@@ -83,6 +83,10 @@ public abstract class DoFnSignature {
   /** Details about this {@link DoFn}'s {@link DoFn.Teardown} method. */
   @Nullable
   public abstract LifecycleMethod teardown();
+
+  /** Details about this {@link DoFn}'s {@link DoFn.OnWindowExpiration} method. */
+  @Nullable
+  public abstract OnWindowExpirationMethod onWindowExpiration();
 
   /** Timer declarations present on the {@link DoFn} class. Immutable. */
   public abstract Map<String, TimerDeclaration> timerDeclarations();
@@ -146,6 +150,8 @@ public abstract class DoFnSignature {
     abstract Builder setSetup(LifecycleMethod setup);
 
     abstract Builder setTeardown(LifecycleMethod teardown);
+
+    abstract Builder setOnWindowExpiration(OnWindowExpirationMethod onWindowExpiration);
 
     abstract Builder setGetInitialRestriction(GetInitialRestrictionMethod getInitialRestriction);
 
@@ -673,8 +679,7 @@ public abstract class DoFnSignature {
      * each scoped to a single window.
      */
     public boolean observesWindow() {
-      return extraParameters()
-          .stream()
+      return extraParameters().stream()
           .anyMatch(
               Predicates.or(
                       Predicates.instanceOf(WindowParameter.class),
@@ -690,8 +695,7 @@ public abstract class DoFnSignature {
     @Nullable
     public RowParameter getRowParameter() {
       Optional<Parameter> parameter =
-          extraParameters()
-              .stream()
+          extraParameters().stream()
               .filter(Predicates.instanceOf(RowParameter.class)::apply)
               .findFirst();
       return parameter.isPresent() ? ((RowParameter) parameter.get()) : null;
@@ -701,8 +705,7 @@ public abstract class DoFnSignature {
     @Nullable
     public OutputReceiverParameter getMainOutputReceiver() {
       Optional<Parameter> parameter =
-          extraParameters()
-              .stream()
+          extraParameters().stream()
               .filter(Predicates.instanceOf(OutputReceiverParameter.class)::apply)
               .findFirst();
       return parameter.isPresent() ? ((OutputReceiverParameter) parameter.get()) : null;
@@ -712,8 +715,7 @@ public abstract class DoFnSignature {
      * Whether this {@link DoFn} is <a href="https://s.apache.org/splittable-do-fn">splittable</a>.
      */
     public boolean isSplittable() {
-      return extraParameters()
-          .stream()
+      return extraParameters().stream()
           .anyMatch(Predicates.instanceOf(RestrictionTrackerParameter.class)::apply);
     }
   }
@@ -753,6 +755,44 @@ public abstract class DoFnSignature {
         List<Parameter> extraParameters) {
       return new AutoValue_DoFnSignature_OnTimerMethod(
           id,
+          targetMethod,
+          requiresStableInput,
+          windowT,
+          Collections.unmodifiableList(extraParameters));
+    }
+  }
+
+  /** Describes a {@link DoFn.OnWindowExpiration} method. */
+  @AutoValue
+  public abstract static class OnWindowExpirationMethod implements MethodWithExtraParameters {
+
+    /** The annotated method itself. */
+    @Override
+    public abstract Method targetMethod();
+
+    /**
+     * Whether this method requires stable input, expressed via {@link
+     * org.apache.beam.sdk.transforms.DoFn.RequiresStableInput}. For {@link
+     * org.apache.beam.sdk.transforms.DoFn.OnWindowExpiration}, this means that any state must be
+     * stably persisted prior to calling it.
+     */
+    public abstract boolean requiresStableInput();
+
+    /** The window type used by this method, if any. */
+    @Nullable
+    @Override
+    public abstract TypeDescriptor<? extends BoundedWindow> windowT();
+
+    /** Types of optional parameters of the annotated method, in the order they appear. */
+    @Override
+    public abstract List<Parameter> extraParameters();
+
+    static OnWindowExpirationMethod create(
+        Method targetMethod,
+        boolean requiresStableInput,
+        TypeDescriptor<? extends BoundedWindow> windowT,
+        List<Parameter> extraParameters) {
+      return new AutoValue_DoFnSignature_OnWindowExpirationMethod(
           targetMethod,
           requiresStableInput,
           windowT,

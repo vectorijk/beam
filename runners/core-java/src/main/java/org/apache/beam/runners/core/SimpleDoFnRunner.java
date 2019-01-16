@@ -17,13 +17,10 @@
  */
 package org.apache.beam.runners.core;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkState;
 
-import com.google.common.collect.FluentIterable;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -60,6 +57,9 @@ import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.FluentIterable;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Sets;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.joda.time.format.PeriodFormat;
@@ -961,8 +961,24 @@ public class SimpleDoFnRunner<InputT, OutputT> implements DoFnRunner<InputT, Out
 
     @Override
     public void set(Instant target) {
-      verifyAbsoluteTimeDomain();
-      verifyTargetTime(target);
+      // Verifies that the time domain of this timer is acceptable for absolute timers.
+      if (!TimeDomain.EVENT_TIME.equals(spec.getTimeDomain())) {
+        throw new IllegalStateException(
+            "Can only set relative timers in processing time domain. Use #setRelative()");
+      }
+
+      // Ensures that the target time is reasonable. For event time timers this means that the time
+      // should be prior to window GC time.
+      if (TimeDomain.EVENT_TIME.equals(spec.getTimeDomain())) {
+        Instant windowExpiry = window.maxTimestamp().plus(allowedLateness);
+        checkArgument(
+            !target.isAfter(windowExpiry),
+            "Attempted to set event time timer for %s but that is after"
+                + " the expiration of window %s",
+            target,
+            windowExpiry);
+      }
+
       setUnderlyingTimer(target);
     }
 
@@ -1004,30 +1020,6 @@ public class SimpleDoFnRunner<InputT, OutputT> implements DoFnRunner<InputT, Out
         }
       }
       return target;
-    }
-
-    /**
-     * Ensures that the target time is reasonable. For event time timers this means that the time
-     * should be prior to window GC time.
-     */
-    private void verifyTargetTime(Instant target) {
-      if (TimeDomain.EVENT_TIME.equals(spec.getTimeDomain())) {
-        Instant windowExpiry = window.maxTimestamp().plus(allowedLateness);
-        checkArgument(
-            !target.isAfter(windowExpiry),
-            "Attempted to set event time timer for %s but that is after"
-                + " the expiration of window %s",
-            target,
-            windowExpiry);
-      }
-    }
-
-    /** Verifies that the time domain of this timer is acceptable for absolute timers. */
-    private void verifyAbsoluteTimeDomain() {
-      if (!TimeDomain.EVENT_TIME.equals(spec.getTimeDomain())) {
-        throw new IllegalStateException(
-            "Cannot only set relative timers in processing time domain." + " Use #setRelative()");
-      }
     }
 
     /**

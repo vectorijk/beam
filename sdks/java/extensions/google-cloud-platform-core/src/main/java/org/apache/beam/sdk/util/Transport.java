@@ -26,13 +26,14 @@ import com.google.api.services.storage.Storage;
 import com.google.auth.Credentials;
 import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.cloud.hadoop.util.ChainingHttpRequestInitializer;
-import com.google.common.collect.ImmutableList;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import org.apache.beam.sdk.extensions.gcp.auth.NullCredentialInitializer;
 import org.apache.beam.sdk.extensions.gcp.options.GcsOptions;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
 
 /** Helpers for cloud communication. */
 public class Transport {
@@ -95,7 +96,8 @@ public class Transport {
                 getJsonFactory(),
                 chainHttpRequestInitializer(
                     options.getGcpCredential(),
-                    // Do not log the code 404. Code up the stack will deal with 404's if needed, and
+                    // Do not log the code 404. Code up the stack will deal with 404's if needed,
+                    // and
                     // logging it by default clutters the output during file staging.
                     new RetryHttpRequestInitializer(
                         ImmutableList.of(404), new UploadIdResponseInterceptor())))
@@ -105,6 +107,7 @@ public class Transport {
       ApiComponents components = apiComponentsFromUrl(servicePath);
       storageBuilder.setRootUrl(components.rootUrl);
       storageBuilder.setServicePath(components.servicePath);
+      storageBuilder.setBatchPath(Paths.get("batch/", components.servicePath).toString());
     }
     return storageBuilder;
   }

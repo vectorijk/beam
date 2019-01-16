@@ -38,12 +38,13 @@ import org.apache.beam.model.jobmanagement.v1.JobServiceGrpc;
 import org.apache.beam.model.pipeline.v1.Endpoints;
 import org.apache.beam.runners.core.construction.graph.PipelineValidator;
 import org.apache.beam.runners.fnexecution.FnService;
+import org.apache.beam.sdk.fn.function.ThrowingConsumer;
 import org.apache.beam.sdk.fn.stream.SynchronizedStreamObserver;
-import org.apache.beam.vendor.grpc.v1.io.grpc.Status;
-import org.apache.beam.vendor.grpc.v1.io.grpc.StatusException;
-import org.apache.beam.vendor.grpc.v1.io.grpc.StatusRuntimeException;
-import org.apache.beam.vendor.grpc.v1.io.grpc.stub.StreamObserver;
-import org.apache.beam.vendor.protobuf.v3.com.google.protobuf.Struct;
+import org.apache.beam.vendor.grpc.v1p13p1.com.google.protobuf.Struct;
+import org.apache.beam.vendor.grpc.v1p13p1.io.grpc.Status;
+import org.apache.beam.vendor.grpc.v1p13p1.io.grpc.StatusException;
+import org.apache.beam.vendor.grpc.v1p13p1.io.grpc.StatusRuntimeException;
+import org.apache.beam.vendor.grpc.v1p13p1.io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,26 +71,35 @@ public class InMemoryJobService extends JobServiceGrpc.JobServiceImplBase implem
   public static InMemoryJobService create(
       Endpoints.ApiServiceDescriptor stagingServiceDescriptor,
       Function<String, String> stagingServiceTokenProvider,
+      ThrowingConsumer<String> cleanupJobFn,
       JobInvoker invoker) {
-    return new InMemoryJobService(stagingServiceDescriptor, stagingServiceTokenProvider, invoker);
+    return new InMemoryJobService(
+        stagingServiceDescriptor, stagingServiceTokenProvider, cleanupJobFn, invoker);
   }
 
   private final ConcurrentMap<String, JobPreparation> preparations;
   private final ConcurrentMap<String, JobInvocation> invocations;
+  private final ConcurrentMap<String, String> stagingSessionTokens;
   private final Endpoints.ApiServiceDescriptor stagingServiceDescriptor;
   private final Function<String, String> stagingServiceTokenProvider;
+  private final ThrowingConsumer<String> cleanupJobFn;
   private final JobInvoker invoker;
 
   private InMemoryJobService(
       Endpoints.ApiServiceDescriptor stagingServiceDescriptor,
       Function<String, String> stagingServiceTokenProvider,
+      ThrowingConsumer<String> cleanupJobFn,
       JobInvoker invoker) {
     this.stagingServiceDescriptor = stagingServiceDescriptor;
     this.stagingServiceTokenProvider = stagingServiceTokenProvider;
+    this.cleanupJobFn = cleanupJobFn;
     this.invoker = invoker;
 
     this.preparations = new ConcurrentHashMap<>();
     this.invocations = new ConcurrentHashMap<>();
+
+    // Map "preparation ID" to staging token
+    this.stagingSessionTokens = new ConcurrentHashMap<>();
   }
 
   @Override
@@ -121,12 +131,15 @@ public class InMemoryJobService extends JobServiceGrpc.JobServiceImplBase implem
         return;
       }
 
+      String stagingSessionToken = stagingServiceTokenProvider.apply(preparationId);
+      stagingSessionTokens.putIfAbsent(preparationId, stagingSessionToken);
+
       // send response
       PrepareJobResponse response =
           PrepareJobResponse.newBuilder()
               .setPreparationId(preparationId)
               .setArtifactStagingEndpoint(stagingServiceDescriptor)
-              .setStagingSessionToken(stagingServiceTokenProvider.apply(preparationId))
+              .setStagingSessionToken(stagingSessionToken)
               .build();
       responseObserver.onNext(response);
       responseObserver.onCompleted();
@@ -161,6 +174,26 @@ public class InMemoryJobService extends JobServiceGrpc.JobServiceImplBase implem
           invoker.invoke(
               preparation.pipeline(), preparation.options(), request.getRetrievalToken());
       String invocationId = invocation.getId();
+
+      invocation.addStateListener(
+          state -> {
+            if (!JobInvocation.isTerminated(state)) {
+              return;
+            }
+            String stagingSessionToken = stagingSessionTokens.get(preparationId);
+            stagingSessionTokens.remove(preparationId);
+            if (cleanupJobFn != null) {
+              try {
+                cleanupJobFn.accept(stagingSessionToken);
+              } catch (Exception e) {
+                LOG.error(
+                    "Failed to remove job staging directory for token {}: {}",
+                    stagingSessionToken,
+                    e);
+              }
+            }
+          });
+
       invocation.start();
       invocations.put(invocationId, invocation);
       RunJobResponse response = RunJobResponse.newBuilder().setJobId(invocationId).build();
@@ -225,7 +258,12 @@ public class InMemoryJobService extends JobServiceGrpc.JobServiceImplBase implem
       Function<JobState.Enum, GetJobStateResponse> responseFunction =
           state -> GetJobStateResponse.newBuilder().setState(state).build();
       Consumer<JobState.Enum> stateListener =
-          state -> responseObserver.onNext(responseFunction.apply(state));
+          state -> {
+            responseObserver.onNext(responseFunction.apply(state));
+            if (JobInvocation.isTerminated(state)) {
+              responseObserver.onCompleted();
+            }
+          };
       invocation.addStateListener(stateListener);
     } catch (Exception e) {
       String errMessage =
@@ -246,11 +284,15 @@ public class InMemoryJobService extends JobServiceGrpc.JobServiceImplBase implem
       StreamObserver<JobMessagesResponse> syncResponseObserver =
           SynchronizedStreamObserver.wrapping(responseObserver);
       Consumer<JobState.Enum> stateListener =
-          state ->
-              syncResponseObserver.onNext(
-                  JobMessagesResponse.newBuilder()
-                      .setStateResponse(GetJobStateResponse.newBuilder().setState(state).build())
-                      .build());
+          state -> {
+            syncResponseObserver.onNext(
+                JobMessagesResponse.newBuilder()
+                    .setStateResponse(GetJobStateResponse.newBuilder().setState(state).build())
+                    .build());
+            if (JobInvocation.isTerminated(state)) {
+              responseObserver.onCompleted();
+            }
+          };
       Consumer<JobMessage> messageListener =
           message ->
               syncResponseObserver.onNext(

@@ -20,10 +20,15 @@ package org.apache.beam.sdk.io.mqtt;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentSkipListSet;
 import org.apache.activemq.broker.BrokerService;
 import org.apache.activemq.broker.Connection;
@@ -41,6 +46,7 @@ import org.fusesource.mqtt.client.Topic;
 import org.joda.time.Duration;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -75,6 +81,7 @@ public class MqttIOTest {
   }
 
   @Test(timeout = 60 * 1000)
+  @Ignore("https://issues.apache.org/jira/browse/BEAM-3604 Test timeout failure.")
   public void testReadNoClientId() throws Exception {
     final String topicName = "READ_TOPIC_NO_CLIENT_ID";
     Read mqttReader =
@@ -137,6 +144,7 @@ public class MqttIOTest {
   }
 
   @Test(timeout = 30 * 1000)
+  @Ignore("https://issues.apache.org/jira/browse/BEAM-5150 Flake Non-deterministic output.")
   public void testRead() throws Exception {
     PCollection<byte[]> output =
         pipeline.apply(
@@ -258,6 +266,25 @@ public class MqttIOTest {
     for (int i = 0; i < numberOfTestMessages; i++) {
       assertTrue(messages.contains("Test " + i));
     }
+  }
+
+  @Test
+  public void testReadObject() throws Exception {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    ObjectOutputStream out = new ObjectOutputStream(bos);
+    MqttIO.MqttCheckpointMark cp1 = new MqttIO.MqttCheckpointMark(UUID.randomUUID().toString());
+    out.writeObject(cp1);
+
+    ByteArrayInputStream bis = new ByteArrayInputStream(bos.toByteArray());
+    ObjectInputStream in = new ObjectInputStream(bis);
+    MqttIO.MqttCheckpointMark cp2 = (MqttIO.MqttCheckpointMark) in.readObject();
+
+    // there should be no bytes left in the stream
+    assertEquals(0, in.available());
+    // the number of messages of the decoded checkpoint should be zero
+    assertEquals(0, cp2.messages.size());
+    assertEquals(cp1.clientId, cp2.clientId);
+    assertEquals(cp1.oldestMessageTimestamp, cp2.oldestMessageTimestamp);
   }
 
   @After

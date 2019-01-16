@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.sdk.schemas.transforms;
 
 import org.apache.beam.sdk.annotations.Experimental;
@@ -94,10 +93,6 @@ public class Convert {
       extends PTransform<PCollection<InputT>, PCollection<OutputT>> {
     TypeDescriptor<OutputT> outputTypeDescriptor;
 
-    ConvertTransform(Class<OutputT> outputClass) {
-      this(TypeDescriptor.of(outputClass));
-    }
-
     ConvertTransform(TypeDescriptor<OutputT> outputTypeDescriptor) {
       this.outputTypeDescriptor = outputTypeDescriptor;
     }
@@ -130,7 +125,8 @@ public class Convert {
                   registry.getToRowFunction(outputTypeDescriptor),
                   registry.getFromRowFunction(outputTypeDescriptor));
           // assert matches input schema.
-          if (!outputSchemaCoder.getSchema().equivalent(input.getSchema())) {
+          // TODO: Properly handle nullable.
+          if (!outputSchemaCoder.getSchema().assignableToIgnoreNullable(input.getSchema())) {
             throw new RuntimeException(
                 "Cannot convert between types that don't have equivalent schemas."
                     + " input schema: "

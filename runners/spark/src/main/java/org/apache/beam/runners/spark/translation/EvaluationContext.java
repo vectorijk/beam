@@ -15,21 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.runners.spark.translation;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
 
-import com.google.common.collect.Iterables;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.apache.beam.runners.core.construction.SerializablePipelineOptions;
 import org.apache.beam.runners.core.construction.TransformInputs;
 import org.apache.beam.runners.spark.SparkPipelineOptions;
-import org.apache.beam.runners.spark.coders.CoderHelpers;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
@@ -41,6 +39,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
@@ -131,31 +130,37 @@ public class EvaluationContext {
     return currentTransform.getOutputs();
   }
 
-  private boolean shouldCache(PValue pvalue) {
-    if ((pvalue instanceof PCollection)
-        && cacheCandidates.containsKey(pvalue)
-        && cacheCandidates.get(pvalue) > 1) {
-      return true;
-    }
-    return false;
+  public Map<TupleTag<?>, Coder<?>> getOutputCoders() {
+    return currentTransform.getOutputs().entrySet().stream()
+        .filter(e -> e.getValue() instanceof PCollection)
+        .collect(Collectors.toMap(e -> e.getKey(), e -> ((PCollection) e.getValue()).getCoder()));
   }
 
-  public void putDataset(
-      PTransform<?, ? extends PValue> transform, Dataset dataset, boolean forceCache) {
-    putDataset(getOutput(transform), dataset, forceCache);
+  /**
+   * Cache PCollection if {@link #isCacheDisabled()} flag is false and PCollection is used more then
+   * once in Pipeline.
+   *
+   * @param pvalue
+   * @return if PCollection will be cached
+   */
+  public boolean shouldCache(PValue pvalue) {
+    if (isCacheDisabled()) {
+      return false;
+    }
+    return pvalue instanceof PCollection && cacheCandidates.getOrDefault(pvalue, 0L) > 1;
   }
 
   public void putDataset(PTransform<?, ? extends PValue> transform, Dataset dataset) {
-    putDataset(transform, dataset, false);
+    putDataset(getOutput(transform), dataset);
   }
 
-  public void putDataset(PValue pvalue, Dataset dataset, boolean forceCache) {
+  public void putDataset(PValue pvalue, Dataset dataset) {
     try {
       dataset.setName(pvalue.getName());
     } catch (IllegalStateException e) {
       // name not set, ignore
     }
-    if ((forceCache || shouldCache(pvalue)) && pvalue instanceof PCollection) {
+    if (shouldCache(pvalue)) {
       // we cache only PCollection
       Coder<?> coder = ((PCollection<?>) pvalue).getCoder();
       Coder<? extends BoundedWindow> wCoder =
@@ -164,26 +169,6 @@ public class EvaluationContext {
     }
     datasets.put(pvalue, dataset);
     leaves.add(dataset);
-  }
-
-  <T> void putBoundedDatasetFromValues(
-      PTransform<?, ? extends PValue> transform, Iterable<T> values, Coder<T> coder) {
-    PValue output = getOutput(transform);
-    if (shouldCache(output)) {
-      // eagerly create the RDD, as it will be reused.
-      Iterable<WindowedValue<T>> elems =
-          Iterables.transform(values, WindowingHelpers.windowValueFunction());
-      WindowedValue.ValueOnlyWindowedValueCoder<T> windowCoder =
-          WindowedValue.getValueOnlyCoder(coder);
-      JavaRDD<WindowedValue<T>> rdd =
-          getSparkContext()
-              .parallelize(CoderHelpers.toByteArrays(elems, windowCoder))
-              .map(CoderHelpers.fromByteFunction(windowCoder));
-      putDataset(transform, new BoundedDataset<>(rdd));
-    } else {
-      // create a BoundedDataset that would create a RDD on demand
-      datasets.put(getOutput(transform), new BoundedDataset<>(values, jsc, coder));
-    }
   }
 
   public Dataset borrowDataset(PTransform<? extends PValue, ?> transform) {
@@ -229,7 +214,7 @@ public class EvaluationContext {
   }
 
   /**
-   * Retrun the current views creates in the pipepline.
+   * Return the current views creates in the pipeline.
    *
    * @return SparkPCollectionView
    */
@@ -238,7 +223,7 @@ public class EvaluationContext {
   }
 
   /**
-   * Adds/Replaces a view to the current views creates in the pipepline.
+   * Adds/Replaces a view to the current views creates in the pipeline.
    *
    * @param view - Identifier of the view
    * @param value - Actual value of the view
@@ -269,5 +254,9 @@ public class EvaluationContext {
 
   public String storageLevel() {
     return serializableOptions.get().as(SparkPipelineOptions.class).getStorageLevel();
+  }
+
+  public boolean isCacheDisabled() {
+    return serializableOptions.get().as(SparkPipelineOptions.class).isCacheDisabled();
   }
 }
