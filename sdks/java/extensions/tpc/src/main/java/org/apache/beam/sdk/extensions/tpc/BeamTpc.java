@@ -78,7 +78,7 @@ public class BeamTpc {
                   new TextTableProvider.CsvToRow(tableSchema.getValue(), csvFormat),
                   new TextTableProvider.RowToCsv(csvFormat))
               .buildIOReader(pipeline.begin())
-              .setCoder(tableSchema.getValue().getRowCoder())
+//              .setCoder(tableSchema.getValue().getRowCoder())
               .setName(tableSchema.getKey());
 
       tables = tables.and(new TupleTag<>(tableSchema.getKey()), table);
