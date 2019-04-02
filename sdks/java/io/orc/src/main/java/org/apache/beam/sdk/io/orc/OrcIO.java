@@ -15,6 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/** Transforms for reading and writing from Orc. */
 package org.apache.beam.sdk.io.orc;
+
+import org.apache.beam.sdk.annotations.Experimental;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/** OrcIO. */
+@Experimental(Experimental.Kind.SOURCE_SINK)
+public class OrcIO {
+  private static final Logger LOG = LoggerFactory.getLogger(OrcIO.class);
+
+  /** Disallow construction of utility class. */
+  private OrcIO() {}
+}
