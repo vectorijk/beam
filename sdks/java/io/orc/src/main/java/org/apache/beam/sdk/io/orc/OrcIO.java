@@ -27,8 +27,13 @@ import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.orc.OrcFile;
+import org.apache.hadoop.hive.ql.io.orc.Reader;
+import org.apache.hadoop.hive.ql.io.orc.RecordReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,10 +80,26 @@ public class OrcIO {
 
     @Override
     public PCollection<String> expand(PBegin input) {
-      Path p = new Path("/string.orc");
-      OrcFile.ReaderOptions op = new OrcFile.ReaderOptions(null);
+      String pth = "/Users/jkai/projects/string.orc";
+      Path p = new Path(pth);
+      Configuration c = new Configuration();
+      OrcFile.ReaderOptions op = new OrcFile.ReaderOptions(c);
       try {
-        OrcFile.createReader(p, op);
+        Reader reader = OrcFile.createReader(p, op);
+
+        RecordReader rows = reader.rows();
+        VectorizedRowBatch batch = reader.getSchema().createRowBatch();
+
+        BytesColumnVector z = (BytesColumnVector) batch.cols[0];
+
+        LOG.info("number of row" + reader.getNumberOfRows());
+
+        while (rows.nextBatch(batch)) {
+          for (int r = 0; r < batch.size; ++r) {
+            LOG.info("content: " + z.toString(r));
+          }
+        }
+        rows.close();
       } catch (IOException e) {
         LOG.info("error in reader");
       }
