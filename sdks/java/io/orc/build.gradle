@@ -30,6 +30,7 @@ dependencies {
     shadow library.java.slf4j_api
     shadow "org.apache.orc:orc-core:$orc_version"
     shadow "org.apache.orc:orc-mapreduce:$orc_version"
+    shadow "org.apache.hive:hive-exec:2.3.4"
     shadow library.java.hadoop_client
     shadow library.java.hadoop_common
     testCompile project(path: ":beam-sdks-java-core", configuration: "shadowTest")

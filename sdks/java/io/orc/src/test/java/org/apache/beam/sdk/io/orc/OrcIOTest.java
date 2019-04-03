@@ -19,6 +19,7 @@ package org.apache.beam.sdk.io.orc;
 
 import java.io.Serializable;
 import org.apache.beam.sdk.testing.TestPipeline;
+import org.apache.beam.sdk.values.PCollection;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -39,5 +40,14 @@ public class OrcIOTest implements Serializable {
   @Test
   public void testTrue() {
     Assert.assertTrue(true);
+  }
+
+  @Test
+  public void testRead() {
+    PCollection<String> read =
+        readPipeline.apply(
+            OrcIO.read("test schema").from(temporaryFolder.getRoot().getAbsolutePath() + "/*"));
+
+    readPipeline.run().waitUntilFinish();
   }
 }
