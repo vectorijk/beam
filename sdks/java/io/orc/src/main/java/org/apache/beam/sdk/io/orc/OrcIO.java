@@ -80,7 +80,7 @@ public class OrcIO {
 
     @Override
     public PCollection<String> expand(PBegin input) {
-      String pth = "/Users/jkai/projects/string.orc";
+      String pth = "/Users/jkai/projects/beam/sdks/java/io/orc/src/test/resources/my-file.orc";
       Path p = new Path(pth);
       Configuration c = new Configuration();
       OrcFile.ReaderOptions op = new OrcFile.ReaderOptions(c);
