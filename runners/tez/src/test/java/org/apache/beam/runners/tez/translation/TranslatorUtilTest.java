@@ -21,9 +21,7 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.junit.Assert;
 import org.junit.Test;
 
-/**
- * Tests for the Tez TranslatorUtil class
- */
+/** Tests for the Tez TranslatorUtil class */
 public class TranslatorUtilTest {
 
   @Test
@@ -37,7 +35,7 @@ public class TranslatorUtilTest {
   private static class testDoFn extends DoFn {
     @ProcessElement
     public void processElement(ProcessContext c) {
-      //Test DoFn
+      // Test DoFn
     }
   }
 }

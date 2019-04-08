@@ -25,21 +25,23 @@ import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 import org.apache.tez.dag.api.DataSinkDescriptor;
 import org.apache.tez.mapreduce.output.MROutput;
 
-/**
- * {@link MROutput} translation to Tez {@link DataSinkDescriptor}.
- */
-class WriteFilesTranslator implements TransformTranslator<WriteFiles<?>> {
+/** {@link MROutput} translation to Tez {@link DataSinkDescriptor}. */
+class WriteFilesTranslator implements TransformTranslator<WriteFiles<?, ?, ?>> {
 
   @Override
   public void translate(WriteFiles transform, TranslationContext context) {
     Pattern pattern = Pattern.compile(".*\\{.*\\{value=(.*)}}.*");
-    Matcher matcher = pattern.matcher(transform.getSink().getBaseOutputDirectoryProvider().toString());
-    if (matcher.matches()){
+    //    Matcher matcher =
+    // pattern.matcher(transform.getSink().getgetBaseOutputDirectoryProvider().toString());
+    Matcher matcher = pattern.matcher(transform.getSink().getTempDirectoryProvider().toString());
+    if (matcher.matches()) {
       String output = matcher.group(1);
-      DataSinkDescriptor dataSink = MROutput.createConfigBuilder(new Configuration(context.getConfig()),
-          TextOutputFormat.class, output).build();
+      DataSinkDescriptor dataSink =
+          MROutput.createConfigBuilder(
+                  new Configuration(context.getConfig()), TextOutputFormat.class, output)
+              .build();
 
-      context.getCurrentInputs().forEach( (a, b) -> context.addSink(b, dataSink));
+      context.getCurrentInputs().forEach((a, b) -> context.addSink(b, dataSink));
     }
   }
 }

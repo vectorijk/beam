@@ -34,7 +34,7 @@ configurations {
     validatesRunner
 }
 
-def tez_version = "0.14.1"
+def tez_version = "0.9.2"
 
 dependencies {
     shadow library.java.vendored_guava_20_0
@@ -47,6 +47,7 @@ dependencies {
     shadow library.java.joda_time
     shadow library.java.commons_compress
     shadow library.java.commons_io_2x
+    shadow library.java.commons_lang3
     shadow library.java.args4j
     shadow library.java.hadoop_common
     shadow library.java.hadoop_client

@@ -26,7 +26,8 @@ import org.apache.tez.runtime.library.api.KeyValueWriter;
 import org.apache.tez.runtime.library.output.OrderedPartitionedKVOutput;
 
 /**
- * {@link TezOutputManager} implementation that properly writes output to {@link OrderedPartitionedKVOutput}
+ * {@link TezOutputManager} implementation that properly writes output to {@link
+ * OrderedPartitionedKVOutput}
  */
 public class OrderedPartitionedKVOutputManager extends TezOutputManager {
 
@@ -34,7 +35,7 @@ public class OrderedPartitionedKVOutputManager extends TezOutputManager {
 
   public OrderedPartitionedKVOutputManager(LogicalOutput output) {
     super(output);
-    if (output.getClass().equals(OrderedPartitionedKVOutput.class)){
+    if (output.getClass().equals(OrderedPartitionedKVOutput.class)) {
       this.output = (OrderedPartitionedKVOutput) output;
       try {
         setWriter((KeyValueWriter) output.getWriter());
@@ -50,12 +51,14 @@ public class OrderedPartitionedKVOutputManager extends TezOutputManager {
   public <T> void output(TupleTag<T> tag, WindowedValue<T> output) {
     try {
       if (output.getValue() instanceof KV) {
-        getWriter().write(TranslatorUtil.convertToBytesWritable(((KV) output.getValue()).getKey()),
-            TranslatorUtil.convertToBytesWritable(((KV) output.getValue()).getValue()));
+        getWriter()
+            .write(
+                TranslatorUtil.convertToBytesWritable(((KV) output.getValue()).getKey()),
+                TranslatorUtil.convertToBytesWritable(((KV) output.getValue()).getValue()));
       } else {
         throw new IllegalArgumentException("GroupByKey can only group Key-Value outputs!");
       }
-    } catch (Exception e){
+    } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }

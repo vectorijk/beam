@@ -23,8 +23,9 @@ import org.apache.tez.runtime.api.LogicalOutput;
 import org.apache.tez.runtime.library.api.KeyValueWriter;
 
 /**
- * Abstract Output Manager that adds before and after methods to the {@link DoFnRunners.OutputManager}
- * interface so that outputs that require them can be added and used with the TezRunner.
+ * Abstract Output Manager that adds before and after methods to the {@link
+ * DoFnRunners.OutputManager} interface so that outputs that require them can be added and used with
+ * the TezRunner.
  */
 public abstract class TezOutputManager implements DoFnRunners.OutputManager {
 
@@ -32,7 +33,7 @@ public abstract class TezOutputManager implements DoFnRunners.OutputManager {
   private KeyValueWriter writer;
   private LogicalOutput output;
 
-  public TezOutputManager(LogicalOutput output){
+  public TezOutputManager(LogicalOutput output) {
     this.output = output;
   }
 
@@ -44,7 +45,7 @@ public abstract class TezOutputManager implements DoFnRunners.OutputManager {
     this.currentElement = currentElement;
   }
 
-  public WindowedValue getCurrentElement(){
+  public WindowedValue getCurrentElement() {
     return currentElement;
   }
 

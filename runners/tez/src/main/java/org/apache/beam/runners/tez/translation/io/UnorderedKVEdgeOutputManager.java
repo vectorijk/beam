@@ -33,7 +33,7 @@ public class UnorderedKVEdgeOutputManager extends TezOutputManager {
 
   public UnorderedKVEdgeOutputManager(LogicalOutput output) {
     super(output);
-    if (output.getClass().equals(UnorderedKVOutput.class)){
+    if (output.getClass().equals(UnorderedKVOutput.class)) {
       this.output = (UnorderedKVOutput) output;
       try {
         setWriter((KeyValueWriter) output.getWriter());
@@ -48,9 +48,11 @@ public class UnorderedKVEdgeOutputManager extends TezOutputManager {
   @Override
   public <T> void output(TupleTag<T> tag, WindowedValue<T> output) {
     try {
-      getWriter().write(TranslatorUtil.convertToBytesWritable(getCurrentElement().getValue()),
-          TranslatorUtil.convertToBytesWritable(output.getValue()));
-    } catch (Exception e){
+      getWriter()
+          .write(
+              TranslatorUtil.convertToBytesWritable(getCurrentElement().getValue()),
+              TranslatorUtil.convertToBytesWritable(output.getValue()));
+    } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }

@@ -41,9 +41,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- * Tests for the TezDoFnProcessor that wraps beam DoFns.
- */
+/** Tests for the TezDoFnProcessor that wraps beam DoFns. */
 public class TezDoFnProcessorTest {
 
   private static final String TOKENIZER_PATTERN = "[^\\p{L}]+";
@@ -52,7 +50,7 @@ public class TezDoFnProcessorTest {
   private static TezClient client;
 
   @Before
-  public void setUp(){
+  public void setUp() {
     TezConfiguration config = new TezConfiguration();
     config.setBoolean(TezConfiguration.TEZ_LOCAL_MODE, true);
     config.set("fs.default.name", "file:///");
@@ -66,7 +64,7 @@ public class TezDoFnProcessorTest {
     String expected = FileUtils.readFileToString(new File(INPUT_LOCATION));
     Set<String> expectedSet = new HashSet<>(Arrays.asList(expected.split(TOKENIZER_PATTERN)));
 
-    DoFn<?,?> doFn = new TestWordsFn();
+    DoFn<?, ?> doFn = new TestWordsFn();
     String doFnInstance;
     doFnInstance = TranslatorUtil.toString(doFn);
 
@@ -75,15 +73,19 @@ public class TezDoFnProcessorTest {
     config.set("DO_FN_INSTANCE", doFnInstance);
     UserPayload payload = TezUtils.createUserPayloadFromConf(config);
 
-    Vertex vertex = Vertex.create("TestVertex", ProcessorDescriptor
-        .create(TezDoFnProcessor.class.getName()).setUserPayload(payload));
-    vertex.addDataSource("TestInput" , MRInput.createConfigBuilder(new Configuration(),
-        TextInputFormat.class, INPUT_LOCATION).build());
+    Vertex vertex =
+        Vertex.create(
+            "TestVertex",
+            ProcessorDescriptor.create(TezDoFnProcessor.class.getName()).setUserPayload(payload));
+    vertex.addDataSource(
+        "TestInput",
+        MRInput.createConfigBuilder(new Configuration(), TextInputFormat.class, INPUT_LOCATION)
+            .build());
 
     dag.addVertex(vertex);
     client.start();
     client.submitDAG(dag);
-    while (client.getAppMasterStatus() != TezAppMasterStatus.SHUTDOWN){}
+    while (client.getAppMasterStatus() != TezAppMasterStatus.SHUTDOWN) {}
 
     Assert.assertEquals(expectedSet, TestWordsFn.RESULTS);
   }
@@ -91,7 +93,7 @@ public class TezDoFnProcessorTest {
   private static class TestWordsFn extends DoFn<String, String> {
     private static final Set<String> RESULTS = Collections.synchronizedSet(new HashSet<>());
 
-    public TestWordsFn(){
+    public TestWordsFn() {
       RESULTS.clear();
     }
 
@@ -108,5 +110,4 @@ public class TezDoFnProcessorTest {
       }
     }
   }
-
 }

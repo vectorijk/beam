@@ -15,18 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.beam.runners.tez.translation;
+package org.apache.beam.runners.tez;
 
-import org.apache.beam.sdk.transforms.Flatten;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.io.Serializable;
+import org.apache.beam.runners.core.StateInternals;
+import org.apache.beam.runners.core.StepContext;
+import org.apache.beam.runners.core.TimerInternals;
 
-/** {@link Flatten} translation to Tez equivalent. */
-class FlattenPCollectionTranslator<T> implements TransformTranslator<Flatten.PCollections<T>> {
-  private static final Logger LOG = LoggerFactory.getLogger(FlattenPCollectionTranslator.class);
+/** Serializable {@link StepContext} that does nothing. */
+public class NoOpStepContext implements StepContext, Serializable {
+  private static final long serialVersionUID = 1L;
 
   @Override
-  public void translate(Flatten.PCollections<T> transform, TranslationContext context) {
-    // TODO: Translate transform to Tez and add to TranslationContext
+  public StateInternals stateInternals() {
+    throw new UnsupportedOperationException("stateInternals is not supported");
+  }
+
+  @Override
+  public TimerInternals timerInternals() {
+    throw new UnsupportedOperationException("timerInternals is not supported");
   }
 }

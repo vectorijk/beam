@@ -25,16 +25,14 @@ import org.apache.tez.mapreduce.output.MROutput;
 import org.apache.tez.runtime.api.LogicalOutput;
 import org.apache.tez.runtime.library.api.KeyValueWriter;
 
-/**
- * {@link TezOutputManager} implementation that properly writes output to {@link MROutput}
- */
+/** {@link TezOutputManager} implementation that properly writes output to {@link MROutput} */
 public class MROutputManager extends TezOutputManager {
 
   private MROutput output;
 
   public MROutputManager(LogicalOutput output) {
     super(output);
-    if (output.getClass().equals(MROutput.class)){
+    if (output.getClass().equals(MROutput.class)) {
       this.output = (MROutput) output;
       try {
         setWriter((KeyValueWriter) output.getWriter());
@@ -60,7 +58,7 @@ public class MROutputManager extends TezOutputManager {
   public <T> void output(TupleTag<T> tag, WindowedValue<T> output) {
     try {
       getWriter().write(null, TranslatorUtil.convertToBytesWritable(output.getValue()));
-    } catch (Exception e){
+    } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }

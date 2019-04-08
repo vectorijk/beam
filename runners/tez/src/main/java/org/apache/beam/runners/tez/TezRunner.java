@@ -31,34 +31,34 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A {@link PipelineRunner} that translates the
- * pipeline to an Tez DAG and executes it on a Tez cluster.
- *
+ * A {@link PipelineRunner} that translates the pipeline to an Tez DAG and executes it on a Tez
+ * cluster.
  */
-public class TezRunner extends PipelineRunner<TezRunnerResult>{
+public class TezRunner extends PipelineRunner<TezRunnerResult> {
 
   private static final Logger LOG = LoggerFactory.getLogger(TezClient.class);
 
   private final TezPipelineOptions options;
 
-  private TezRunner(TezPipelineOptions options){
+  private TezRunner(TezPipelineOptions options) {
     this.options = options;
   }
 
   public static TezRunner fromOptions(PipelineOptions options) {
-    TezPipelineOptions tezOptions = PipelineOptionsValidator.validate(TezPipelineOptions.class,options);
+    TezPipelineOptions tezOptions =
+        PipelineOptionsValidator.validate(TezPipelineOptions.class, options);
     return new TezRunner(tezOptions);
   }
 
   @Override
   public TezRunnerResult run(Pipeline pipeline) {
-    //Setup Tez Local Config
+    // Setup Tez Local Config
     TezConfiguration config = new TezConfiguration();
     config.setBoolean(TezConfiguration.TEZ_LOCAL_MODE, true);
     config.set("fs.default.name", "file:///");
     config.setBoolean(TezRuntimeConfiguration.TEZ_RUNTIME_OPTIMIZE_LOCAL_FETCH, true);
     config.set(TezConfiguration.TEZ_TASK_LOG_LEVEL, "DEBUG");
-    //TODO: Support Remote Tez Configuration
+    // TODO: Support Remote Tez Configuration
 
     final TezPipelineTranslator translator = new TezPipelineTranslator(options, config);
     final AtomicReference<DAG> tezDAG = new AtomicReference<>();
@@ -70,7 +70,7 @@ public class TezRunner extends PipelineRunner<TezRunnerResult>{
     try {
       client.start();
       client.submitDAG(dag);
-    } catch (Exception e){
+    } catch (Exception e) {
       e.printStackTrace();
     }
 

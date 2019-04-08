@@ -46,9 +46,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- * Tests for the ParDoTranslator class
- */
+/** Tests for the ParDoTranslator class */
 public class ParDoTranslatorTest {
 
   private static final String DO_FN_INSTANCE_TAG = "DO_FN_INSTANCE";
@@ -61,60 +59,80 @@ public class ParDoTranslatorTest {
 
   @Test
   public void testParDoTranslation() throws Exception {
-    MultiOutput parDo = ParDo.of(new TestDoFn()).withOutputTags(new TupleTag<>(), TupleTagList.of(new TupleTag<String>()));
+    MultiOutput parDo =
+        ParDo.of(new TestDoFn())
+            .withOutputTags(new TupleTag<>(), TupleTagList.of(new TupleTag<String>()));
     Node node = hierarchy.pushNode(TEST_TAG, pvalue, parDo);
     hierarchy.setOutput(pvalue);
     context.setCurrentTransform(node);
     translator.translate(parDo, context);
     context.populateDAG(dag);
     Vertex vertex = Iterables.getOnlyElement(dag.getVertices());
-    Configuration config = TezUtils.createConfFromUserPayload(vertex.getProcessorDescriptor().getUserPayload());
+    Configuration config =
+        TezUtils.createConfFromUserPayload(vertex.getProcessorDescriptor().getUserPayload());
     String doFnString = config.get(DO_FN_INSTANCE_TAG);
     DoFn doFn = (DoFn) TranslatorUtil.fromString(doFnString);
 
-    Assert.assertEquals(vertex.getProcessorDescriptor().getClassName(), TezDoFnProcessor.class.getName());
+    Assert.assertEquals(
+        vertex.getProcessorDescriptor().getClassName(), TezDoFnProcessor.class.getName());
     Assert.assertEquals(doFn.getClass(), TestDoFn.class);
   }
 
   @Before
-  public void setupTest(){
+  public void setupTest() {
     dag = DAG.create(TEST_TAG);
     translator = new ParDoTranslator();
     PipelineOptions options = PipelineOptionsFactory.create();
     options.setRunner(TezRunner.class);
-    TezPipelineOptions tezOptions = PipelineOptionsValidator.validate(TezPipelineOptions.class, options);
+    TezPipelineOptions tezOptions =
+        PipelineOptionsValidator.validate(TezPipelineOptions.class, options);
     context = new TranslationContext(tezOptions, new TezConfiguration());
-    hierarchy = new TransformHierarchy(Pipeline.create());
-    PValue innerValue = new PValueBase() {
-      @Override
-      public String getName() {return null;}
-    };
-    pvalue = new PValue() {
-      @Override
-      public String getName() {return null;}
+    hierarchy = new TransformHierarchy();
+    //    hierarchy = new TransformHierarchy(Pipeline.create());
+    PValue innerValue =
+        new PValueBase() {
+          @Override
+          public String getName() {
+            return null;
+          }
 
-      @Override
-      public Map<TupleTag<?>, PValue> expand() {
-        Map<TupleTag<?>, PValue> map = new HashMap<>();
-        map.put(new TupleTag<>(), innerValue);
-        return map;
-      }
+          @Override
+          public Map<TupleTag<?>, PValue> expand() {
+            return null;
+          }
+        };
+    pvalue =
+        new PValue() {
+          @Override
+          public String getName() {
+            return null;
+          }
 
-      @Override
-      public void finishSpecifying(PInput upstreamInput, PTransform<?, ?> upstreamTransform) {}
+          @Override
+          public Map<TupleTag<?>, PValue> expand() {
+            Map<TupleTag<?>, PValue> map = new HashMap<>();
+            map.put(new TupleTag<>(), innerValue);
+            return map;
+          }
 
-      @Override
-      public Pipeline getPipeline() {return null;}
+          @Override
+          public void finishSpecifying(PInput upstreamInput, PTransform<?, ?> upstreamTransform) {}
 
-      @Override
-      public void finishSpecifyingOutput(String transformName, PInput input, PTransform<?, ?> transform) {}
-    };
+          @Override
+          public Pipeline getPipeline() {
+            return null;
+          }
+
+          @Override
+          public void finishSpecifyingOutput(
+              String transformName, PInput input, PTransform<?, ?> transform) {}
+        };
   }
 
   private static class TestDoFn extends DoFn<String, String> {
     @ProcessElement
     public void processElement(ProcessContext c) {
-      //Test DoFn
+      // Test DoFn
     }
   }
 }

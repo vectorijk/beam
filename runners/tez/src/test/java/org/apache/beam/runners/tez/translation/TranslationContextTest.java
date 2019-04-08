@@ -18,6 +18,7 @@
 package org.apache.beam.runners.tez.translation;
 
 import com.google.common.collect.Iterables;
+import java.util.Map;
 import org.apache.beam.runners.tez.TezPipelineOptions;
 import org.apache.beam.runners.tez.TezRunner;
 import org.apache.beam.sdk.options.PipelineOptions;
@@ -25,6 +26,7 @@ import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.options.PipelineOptionsValidator;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.PValueBase;
+import org.apache.beam.sdk.values.TupleTag;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapred.TextInputFormat;
 import org.apache.tez.dag.api.DAG;
@@ -37,9 +39,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- * Tests for the TranslationContext class
- */
+/** Tests for the TranslationContext class */
 public class TranslationContextTest {
 
   private static final String TEST_SOURCE = "Test.txt";
@@ -59,36 +59,58 @@ public class TranslationContextTest {
     dag = DAG.create(DAG_NAME);
     PipelineOptions options = PipelineOptionsFactory.create();
     options.setRunner(TezRunner.class);
-    TezPipelineOptions tezOptions = PipelineOptionsValidator.validate(TezPipelineOptions.class, options);
+    TezPipelineOptions tezOptions =
+        PipelineOptionsValidator.validate(TezPipelineOptions.class, options);
     context = new TranslationContext(tezOptions, new TezConfiguration());
-    value1 = new PValueBase() {
-      @Override
-      public String getName() {
-        return PVALUE_NAME;
-      }
-    };
-    value2 = new PValueBase() {
-      @Override
-      public String getName() {
-        return PVALUE_NAME;
-      }
-    };
-    value3 = new PValueBase() {
-      @Override
-      public String getName() {
-        return PVALUE_NAME;
-      }
-    };
+    value1 =
+        new PValueBase() {
+          @Override
+          public String getName() {
+            return PVALUE_NAME;
+          }
+
+          @Override
+          public Map<TupleTag<?>, PValue> expand() {
+            return null;
+          }
+        };
+    value2 =
+        new PValueBase() {
+          @Override
+          public String getName() {
+            return PVALUE_NAME;
+          }
+
+          @Override
+          public Map<TupleTag<?>, PValue> expand() {
+            return null;
+          }
+        };
+    value3 =
+        new PValueBase() {
+          @Override
+          public String getName() {
+            return PVALUE_NAME;
+          }
+
+          @Override
+          public Map<TupleTag<?>, PValue> expand() {
+            return null;
+          }
+        };
   }
 
   @Test
   public void testVertexConnect() throws Exception {
-    Vertex vertex1 = Vertex.create(VERTEX1_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
-    Vertex vertex2 = Vertex.create(VERTEX2_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
+    Vertex vertex1 =
+        Vertex.create(VERTEX1_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
+    Vertex vertex2 =
+        Vertex.create(VERTEX2_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
     context.addVertex(VERTEX1_NAME, vertex1, value1, value2);
     context.addVertex(VERTEX2_NAME, vertex2, value2, value3);
     context.populateDAG(dag);
-    Vertex vertex1Output = Iterables.getOnlyElement(dag.getVertex(VERTEX1_NAME).getOutputVertices());
+    Vertex vertex1Output =
+        Iterables.getOnlyElement(dag.getVertex(VERTEX1_NAME).getOutputVertices());
     Vertex vertex2Input = Iterables.getOnlyElement(dag.getVertex(VERTEX2_NAME).getInputVertices());
 
     Assert.assertEquals(vertex2, vertex1Output);
@@ -97,13 +119,19 @@ public class TranslationContextTest {
 
   @Test
   public void testDataSourceConnect() throws Exception {
-    Vertex vertex1 = Vertex.create(VERTEX1_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
+    Vertex vertex1 =
+        Vertex.create(VERTEX1_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
     context.addVertex(VERTEX1_NAME, vertex1, value1, value2);
-    DataSourceDescriptor dataSource = MRInput.createConfigBuilder(new Configuration(context.getConfig()),
-        TextInputFormat.class, TEST_SOURCE).groupSplits(true).generateSplitsInAM(true).build();
+    DataSourceDescriptor dataSource =
+        MRInput.createConfigBuilder(
+                new Configuration(context.getConfig()), TextInputFormat.class, TEST_SOURCE)
+            .groupSplits(true)
+            .generateSplitsInAM(true)
+            .build();
     context.addSource(value1, dataSource);
     context.populateDAG(dag);
-    DataSourceDescriptor vertex1Source = Iterables.getOnlyElement(dag.getVertex(VERTEX1_NAME).getDataSources());
+    DataSourceDescriptor vertex1Source =
+        Iterables.getOnlyElement(dag.getVertex(VERTEX1_NAME).getDataSources());
 
     Assert.assertEquals(dataSource, vertex1Source);
   }

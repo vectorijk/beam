@@ -32,9 +32,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- * Tests for the Tez runner.
- */
+/** Tests for the Tez runner. */
 public class TezRunnerTest {
 
   private static final String TOKENIZER_PATTERN = "[^\\p{L}]+";
@@ -44,24 +42,26 @@ public class TezRunnerTest {
   private static Pipeline directPipeline;
 
   @Before
-  public void setupPipelines(){
-    //TezRunner Pipeline
+  public void setupPipelines() {
+    // TezRunner Pipeline
     PipelineOptions tezOptions = PipelineOptionsFactory.create();
     tezOptions.setRunner(TezRunner.class);
     tezPipeline = Pipeline.create(tezOptions);
 
-    //DirectRunner Pipeline
+    // DirectRunner Pipeline
     PipelineOptions options = PipelineOptionsFactory.create();
     directPipeline = Pipeline.create(options);
   }
 
   @Test
   public void simpleTest() throws Exception {
-    tezPipeline.apply(TextIO.read().from(INPUT_LOCATION))
+    tezPipeline
+        .apply(TextIO.read().from(INPUT_LOCATION))
         .apply(ParDo.of(new AddHelloWorld()))
         .apply(ParDo.of(new TestTezFn()));
 
-    directPipeline.apply(TextIO.read().from(INPUT_LOCATION))
+    directPipeline
+        .apply(TextIO.read().from(INPUT_LOCATION))
         .apply(ParDo.of(new AddHelloWorld()))
         .apply(ParDo.of(new TestDirectFn()));
 
@@ -72,13 +72,15 @@ public class TezRunnerTest {
 
   @Test
   public void wordCountTest() throws Exception {
-    tezPipeline.apply("ONE", TextIO.read().from(INPUT_LOCATION))
+    tezPipeline
+        .apply("ONE", TextIO.read().from(INPUT_LOCATION))
         .apply("TWO", ParDo.of(new TokenDoFn()))
         .apply("THREE", GroupByKey.create())
         .apply("FOUR", ParDo.of(new ProcessDoFn()))
         .apply("FIVE", ParDo.of(new TestTezFn()));
 
-    directPipeline.apply("ONE", TextIO.read().from(INPUT_LOCATION))
+    directPipeline
+        .apply("ONE", TextIO.read().from(INPUT_LOCATION))
         .apply("TWO", ParDo.of(new TokenDoFn()))
         .apply("THREE", GroupByKey.create())
         .apply("FOUR", ParDo.of(new ProcessDoFn()))
@@ -89,7 +91,7 @@ public class TezRunnerTest {
     Assert.assertEquals(TestDirectFn.RESULTS, TestTezFn.RESULTS);
   }
 
-  private static class AddHelloWorld extends DoFn<String, String>{
+  private static class AddHelloWorld extends DoFn<String, String> {
     @ProcessElement
     public void processElement(ProcessContext c) {
 
@@ -104,22 +106,22 @@ public class TezRunnerTest {
     }
   }
 
-  public static class TokenDoFn extends DoFn<String, KV<String, Integer>>{
+  public static class TokenDoFn extends DoFn<String, KV<String, Integer>> {
     @ProcessElement
-    public void processElement(ProcessContext c){
-      for( String word : c.element().split(TOKENIZER_PATTERN)){
-        if(!word.isEmpty()){
+    public void processElement(ProcessContext c) {
+      for (String word : c.element().split(TOKENIZER_PATTERN)) {
+        if (!word.isEmpty()) {
           c.output(KV.of(word, 1));
         }
       }
     }
   }
 
-  public static class ProcessDoFn extends DoFn<KV<String,Iterable<Integer>>, String>{
+  public static class ProcessDoFn extends DoFn<KV<String, Iterable<Integer>>, String> {
     @ProcessElement
-    public void processElement(ProcessContext c){
+    public void processElement(ProcessContext c) {
       Integer sum = 0;
-      for( Integer integer : c.element().getValue()){
+      for (Integer integer : c.element().getValue()) {
         sum = sum + integer;
       }
       c.output(c.element().getKey() + ": " + sum);
@@ -129,7 +131,7 @@ public class TezRunnerTest {
   private static class TestTezFn extends DoFn<String, String> {
     private static final Set<String> RESULTS = Collections.synchronizedSet(new HashSet<>());
 
-    public TestTezFn(){
+    public TestTezFn() {
       RESULTS.clear();
     }
 
@@ -142,7 +144,7 @@ public class TezRunnerTest {
   private static class TestDirectFn extends DoFn<String, String> {
     private static final Set<String> RESULTS = Collections.synchronizedSet(new HashSet<>());
 
-    public TestDirectFn(){
+    public TestDirectFn() {
       RESULTS.clear();
     }
 
@@ -151,5 +153,4 @@ public class TezRunnerTest {
       RESULTS.add(c.element());
     }
   }
-
 }
