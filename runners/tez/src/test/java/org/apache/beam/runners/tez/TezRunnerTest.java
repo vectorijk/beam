@@ -17,7 +17,6 @@
  */
 package org.apache.beam.runners.tez;
 
-import com.google.common.base.Splitter;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -29,6 +28,7 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.values.KV;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Splitter;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -107,6 +107,7 @@ public class TezRunnerTest {
     }
   }
 
+  /** doc. */
   public static class TokenDoFn extends DoFn<String, KV<String, Integer>> {
     @ProcessElement
     public void processElement(ProcessContext c) {
@@ -120,6 +121,7 @@ public class TezRunnerTest {
     }
   }
 
+  /** docs. */
   public static class ProcessDoFn extends DoFn<KV<String, Iterable<Integer>>, String> {
     @ProcessElement
     public void processElement(ProcessContext c) {

@@ -17,7 +17,6 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import com.google.common.collect.Iterables;
 import java.util.Map;
 import org.apache.beam.runners.tez.TezPipelineOptions;
 import org.apache.beam.runners.tez.TezRunner;
@@ -27,6 +26,7 @@ import org.apache.beam.sdk.options.PipelineOptionsValidator;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.PValueBase;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapred.TextInputFormat;
 import org.apache.tez.dag.api.DAG;
@@ -39,7 +39,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-/** Tests for the TranslationContext class */
+/** Tests for the TranslationContext class. */
 public class TranslationContextTest {
 
   private static final String TEST_SOURCE = "Test.txt";

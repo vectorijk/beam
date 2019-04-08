@@ -17,12 +17,11 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import static org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
-
 import java.io.IOException;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo.MultiOutput;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;

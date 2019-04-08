@@ -17,10 +17,9 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import static org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
-
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.values.PValue;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

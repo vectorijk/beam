@@ -17,8 +17,6 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import static org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
-
 import java.util.ArrayList;
 import org.apache.beam.runners.core.DoFnRunner;
 import org.apache.beam.runners.core.DoFnRunners;
@@ -33,6 +31,7 @@ import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.tez.common.TezUtils;
 import org.apache.tez.dag.api.UserPayload;

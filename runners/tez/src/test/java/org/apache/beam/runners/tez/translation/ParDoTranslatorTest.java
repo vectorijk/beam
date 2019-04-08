@@ -17,7 +17,6 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import com.google.common.collect.Iterables;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.beam.runners.tez.TezPipelineOptions;
@@ -37,6 +36,7 @@ import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.PValueBase;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TupleTagList;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.tez.common.TezUtils;
 import org.apache.tez.dag.api.DAG;
@@ -46,7 +46,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-/** Tests for the ParDoTranslator class */
+/** Tests for the ParDoTranslator class. */
 public class ParDoTranslatorTest {
 
   private static final String DO_FN_INSTANCE_TAG = "DO_FN_INSTANCE";

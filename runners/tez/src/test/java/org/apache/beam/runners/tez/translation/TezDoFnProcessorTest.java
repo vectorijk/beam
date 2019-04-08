@@ -17,7 +17,6 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import com.google.common.base.Splitter;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
@@ -25,6 +24,7 @@ import java.util.HashSet;
 import java.util.Set;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Splitter;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapred.TextInputFormat;
