@@ -29,12 +29,12 @@ import org.apache.tez.runtime.library.output.UnorderedKVOutput;
  */
 public class UnorderedKVEdgeOutputManager extends TezOutputManager {
 
-  private UnorderedKVOutput output;
+  //  private UnorderedKVOutput output;
 
   public UnorderedKVEdgeOutputManager(LogicalOutput output) {
     super(output);
     if (output.getClass().equals(UnorderedKVOutput.class)) {
-      this.output = (UnorderedKVOutput) output;
+      //      this.output = (UnorderedKVOutput) output;
       try {
         setWriter((KeyValueWriter) output.getWriter());
       } catch (Exception e) {

@@ -31,12 +31,12 @@ import org.apache.tez.runtime.library.output.OrderedPartitionedKVOutput;
  */
 public class OrderedPartitionedKVOutputManager extends TezOutputManager {
 
-  private OrderedPartitionedKVOutput output;
+  //  private OrderedPartitionedKVOutput output;
 
   public OrderedPartitionedKVOutputManager(LogicalOutput output) {
     super(output);
     if (output.getClass().equals(OrderedPartitionedKVOutput.class)) {
-      this.output = (OrderedPartitionedKVOutput) output;
+      //      this.output = (OrderedPartitionedKVOutput) output;
       try {
         setWriter((KeyValueWriter) output.getWriter());
       } catch (Exception e) {
