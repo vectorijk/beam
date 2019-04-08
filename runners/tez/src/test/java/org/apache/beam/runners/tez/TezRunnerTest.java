@@ -17,6 +17,7 @@
  */
 package org.apache.beam.runners.tez;
 
+import com.google.common.base.Splitter;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -96,7 +97,7 @@ public class TezRunnerTest {
     public void processElement(ProcessContext c) {
 
       // Split the line into words.
-      String[] words = c.element().split(TOKENIZER_PATTERN);
+      Iterable<String> words = Splitter.onPattern(TOKENIZER_PATTERN).split(c.element());
       // Output each word encountered into the output PCollection.
       for (String word : words) {
         if (!word.isEmpty()) {
@@ -109,7 +110,9 @@ public class TezRunnerTest {
   public static class TokenDoFn extends DoFn<String, KV<String, Integer>> {
     @ProcessElement
     public void processElement(ProcessContext c) {
-      for (String word : c.element().split(TOKENIZER_PATTERN)) {
+      Iterable<String> words = Splitter.onPattern(TOKENIZER_PATTERN).split(c.element());
+
+      for (String word : words) {
         if (!word.isEmpty()) {
           c.output(KV.of(word, 1));
         }

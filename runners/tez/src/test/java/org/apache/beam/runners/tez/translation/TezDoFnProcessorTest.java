@@ -17,6 +17,7 @@
  */
 package org.apache.beam.runners.tez.translation;
 
+import com.google.common.base.Splitter;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
@@ -101,7 +102,7 @@ public class TezDoFnProcessorTest {
     public void processElement(ProcessContext c) {
 
       // Split the line into words.
-      String[] words = c.element().split(TOKENIZER_PATTERN);
+      Iterable<String> words = Splitter.onPattern(TOKENIZER_PATTERN).split(c.element());
       // Output each word encountered into the output PCollection.
       for (String word : words) {
         if (!word.isEmpty()) {

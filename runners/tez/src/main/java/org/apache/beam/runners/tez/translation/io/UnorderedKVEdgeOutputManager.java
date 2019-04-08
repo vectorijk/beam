@@ -25,7 +25,7 @@ import org.apache.tez.runtime.library.api.KeyValueWriter;
 import org.apache.tez.runtime.library.output.UnorderedKVOutput;
 
 /**
- * {@link TezOutputManager} implementation that properly writes output to {@link UnorderedKVOutput}
+ * {@link TezOutputManager} implementation that properly writes output to {@link UnorderedKVOutput}.
  */
 public class UnorderedKVEdgeOutputManager extends TezOutputManager {
 

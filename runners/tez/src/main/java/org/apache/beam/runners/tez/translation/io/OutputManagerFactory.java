@@ -22,6 +22,7 @@ import org.apache.tez.runtime.api.LogicalOutput;
 import org.apache.tez.runtime.library.output.OrderedPartitionedKVOutput;
 import org.apache.tez.runtime.library.output.UnorderedKVOutput;
 
+/** OutputManager. */
 public class OutputManagerFactory {
   public static TezOutputManager createOutputManager(LogicalOutput output) {
     TezOutputManager outputManager;

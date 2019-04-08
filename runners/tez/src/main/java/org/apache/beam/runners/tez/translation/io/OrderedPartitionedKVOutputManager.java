@@ -27,7 +27,7 @@ import org.apache.tez.runtime.library.output.OrderedPartitionedKVOutput;
 
 /**
  * {@link TezOutputManager} implementation that properly writes output to {@link
- * OrderedPartitionedKVOutput}
+ * OrderedPartitionedKVOutput}.
  */
 public class OrderedPartitionedKVOutputManager extends TezOutputManager {
 

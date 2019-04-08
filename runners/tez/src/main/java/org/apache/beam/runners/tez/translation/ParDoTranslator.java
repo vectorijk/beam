@@ -17,7 +17,8 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import com.google.common.collect.Iterables;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+
 import java.io.IOException;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo.MultiOutput;

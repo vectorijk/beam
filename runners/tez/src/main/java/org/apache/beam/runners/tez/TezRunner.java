@@ -71,7 +71,8 @@ public class TezRunner extends PipelineRunner<TezRunnerResult> {
       client.start();
       client.submitDAG(dag);
     } catch (Exception e) {
-      e.printStackTrace();
+      LOG.error("tez client runtime errors;");
+      //      e.printStackTrace();
     }
 
     return new TezRunnerResult(client);

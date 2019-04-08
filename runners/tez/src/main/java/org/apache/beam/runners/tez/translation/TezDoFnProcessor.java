@@ -17,8 +17,9 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import com.google.common.collect.Iterables;
-import java.util.LinkedList;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+
+import java.util.ArrayList;
 import org.apache.beam.runners.core.DoFnRunner;
 import org.apache.beam.runners.core.DoFnRunners;
 import org.apache.beam.runners.core.NullSideInputReader;
@@ -45,7 +46,7 @@ import org.apache.tez.runtime.library.processor.SimpleProcessor;
 
 /**
  * TezDoFnProcessor is the Tez Wrapper to wrap user defined functions for Tez processing The DoFn is
- * received through the {@link UserPayload} and then run using the simple {@link DoFnRunner}
+ * received through the {@link UserPayload} and then run using the simple {@link DoFnRunner}.
  */
 public class TezDoFnProcessor extends SimpleProcessor {
 
@@ -103,7 +104,7 @@ public class TezDoFnProcessor extends SimpleProcessor {
             NullSideInputReader.empty(),
             outputManager,
             new TupleTag<>(outputTag),
-            new LinkedList<>(),
+            new ArrayList<>(),
             new NoOpStepContext(),
             null,
             null,

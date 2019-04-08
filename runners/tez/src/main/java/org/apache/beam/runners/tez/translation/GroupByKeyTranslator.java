@@ -17,7 +17,8 @@
  */
 package org.apache.beam.runners.tez.translation;
 
-import com.google.common.collect.Iterables;
+import static org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Iterables;
+
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.values.PValue;
 import org.slf4j.Logger;
@@ -25,7 +26,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * {@link GroupByKey} translation to Tez {@link
- * org.apache.tez.runtime.library.conf.OrderedPartitionedKVEdgeConfig}
+ * org.apache.tez.runtime.library.conf.OrderedPartitionedKVEdgeConfig}.
  */
 class GroupByKeyTranslator<K, V> implements TransformTranslator<GroupByKey<K, V>> {
   private static final Logger LOG = LoggerFactory.getLogger(GroupByKey.class);

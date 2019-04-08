@@ -25,7 +25,7 @@ import org.apache.tez.mapreduce.output.MROutput;
 import org.apache.tez.runtime.api.LogicalOutput;
 import org.apache.tez.runtime.library.api.KeyValueWriter;
 
-/** {@link TezOutputManager} implementation that properly writes output to {@link MROutput} */
+/** {@link TezOutputManager} implementation that properly writes output to {@link MROutput}. */
 public class MROutputManager extends TezOutputManager {
 
   private MROutput output;
