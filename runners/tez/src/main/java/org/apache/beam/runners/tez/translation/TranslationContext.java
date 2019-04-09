@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import org.apache.beam.runners.tez.TezPipelineOptions;
+import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.runners.AppliedPTransform;
 import org.apache.beam.sdk.runners.TransformHierarchy;
 import org.apache.beam.sdk.values.PValue;
@@ -66,9 +67,9 @@ public class TranslationContext {
     this.config = config;
   }
 
-  public void setCurrentTransform(TransformHierarchy.Node treeNode) {
+  public void setCurrentTransform(TransformHierarchy.Node treeNode, Pipeline p) {
     //    this.currentTransform = treeNode.toAppliedPTransform();
-    this.currentTransform = treeNode.toAppliedPTransform(null);
+    this.currentTransform = treeNode.toAppliedPTransform(p);
     this.currentInputs = treeNode.getInputs();
     this.currentOutputs = treeNode.getOutputs();
     this.currentName = treeNode.getFullName();

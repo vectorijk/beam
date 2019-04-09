@@ -56,6 +56,8 @@ public class TezPipelineTranslator implements Pipeline.PipelineVisitor {
 
   private final TranslationContext translationContext;
 
+  private Pipeline pipeline = null;
+
   static {
     registerTransformTranslator(ParDo.MultiOutput.class, new ParDoTranslator<>());
     registerTransformTranslator(GroupByKey.class, new GroupByKeyTranslator<>());
@@ -72,7 +74,11 @@ public class TezPipelineTranslator implements Pipeline.PipelineVisitor {
   }
 
   public void translate(Pipeline pipeline, DAG dag) {
+    LOG.error("translate pipeline...");
+    System.out.println("translate pipeline...");
+    this.pipeline = pipeline;
     pipeline.traverseTopologically(this);
+
     translationContext.populateDAG(dag);
   }
 
@@ -83,29 +89,33 @@ public class TezPipelineTranslator implements Pipeline.PipelineVisitor {
    */
   @Override
   public void visitPrimitiveTransform(Node node) {
-    LOG.debug("visiting transform {}", node.getTransform());
+    LOG.warn("visiting transform {}", node.getTransform());
+    System.out.println("visiting transform " + node.getTransform());
     PTransform transform = node.getTransform();
     TransformTranslator translator = transformTranslators.get(transform.getClass());
     if (translator == null) {
       throw new UnsupportedOperationException("no translator registered for " + transform);
     }
-    translationContext.setCurrentTransform(node);
+    System.out.println("visiting transform full name: " + node.getFullName());
+    translationContext.setCurrentTransform(node, this.pipeline);
     translator.translate(transform, translationContext);
   }
 
   @Override
   public void enterPipeline(Pipeline p) {
-    LOG.debug("enter pipeline...");
+    LOG.error("enter pipeline...");
+    System.out.println("enter pipeline...");
   }
 
   @Override
   public CompositeBehavior enterCompositeTransform(Node node) {
-    LOG.debug("entering composite transform {}", node.getTransform());
+    LOG.warn("entering composite transform {}", node.getTransform());
+    System.out.println("entering composite transform " + node.getTransform());
     PTransform transform = node.getTransform();
     if (transform != null) {
       TransformTranslator translator = compositeTransformTranslators.get(transform.getClass());
       if (translator != null) {
-        translationContext.setCurrentTransform(node);
+        translationContext.setCurrentTransform(node, this.pipeline);
         translator.translate(transform, translationContext);
         return CompositeBehavior.DO_NOT_ENTER_TRANSFORM;
       }
@@ -115,17 +125,17 @@ public class TezPipelineTranslator implements Pipeline.PipelineVisitor {
 
   @Override
   public void leaveCompositeTransform(Node node) {
-    LOG.debug("leaving composite transform {}", node.getTransform());
+    LOG.warn("leaving composite transform {}", node.getTransform());
   }
 
   @Override
   public void visitValue(PValue value, Node producer) {
-    LOG.debug("visiting value {}", value);
+    LOG.warn("visiting value {}", value);
   }
 
   @Override
   public void leavePipeline(Pipeline pipeline) {
-    LOG.debug("leave pipeline...");
+    LOG.warn("leave pipeline...");
   }
 
   /**

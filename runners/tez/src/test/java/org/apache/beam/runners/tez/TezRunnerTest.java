@@ -24,12 +24,14 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.testing.PAssert;
+import org.apache.beam.sdk.testing.PAssertTest;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.values.KV;
+import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Splitter;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -40,7 +42,6 @@ public class TezRunnerTest {
   private static final String INPUT_LOCATION = "src/test/resources/test_input.txt";
 
   private static Pipeline tezPipeline;
-  private static Pipeline directPipeline;
 
   @Before
   public void setupPipelines() {
@@ -48,27 +49,17 @@ public class TezRunnerTest {
     PipelineOptions tezOptions = PipelineOptionsFactory.create();
     tezOptions.setRunner(TezRunner.class);
     tezPipeline = Pipeline.create(tezOptions);
-
-    // DirectRunner Pipeline
-    PipelineOptions options = PipelineOptionsFactory.create();
-    directPipeline = Pipeline.create(options);
   }
 
   @Test
   public void simpleTest() throws Exception {
-    tezPipeline
+    PCollection<String> pCollection = tezPipeline
         .apply(TextIO.read().from(INPUT_LOCATION))
         .apply(ParDo.of(new AddHelloWorld()))
         .apply(ParDo.of(new TestTezFn()));
-
-    directPipeline
-        .apply(TextIO.read().from(INPUT_LOCATION))
-        .apply(ParDo.of(new AddHelloWorld()))
-        .apply(ParDo.of(new TestDirectFn()));
-
+//    PAssert.that(pCollection).containsInAnyOrder("up HelloWorld",
+//                    "is HelloWorld", "splitting HelloWorld", "Then HelloWorld");
     tezPipeline.run().waitUntilFinish();
-    directPipeline.run().waitUntilFinish();
-    Assert.assertEquals(TestDirectFn.RESULTS, TestTezFn.RESULTS);
   }
 
   @Test
@@ -79,17 +70,7 @@ public class TezRunnerTest {
         .apply("THREE", GroupByKey.create())
         .apply("FOUR", ParDo.of(new ProcessDoFn()))
         .apply("FIVE", ParDo.of(new TestTezFn()));
-
-    directPipeline
-        .apply("ONE", TextIO.read().from(INPUT_LOCATION))
-        .apply("TWO", ParDo.of(new TokenDoFn()))
-        .apply("THREE", GroupByKey.create())
-        .apply("FOUR", ParDo.of(new ProcessDoFn()))
-        .apply("FIVE", ParDo.of(new TestDirectFn()));
-
     tezPipeline.run().waitUntilFinish();
-    directPipeline.run().waitUntilFinish();
-    Assert.assertEquals(TestDirectFn.RESULTS, TestTezFn.RESULTS);
   }
 
   private static class AddHelloWorld extends DoFn<String, String> {
@@ -137,19 +118,6 @@ public class TezRunnerTest {
     private static final Set<String> RESULTS = Collections.synchronizedSet(new HashSet<>());
 
     public TestTezFn() {
-      RESULTS.clear();
-    }
-
-    @ProcessElement
-    public void processElement(ProcessContext c) {
-      RESULTS.add(c.element());
-    }
-  }
-
-  private static class TestDirectFn extends DoFn<String, String> {
-    private static final Set<String> RESULTS = Collections.synchronizedSet(new HashSet<>());
-
-    public TestDirectFn() {
       RESULTS.clear();
     }
 

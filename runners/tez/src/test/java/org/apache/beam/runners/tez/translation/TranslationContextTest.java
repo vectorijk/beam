@@ -118,7 +118,7 @@ public class TranslationContextTest {
   }
 
   @Test
-  public void testDataSourceConnect() throws Exception {
+  public void testDataSourceConnect() {
     Vertex vertex1 =
         Vertex.create(VERTEX1_NAME, ProcessorDescriptor.create(TezDoFnProcessor.class.getName()));
     context.addVertex(VERTEX1_NAME, vertex1, value1, value2);
