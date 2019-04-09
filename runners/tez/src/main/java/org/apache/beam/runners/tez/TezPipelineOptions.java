@@ -17,9 +17,15 @@
  */
 package org.apache.beam.runners.tez;
 
+import org.apache.beam.sdk.options.Default;
+import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptions;
 
 /** Options that configure the Tez pipeline. */
-public interface TezPipelineOptions extends PipelineOptions, java.io.Serializable {
-  // TODO: Add options to configure Tez
+public interface TezPipelineOptions extends PipelineOptions {
+  @Description("Log level in Tez.")
+  @Default.String("INFO")
+  String getLogLevel();
+
+  void setLogLevel(String master);
 }

@@ -94,7 +94,9 @@ public class TezPipelineTranslator implements Pipeline.PipelineVisitor {
   }
 
   @Override
-  public void enterPipeline(Pipeline p) {}
+  public void enterPipeline(Pipeline p) {
+    LOG.debug("enter pipeline...");
+  }
 
   @Override
   public CompositeBehavior enterCompositeTransform(Node node) {
@@ -122,7 +124,9 @@ public class TezPipelineTranslator implements Pipeline.PipelineVisitor {
   }
 
   @Override
-  public void leavePipeline(Pipeline pipeline) {}
+  public void leavePipeline(Pipeline pipeline) {
+    LOG.debug("leave pipeline...");
+  }
 
   /**
    * Records that instances of the specified PTransform class should be translated by default by the
