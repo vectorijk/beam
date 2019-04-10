@@ -45,7 +45,6 @@ import org.apache.tez.dag.api.Vertex;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Ignore;
-import org.junit.Test;
 
 /** Tests for the ParDoTranslator class. */
 public class ParDoTranslatorTest {
@@ -65,7 +64,7 @@ public class ParDoTranslatorTest {
             .withOutputTags(new TupleTag<>(), TupleTagList.of(new TupleTag<String>()));
     Node node = hierarchy.pushNode(TEST_TAG, pvalue, parDo);
     hierarchy.setOutput(pvalue);
-//    context.setCurrentTransform(node);
+    //    context.setCurrentTransform(node);
     translator.translate(parDo, context);
     context.populateDAG(dag);
     Vertex vertex = Iterables.getOnlyElement(dag.getVertices());

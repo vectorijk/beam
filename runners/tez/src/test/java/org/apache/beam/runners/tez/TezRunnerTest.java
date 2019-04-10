@@ -24,8 +24,6 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.beam.sdk.testing.PAssert;
-import org.apache.beam.sdk.testing.PAssertTest;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.ParDo;
@@ -53,12 +51,13 @@ public class TezRunnerTest {
 
   @Test
   public void simpleTest() throws Exception {
-    PCollection<String> pCollection = tezPipeline
-        .apply(TextIO.read().from(INPUT_LOCATION))
-        .apply(ParDo.of(new AddHelloWorld()))
-        .apply(ParDo.of(new TestTezFn()));
-//    PAssert.that(pCollection).containsInAnyOrder("up HelloWorld",
-//                    "is HelloWorld", "splitting HelloWorld", "Then HelloWorld");
+    PCollection<String> pCollection =
+        tezPipeline
+            .apply(TextIO.read().from(INPUT_LOCATION))
+            .apply(ParDo.of(new AddHelloWorld()))
+            .apply(ParDo.of(new TestTezFn()));
+    //    PAssert.that(pCollection).containsInAnyOrder("up HelloWorld",
+    //                    "is HelloWorld", "splitting HelloWorld", "Then HelloWorld");
     tezPipeline.run().waitUntilFinish();
   }
 
