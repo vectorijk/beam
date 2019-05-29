@@ -16,16 +16,16 @@
  * limitations under the License.
  */
 
-apply plugin: org.apache.beam.gradle.VendorJavaPlugin
+plugins { id 'org.apache.beam.vendor-java' }
 
-description = "Apache Beam :: Vendored Dependencies :: Calcite 1.18.0"
+description = "Apache Beam :: Vendored Dependencies :: Calcite 1.19.0"
 
 group = "org.apache.beam"
 version = "0.1"
 
-def calcite_version = "1.18.0"
-def avatica_version = "1.12.0"
-def prefix = "org.apache.beam.vendor.calcite.v1_18_0"
+def calcite_version = "1.19.0"
+def avatica_version = "1.15.0"
+def prefix = "org.apache.beam.vendor.calcite.v1_19_0"
 
 vendorJava(
   dependencies: [
@@ -54,6 +54,6 @@ vendorJava(
       // Protobuf is in here too...
   ],
   groupId: group,
-  artifactId: "beam-vendor-calcite-1_18_0",
+  artifactId: "beam-vendor-calcite-1_19_0",
   version: version,
 )

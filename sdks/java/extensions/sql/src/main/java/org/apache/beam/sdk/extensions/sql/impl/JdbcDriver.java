@@ -31,19 +31,19 @@ import org.apache.beam.sdk.extensions.sql.SqlTransform;
 import org.apache.beam.sdk.extensions.sql.impl.planner.BeamRuleSets;
 import org.apache.beam.sdk.extensions.sql.meta.provider.TableProvider;
 import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.avatica.AvaticaFactory;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.jdbc.CalciteConnection;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.jdbc.CalciteFactory;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.jdbc.Driver;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.plan.RelOptPlanner;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.plan.RelOptRule;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.plan.RelTraitDef;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.prepare.CalcitePrepareImpl;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.RelCollationTraitDef;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.rules.CalcRemoveRule;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.rules.SortRemoveRule;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.runtime.Hook;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.tools.RuleSet;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.AvaticaFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalciteConnection;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalciteFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.Driver;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptPlanner;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptRule;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelTraitDef;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.prepare.CalcitePrepareImpl;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.RelCollationTraitDef;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.CalcRemoveRule;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.SortRemoveRule;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.runtime.Hook;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSet;
 
 /**
  * Calcite JDBC driver with Beam defaults.

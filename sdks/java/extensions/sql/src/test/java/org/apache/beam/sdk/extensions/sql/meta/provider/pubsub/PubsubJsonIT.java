@@ -61,7 +61,7 @@ import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Supplier;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableSet;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.jdbc.CalciteConnection;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalciteConnection;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.junit.Ignore;

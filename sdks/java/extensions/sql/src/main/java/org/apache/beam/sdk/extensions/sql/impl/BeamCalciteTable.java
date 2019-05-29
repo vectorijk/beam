@@ -25,20 +25,20 @@ import org.apache.beam.sdk.extensions.sql.impl.rel.BeamIOSinkRel;
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamIOSourceRel;
 import org.apache.beam.sdk.extensions.sql.impl.utils.CalciteUtils;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.adapter.java.AbstractQueryableTable;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.linq4j.QueryProvider;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.linq4j.Queryable;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.plan.RelOptCluster;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.plan.RelOptTable;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.prepare.Prepare;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.RelNode;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.core.TableModify;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.type.RelDataType;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.rex.RexNode;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.schema.ModifiableTable;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.schema.SchemaPlus;
-import org.apache.beam.vendor.calcite.v1_18_0.org.apache.calcite.schema.TranslatableTable;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.java.AbstractQueryableTable;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.QueryProvider;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.Queryable;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptCluster;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptTable;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.prepare.Prepare;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.RelNode;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.core.TableModify;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataType;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexNode;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.ModifiableTable;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaPlus;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.TranslatableTable;
 
 /** Adapter from {@link BeamSqlTable} to a calcite Table. */
 public class BeamCalciteTable extends AbstractQueryableTable
