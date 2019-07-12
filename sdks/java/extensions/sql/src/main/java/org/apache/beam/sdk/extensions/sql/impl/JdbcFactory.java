@@ -30,14 +30,14 @@ import org.apache.beam.sdk.extensions.sql.impl.parser.impl.BeamSqlParserImpl;
 import org.apache.beam.sdk.extensions.sql.impl.planner.BeamRelDataTypeSystem;
 import org.apache.beam.sdk.extensions.sql.meta.provider.TableProvider;
 import org.apache.beam.sdk.util.ReleaseInfo;
-import org.apache.calcite.adapter.java.JavaTypeFactory;
-import org.apache.calcite.avatica.AvaticaConnection;
-import org.apache.calcite.avatica.AvaticaFactory;
-import org.apache.calcite.avatica.ConnectionProperty;
-import org.apache.calcite.avatica.UnregisteredDriver;
-import org.apache.calcite.config.Lex;
-import org.apache.calcite.jdbc.CalciteFactory;
-import org.apache.calcite.jdbc.CalciteSchema;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.java.JavaTypeFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.AvaticaConnection;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.AvaticaFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.ConnectionProperty;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.UnregisteredDriver;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.Lex;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalciteFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalciteSchema;
 
 /**
  * Implements {@link CalciteFactory} that is used by Clacite JDBC driver to instantiate different
