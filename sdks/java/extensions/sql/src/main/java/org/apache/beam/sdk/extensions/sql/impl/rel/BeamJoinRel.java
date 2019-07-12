@@ -53,8 +53,6 @@ import org.apache.beam.sdk.values.PCollectionList;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.WindowingStrategy;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Optional;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptCluster;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelTraitSet;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.RelNode;
@@ -62,11 +60,13 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.core.Correl
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.core.Join;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.core.JoinRelType;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexCall;
-import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexInputRef;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexNode;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.Pair;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Optional;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
+import org.apache.calcite.rex.RexFieldAccess;
 
 /**
  * {@code BeamRelNode} to replace a {@code Join} node.

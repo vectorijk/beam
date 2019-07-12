@@ -44,7 +44,6 @@ import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
 import org.apache.beam.sdk.values.Row;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.DataContext;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.JavaRowFormat;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.PhysType;
@@ -72,6 +71,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaPl
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.BuiltInMethod;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
 import org.codehaus.commons.compiler.CompileException;
 import org.codehaus.janino.ScriptEvaluator;
 import org.joda.time.DateTime;

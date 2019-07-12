@@ -33,12 +33,12 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
 import org.apache.beam.sdk.values.Row;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptCluster;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelTraitSet;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.core.Values;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataType;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
+import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
 
 /**
  * {@code BeamRelNode} to replace a {@code Values} node.
