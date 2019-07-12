@@ -53,6 +53,9 @@ vendorJava(
       "org.yaml": "${prefix}.org.yaml",
       // Protobuf is in here too...
   ],
+  exclusions: [
+    "com/google/protobuf/**"
+  ],
   groupId: group,
   artifactId: "beam-vendor-calcite-1_19_0",
   version: version,
