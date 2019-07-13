@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl.parser;
 
-import static org.apache.calcite.util.Static.RESOURCE;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.Static.RESOURCE;
 
 import org.apache.beam.sdk.extensions.sql.impl.BeamCalciteSchema;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalcitePrepare;

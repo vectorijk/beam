@@ -18,12 +18,12 @@
 package org.apache.beam.sdk.extensions.sql.impl;
 
 import static org.apache.beam.sdk.extensions.sql.impl.JdbcDriver.TOP_LEVEL_BEAM_SCHEMA;
-import static org.apache.calcite.avatica.BuiltInConnectionProperty.TIME_ZONE;
-import static org.apache.calcite.config.CalciteConnectionProperty.LEX;
-import static org.apache.calcite.config.CalciteConnectionProperty.PARSER_FACTORY;
-import static org.apache.calcite.config.CalciteConnectionProperty.SCHEMA;
-import static org.apache.calcite.config.CalciteConnectionProperty.SCHEMA_FACTORY;
-import static org.apache.calcite.config.CalciteConnectionProperty.TYPE_SYSTEM;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.BuiltInConnectionProperty.TIME_ZONE;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionProperty.LEX;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionProperty.PARSER_FACTORY;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionProperty.SCHEMA;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionProperty.SCHEMA_FACTORY;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionProperty.TYPE_SYSTEM;
 
 import java.util.Properties;
 import org.apache.beam.sdk.extensions.sql.impl.parser.impl.BeamSqlParserImpl;

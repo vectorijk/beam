@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl;
 
-import static org.apache.calcite.util.Static.RESOURCE;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.Static.RESOURCE;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
