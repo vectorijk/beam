@@ -99,7 +99,8 @@ public class BeamCalciteSchema implements Schema {
   }
 
   @Override
-  public org.apache.calcite.schema.Table getTable(String name) {
+  public org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Table getTable(
+      String name) {
     Table table = tableProvider.getTable(name);
     if (table == null) {
       return null;

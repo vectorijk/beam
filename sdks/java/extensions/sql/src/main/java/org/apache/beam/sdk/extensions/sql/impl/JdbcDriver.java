@@ -18,7 +18,7 @@
 package org.apache.beam.sdk.extensions.sql.impl;
 
 import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionProperty.SCHEMA_FACTORY;
-import static org.codehaus.commons.compiler.CompilerFactoryFactory.getDefaultCompilerFactory;
+import static org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.commons.compiler.CompilerFactoryFactory.getDefaultCompilerFactory;
 
 import com.google.auto.service.AutoService;
 import java.sql.Connection;

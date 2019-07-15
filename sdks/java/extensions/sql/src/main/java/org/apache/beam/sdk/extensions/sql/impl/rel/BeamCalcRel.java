@@ -71,9 +71,9 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaPl
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.BuiltInMethod;
+import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.commons.compiler.CompileException;
+import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.janino.ScriptEvaluator;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
-import org.codehaus.commons.compiler.CompileException;
-import org.codehaus.janino.ScriptEvaluator;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.ReadableInstant;
