@@ -22,7 +22,6 @@ import static org.apache.beam.sdk.extensions.sql.impl.schema.BeamTableUtils.auto
 import static org.apache.beam.sdk.values.Row.toRow;
 import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
 
-import com.google.common.collect.ImmutableList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -39,6 +38,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.core.Values
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataType;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
 import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v20_0.com.google.thirdparty.collect.ImmutableList;
 
 /**
  * {@code BeamRelNode} to replace a {@code Values} node.

@@ -81,6 +81,10 @@ dependencies {
   provided project(path: ":sdks:java:io:kafka", configuration: "shadow")
   provided project(path: ":sdks:java:io:google-cloud-platform", configuration: "shadow")
   provided library.java.kafka_clients
+  //  shadowTestRuntimeClasspath library.java.vendored_calcite_1_19_0
+  //  shadowTestRuntimeClasspath library.java.vendored_guava_20_0
+  //  shadowTestRuntimeClasspath "org.codehaus.janino:janino:2.7.6"
+  //  shadowTestRuntimeClasspath "org.codehaus.janino:commons-compiler:2.7.6"
   shadowTest library.java.junit
   shadowTest library.java.hamcrest_core
   shadowTest library.java.hamcrest_library
@@ -100,6 +104,7 @@ dependencies {
   // but it doesn't matter which is used
   permitUsedUndeclared "com.google.code.findbugs:jsr305:3.0.2"
   permitUnusedDeclared "net.jcip:jcip-annotations:1.0"
+  permitUnusedDeclared "com.google.guava:guava:20.0"
 }
 
 // Copy Caclcite templates and our own template into the build directory
@@ -116,6 +121,18 @@ task copyFmppTemplatesFromCalciteCore(type: Copy) {
   from zipTree(calciteCoreJar)
   include "**/Parser.jj"
   into "${project.buildDir}/templates-fmpp"
+  filter{
+    line ->
+      line.replace('import org.apache.calcite.', 'import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.')
+  }
+  filter{
+    line ->
+      line.replace('import static org.apache.calcite.', 'import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.')
+  }
+  filter{
+    line ->
+      line.replace('import org.slf4j.Logger', 'import org.apache.beam.vendor.calcite.v1_19_0.org.slf4j.Logger')
+  }
 }
 
 // Generate the FMPP sources from the FMPP templates.

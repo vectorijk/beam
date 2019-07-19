@@ -112,7 +112,7 @@ artifactId=${project.name}
 
       project.shadowJar {
         config.relocations.each { srcNamespace, destNamespace ->
-          relocate(srcNamespace, destNamespace)
+          relocate(srcNamespace, destNamespace) { exclude 'org.codehaus.commons.compiler.properties' }
         }
         config.exclusions.each { exclude it }
 

@@ -21,7 +21,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import com.google.common.collect.ImmutableList;
 import java.math.BigDecimal;
 import java.util.List;
 import org.apache.beam.sdk.extensions.sql.impl.schema.BaseBeamTable;
@@ -50,6 +49,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDat
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexBuilder;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
+import org.apache.beam.vendor.guava.v20_0.com.google.thirdparty.collect.ImmutableList;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
