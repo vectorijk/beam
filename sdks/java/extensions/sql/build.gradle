@@ -29,23 +29,8 @@ applyJavaNature(
   enableStrictDependencies: true,
   shadowClosure: DEFAULT_SHADOW_CLOSURE << {
     dependencies {
-//      include(dependency(library.java.protobuf_java))
-//      include(dependency(library.java.protobuf_java_util))
       include(dependency(library.java.vendored_calcite_1_19_0))
-//      include(dependency("org.apache.calcite:.*"))
-//      include(dependency("org.apache.calcite.avatica:.*"))
-//      include(dependency("org.codehaus.janino:.*"))
     }
-//    relocate "com.google.protobuf", getJavaRelocatedPath("com.google.protobuf")
-    relocate "org.codehaus.commons.compiler.properties", "org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.commons.compiler.properties"
-
-  // Looking up the compiler factory in Calcite depends on having a properties
-  // file in the right location. We package one that is shading compatible
-  // in src/main/resources. Note that if this shaded path changes, that
-  // files name and contents need to be updated as well. TODO, swap to use
-  // getJavaRelocatedPath once the Maven build is no longer also shading this
-  // module.
-//  relocate "org.codehaus", "org.apache.beam.sdks.java.extensions.sql.repackage.org.codehaus"
 })
 
 description = "Apache Beam :: SDKs :: Java :: Extensions :: SQL"
@@ -84,8 +69,6 @@ dependencies {
   provided library.java.kafka_clients
   shadowTest library.java.vendored_calcite_1_19_0
   shadowTest library.java.vendored_guava_20_0
-//  shadowTest "org.codehaus.janino:janino:2.7.6"
-//  shadowTest "org.codehaus.janino:commons-compiler:2.7.6"
   shadowTest library.java.junit
   shadowTest library.java.hamcrest_core
   shadowTest library.java.hamcrest_library
@@ -96,10 +79,6 @@ dependencies {
   // Dependencies that we don't directly reference
   permitUnusedDeclared "com.jayway.jsonpath:json-path:2.4.0"
   permitUnusedDeclared library.java.jackson_dataformat_yaml
-
-  // Dependencies that are bundled in when we bundle Calcite
-//  permitUsedUndeclared "org.codehaus.janino:janino:3.0.11"
-//  permitUsedUndeclared "org.codehaus.janino:commons-compiler:3.0.11"
 
   // Dependencies where one or the other appears "used" depending on classpath,
   // but it doesn't matter which is used

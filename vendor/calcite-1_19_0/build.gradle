@@ -56,9 +56,6 @@ vendorJava(
   ],
   exclusions: [
     "com/google/protobuf/**"
-//    ,
-//    "org/codehaus/janino/**",
-//          "org/codehaus/commons/**"
   ],
   groupId: group,
   artifactId: "beam-vendor-calcite-1_19_0",
