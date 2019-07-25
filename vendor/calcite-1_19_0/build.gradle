@@ -51,6 +51,7 @@ vendorJava(
     "org.slf4j": "${prefix}.org.slf4j",
     "org.apache.http": "${prefix}.org.apache.http",
     "org.yaml": "${prefix}.org.yaml",
+    "org.codehaus.commons.compiler.properties": "${prefix}.org.codehaus.commons.compiler.properties"
       // Protobuf is in here too...
   ],
   exclusions: [
