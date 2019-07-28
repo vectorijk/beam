@@ -27,7 +27,7 @@ applyJavaNature(
   disableLintWarnings: ['dep-ann'],
   testShadowJar: true,
   enableStrictDependencies: true,
-  shadowClosure: DEFAULT_SHADOW_CLOSURE << {
+  shadowClosure: {
     dependencies {
       include(dependency(library.java.vendored_calcite_1_19_0))
     }
@@ -50,10 +50,10 @@ dependencies {
   fmppTask "org.freemarker:freemarker:2.3.28"
   fmppTemplates library.java.vendored_calcite_1_19_0
   shadow library.java.vendored_calcite_1_19_0
-  shadow library.java.vendored_guava_20_0 // Internal use
+  shadow library.java.vendored_guava_26_0_jre // Internal use
   compile library.java.guava // Interfaces with Calcite use this
   shadow project(path: ":sdks:java:core", configuration: "shadow")
-  shadow project(path: ":sdks:java:extensions:join-library", configuration: "shadow")
+  shadow project(":sdks:java:extensions:join-library")
   shadow library.java.slf4j_api
   shadow library.java.commons_codec
   shadow library.java.commons_csv
@@ -64,8 +64,8 @@ dependencies {
   shadow "com.alibaba:fastjson:1.2.49"
   shadow "com.jayway.jsonpath:json-path:2.4.0"
   shadow project(path: ":runners:direct-java", configuration: "shadow")
-  provided project(path: ":sdks:java:io:kafka", configuration: "shadow")
-  provided project(path: ":sdks:java:io:google-cloud-platform", configuration: "shadow")
+  provided project(":sdks:java:io:kafka")
+  provided project(":sdks:java:io:google-cloud-platform")
   provided library.java.kafka_clients
   shadowTest library.java.vendored_calcite_1_19_0
   shadowTest library.java.vendored_guava_20_0

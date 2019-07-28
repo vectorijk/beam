@@ -29,7 +29,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Function
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.FunctionParameter;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.impl.ReflectiveFunctionBase;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.ReflectUtil;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
 
 /** Beam-customized version from {@link ReflectiveFunctionBase}, to address BEAM-5921. */
 public abstract class UdfImplReflectiveFunctionBase implements Function {

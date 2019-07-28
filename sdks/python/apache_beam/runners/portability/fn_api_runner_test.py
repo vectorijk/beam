@@ -26,6 +26,7 @@ import tempfile
 import threading
 import time
 import traceback
+import typing
 import unittest
 import uuid
 from builtins import range
@@ -50,6 +51,7 @@ from apache_beam.runners.portability import fn_api_runner
 from apache_beam.runners.worker import data_plane
 from apache_beam.runners.worker import statesampler
 from apache_beam.testing.synthetic_pipeline import SyntheticSDFAsSource
+from apache_beam.testing.test_stream import TestStream
 from apache_beam.testing.util import assert_that
 from apache_beam.testing.util import equal_to
 from apache_beam.transforms import userstate
@@ -256,10 +258,10 @@ class FnApiRunnerTest(unittest.TestCase):
     with self.create_pipeline() as p:
       main = p | 'main' >> beam.Create(['a', 'b'])
       # The type of this side-input is forced to Any (overriding type
-      # inference). Without type coercion to KV[Any, Any], the usage of this
+      # inference). Without type coercion to Tuple[Any, Any], the usage of this
       # side-input in AsMultiMap() below should fail.
       side = (p | 'side' >> beam.Create([('a', 1), ('b', 2), ('a', 3)])
-              .with_output_types(beam.typehints.Any))
+              .with_output_types(typing.Any))
       assert_that(
           main | beam.Map(lambda k, d: (k, sorted(d[k])),
                           beam.pvalue.AsMultiMap(side)),
@@ -305,6 +307,36 @@ class FnApiRunnerTest(unittest.TestCase):
     with self.create_pipeline() as p:
       assert_that(p | beam.Create(inputs) | beam.ParDo(AddIndex()),
                   equal_to(expected))
+
+  @unittest.skip('TestStream not yet supported')
+  def test_teststream_pardo_timers(self):
+    timer_spec = userstate.TimerSpec('timer', userstate.TimeDomain.WATERMARK)
+
+    class TimerDoFn(beam.DoFn):
+      def process(self, element, timer=beam.DoFn.TimerParam(timer_spec)):
+        unused_key, ts = element
+        timer.set(ts)
+        timer.set(2 * ts)
+
+      @userstate.on_timer(timer_spec)
+      def process_timer(self):
+        yield 'fired'
+
+    ts = (TestStream()
+          .add_elements([('k1', 10)])  # Set timer for 20
+          .advance_watermark_to(100)
+          .add_elements([('k2', 100)])  # Set timer for 200
+          .advance_watermark_to(1000))
+
+    with self.create_pipeline() as p:
+      _ = (
+          p
+          | ts
+          | beam.ParDo(TimerDoFn())
+          | beam.Map(lambda x, ts=beam.DoFn.TimestampParam: (x, ts)))
+
+      #expected = [('fired', ts) for ts in (20, 200)]
+      #assert_that(actual, equal_to(expected))
 
   def test_pardo_timers(self):
     timer_spec = userstate.TimerSpec('timer', userstate.TimeDomain.WATERMARK)
@@ -750,7 +782,7 @@ class FnApiRunnerTest(unittest.TestCase):
 
 
 # These tests are kept in a separate group so that they are
-# not ran in he FnApiRunnerTestWithBundleRepeat which repeats
+# not ran in the FnApiRunnerTestWithBundleRepeat which repeats
 # bundle processing. This breaks the byte sampling metrics as
 # it makes the probability of sampling far too small
 # upon repeating bundle processing due to unncessarily incrementing
@@ -1145,6 +1177,25 @@ class FnApiRunnerTestWithGrpcMultiThreaded(FnApiRunnerTest):
                 payload=b'2')))
 
 
+class FnApiRunnerTestWithGrpcAndMultiWorkers(FnApiRunnerTest):
+
+  def create_pipeline(self):
+    from apache_beam.options.pipeline_options import PipelineOptions
+    pipeline_options = PipelineOptions(['--direct_num_workers', '2'])
+    p = beam.Pipeline(
+        runner=fn_api_runner.FnApiRunner(
+            default_environment=beam_runner_api_pb2.Environment(
+                urn=python_urns.EMBEDDED_PYTHON_GRPC)),
+        options=pipeline_options)
+    return p
+
+  def test_metrics(self):
+    raise unittest.SkipTest("This test is for a single worker only.")
+
+  def test_sdf_with_sdf_initiated_checkpointing(self):
+    raise unittest.SkipTest("This test is for a single worker only.")
+
+
 class FnApiRunnerTestWithBundleRepeat(FnApiRunnerTest):
 
   def create_pipeline(self):
@@ -1232,12 +1283,13 @@ class FnApiRunnerSplitTest(unittest.TestCase):
     element_counter = ElementCounter()
 
     def split_manager(num_elements):
-      element_counter.reset()
-      breakpoint = element_counter.set_breakpoint(1)
-      yield
-      breakpoint.wait()
-      yield 0
-      breakpoint.clear()
+      if num_elements > 0:
+        element_counter.reset()
+        breakpoint = element_counter.set_breakpoint(1)
+        yield
+        breakpoint.wait()
+        yield 0
+        breakpoint.clear()
 
     # Everything should be perfectly split.
     elements = [2, 3]
@@ -1251,7 +1303,7 @@ class FnApiRunnerSplitTest(unittest.TestCase):
     is_first_bundle = [True]  # emulate nonlocal for Python 2
 
     def split_manager(num_elements):
-      if is_first_bundle:
+      if is_first_bundle and num_elements > 0:
         del is_first_bundle[:]
         breakpoint = element_counter.set_breakpoint(1)
         yield
@@ -1281,14 +1333,15 @@ class FnApiRunnerSplitTest(unittest.TestCase):
     element_counter = ElementCounter()
 
     def split_manager(num_elements):
-      element_counter.reset()
-      wait_for = r.randrange(num_elements)
-      breakpoint = element_counter.set_breakpoint(wait_for)
-      yield
-      breakpoint.wait()
-      yield r.random()
-      yield r.random()
-      breakpoint.clear()
+      if num_elements > 0:
+        element_counter.reset()
+        wait_for = r.randrange(num_elements)
+        breakpoint = element_counter.set_breakpoint(wait_for)
+        yield
+        breakpoint.wait()
+        yield r.random()
+        yield r.random()
+        breakpoint.clear()
 
     try:
       elements = [r.randrange(5, 10) for _ in range(5)]
@@ -1461,6 +1514,25 @@ class ExpandStringsProvider(beam.transforms.core.RestrictionProvider):
 
   def restriction_size(self, element, restriction):
     return restriction[1] - restriction[0]
+
+
+class FnApiRunnerTestWithMultiWorkers(FnApiRunnerSplitTest):
+
+  def create_pipeline(self):
+    from apache_beam.options.pipeline_options import PipelineOptions
+    pipeline_options = PipelineOptions(['--direct_num_workers', '2'])
+    p = beam.Pipeline(
+        runner=fn_api_runner.FnApiRunner(
+            default_environment=beam_runner_api_pb2.Environment(
+                urn=python_urns.EMBEDDED_PYTHON_GRPC)),
+        options=pipeline_options)
+    return p
+
+  def test_checkpoint(self):
+    raise unittest.SkipTest("This test is for a single worker only.")
+
+  def test_split_half(self):
+    raise unittest.SkipTest("This test is for a single worker only.")
 
 
 if __name__ == '__main__':

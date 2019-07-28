@@ -20,7 +20,7 @@ package org.apache.beam.sdk.extensions.sql.impl.rel;
 import static org.apache.beam.sdk.schemas.Schema.FieldType;
 import static org.apache.beam.sdk.schemas.Schema.TypeName;
 import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.util.DateTimeUtils.MILLIS_PER_DAY;
-import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -50,6 +50,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumera
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.PhysTypeImpl;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.RexToLixTranslator;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.java.JavaTypeFactory;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.util.ByteString;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.QueryProvider;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.tree.BlockBuilder;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.tree.Expression;
@@ -73,7 +74,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.validate.Sq
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.BuiltInMethod;
 import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.commons.compiler.CompileException;
 import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.janino.ScriptEvaluator;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.ReadableInstant;
@@ -276,7 +277,13 @@ public class BeamCalcRel extends Calc implements BeamRelNode {
     } else if (toType.getTypeName() == TypeName.DECIMAL
         && !Types.isAssignableFrom(BigDecimal.class, (Class) value.getType())) {
       return Expressions.new_(BigDecimal.class, value);
+    } else if (toType.getTypeName() == TypeName.BYTES
+        && Types.isAssignableFrom(ByteString.class, (Class) value.getType())) {
 
+      return Expressions.condition(
+          Expressions.equal(value, Expressions.constant(null)),
+          Expressions.constant(null),
+          Expressions.call(value, "getBytes"));
     } else if (((Class) value.getType()).isPrimitive()
         || Types.isAssignableFrom(Number.class, (Class) value.getType())) {
       Type rawType = rawTypeMap.get(toType.getTypeName());
@@ -386,27 +393,47 @@ public class BeamCalcRel extends Calc implements BeamRelNode {
       }
       Expression field = Expressions.call(expression, getter, Expressions.constant(index));
       if (fromType.getTypeName().isLogicalType()) {
-        field = Expressions.call(field, "getMillis");
+        Expression millisField = Expressions.call(field, "getMillis");
         String logicalId = fromType.getLogicalType().getIdentifier();
         if (logicalId.equals(TimeType.IDENTIFIER)) {
-          field = Expressions.convert_(field, int.class);
+          field = nullOr(field, Expressions.convert_(millisField, int.class));
         } else if (logicalId.equals(DateType.IDENTIFIER)) {
           field =
-              Expressions.convert_(
-                  Expressions.modulo(field, Expressions.constant(MILLIS_PER_DAY)), int.class);
+              nullOr(
+                  field,
+                  Expressions.convert_(
+                      Expressions.divide(millisField, Expressions.constant(MILLIS_PER_DAY)),
+                      int.class));
         } else if (!logicalId.equals(CharType.IDENTIFIER)) {
           throw new IllegalArgumentException(
               "Unknown LogicalType " + fromType.getLogicalType().getIdentifier());
         }
       } else if (CalciteUtils.isDateTimeType(fromType)) {
-        field = Expressions.call(field, "getMillis");
+        field = nullOr(field, Expressions.call(field, "getMillis"));
       } else if (fromType.getTypeName().isCompositeType()
           || (fromType.getTypeName().isCollectionType()
               && fromType.getCollectionElementType().getTypeName().isCompositeType())) {
-        field = Expressions.call(WrappedList.class, "of", field);
+        field =
+            Expressions.condition(
+                Expressions.equal(field, Expressions.constant(null)),
+                Expressions.constant(null),
+                Expressions.call(WrappedList.class, "of", field));
+      } else if (fromType.getTypeName() == TypeName.BYTES) {
+        field =
+            Expressions.condition(
+                Expressions.equal(field, Expressions.constant(null)),
+                Expressions.constant(null),
+                Expressions.new_(ByteString.class, field));
       }
       return field;
     }
+  }
+
+  private static Expression nullOr(Expression field, Expression ifNotNull) {
+    return Expressions.condition(
+        Expressions.equal(field, Expressions.constant(null)),
+        Expressions.constant(null),
+        Expressions.box(ifNotNull));
   }
 
   private static final DataContext CONTEXT_INSTANCE = new SlimDataContext();

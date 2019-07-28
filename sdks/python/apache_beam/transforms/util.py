@@ -25,16 +25,20 @@ import collections
 import contextlib
 import random
 import time
+import typing
+import warnings
 from builtins import object
 from builtins import range
 from builtins import zip
 
 from future.utils import itervalues
 
+from apache_beam import coders
 from apache_beam import typehints
 from apache_beam.metrics import Metrics
 from apache_beam.portability import common_urns
 from apache_beam.transforms import window
+from apache_beam.transforms.combiners import CountCombineFn
 from apache_beam.transforms.core import CombinePerKey
 from apache_beam.transforms.core import DoFn
 from apache_beam.transforms.core import FlatMap
@@ -45,13 +49,19 @@ from apache_beam.transforms.core import ParDo
 from apache_beam.transforms.core import Windowing
 from apache_beam.transforms.ptransform import PTransform
 from apache_beam.transforms.ptransform import ptransform_fn
+from apache_beam.transforms.timeutil import TimeDomain
 from apache_beam.transforms.trigger import AccumulationMode
 from apache_beam.transforms.trigger import AfterCount
+from apache_beam.transforms.userstate import BagStateSpec
+from apache_beam.transforms.userstate import CombiningValueStateSpec
+from apache_beam.transforms.userstate import TimerSpec
+from apache_beam.transforms.userstate import on_timer
 from apache_beam.transforms.window import NonMergingWindowFn
 from apache_beam.transforms.window import TimestampCombiner
 from apache_beam.transforms.window import TimestampedValue
 from apache_beam.utils import windowed_value
 from apache_beam.utils.annotations import deprecated
+from apache_beam.utils.annotations import experimental
 
 __all__ = [
     'BatchElements',
@@ -64,12 +74,13 @@ __all__ = [
     'Reshuffle',
     'ToString',
     'Values',
-    'WithKeys'
+    'WithKeys',
+    'GroupIntoBatches'
     ]
 
-K = typehints.TypeVariable('K')
-V = typehints.TypeVariable('V')
-T = typehints.TypeVariable('T')
+K = typing.TypeVar('K')
+V = typing.TypeVar('V')
+T = typing.TypeVar('T')
 
 
 class CoGroupByKey(PTransform):
@@ -87,16 +98,17 @@ class CoGroupByKey(PTransform):
                     'tag2': ... ,
                     ... })
 
-  For example, given:
+  For example, given::
 
       {'tag1': pc1, 'tag2': pc2, 333: pc3}
 
-  where:
+  where::
+
       pc1 = [(k1, v1)]
       pc2 = []
       pc3 = [(k1, v31), (k1, v32), (k2, v33)]
 
-  The output PCollection would be:
+  The output PCollection would be::
 
       [(k1, {'tag1': [v1], 'tag2': [], 333: [v31, v32]}),
        (k2, {'tag1': [], 'tag2': [], 333: [v33]})]
@@ -469,7 +481,7 @@ class _WindowAwareBatchingDoFn(DoFn):
 
 
 @typehints.with_input_types(T)
-@typehints.with_output_types(typehints.List[T])
+@typehints.with_output_types(typing.List[T])
 class BatchElements(PTransform):
   """A Transform that batches elements for amortized processing.
 
@@ -562,8 +574,8 @@ class _IdentityWindowFn(NonMergingWindowFn):
     return self._window_coder
 
 
-@typehints.with_input_types(typehints.KV[K, V])
-@typehints.with_output_types(typehints.KV[K, V])
+@typehints.with_input_types(typing.Tuple[K, V])
+@typehints.with_output_types(typing.Tuple[K, V])
 class ReshufflePerKey(PTransform):
   """PTransform that returns a PCollection equivalent to its input,
   but operationally provides some of the side effects of a GroupByKey,
@@ -670,6 +682,71 @@ def WithKeys(pcoll, k):
   return pcoll | Map(lambda v: (k, v))
 
 
+@experimental()
+@typehints.with_input_types(typing.Tuple[K, V])
+class GroupIntoBatches(PTransform):
+  """PTransform that batches the input into desired batch size. Elements are
+  buffered until they are equal to batch size provided in the argument at which
+  point they are output to the output Pcollection.
+
+  Windows are preserved (batches will contain elements from the same window)
+
+  GroupIntoBatches is experimental. Its use case will depend on the runner if
+  it has support of States and Timers.
+  """
+
+  def __init__(self, batch_size):
+    """Create a new GroupIntoBatches with batch size.
+
+    Arguments:
+      batch_size: (required) How many elements should be in a batch
+    """
+    warnings.warn('Use of GroupIntoBatches transform requires State/Timer '
+                  'support from the runner')
+    self.batch_size = batch_size
+
+  def expand(self, pcoll):
+    input_coder = coders.registry.get_coder(pcoll)
+    return pcoll | ParDo(_pardo_group_into_batches(
+        self.batch_size, input_coder))
+
+
+def _pardo_group_into_batches(batch_size, input_coder):
+  ELEMENT_STATE = BagStateSpec('values', input_coder)
+  COUNT_STATE = CombiningValueStateSpec('count', input_coder, CountCombineFn())
+  EXPIRY_TIMER = TimerSpec('expiry', TimeDomain.WATERMARK)
+
+  class _GroupIntoBatchesDoFn(DoFn):
+
+    def process(self, element,
+                window=DoFn.WindowParam,
+                element_state=DoFn.StateParam(ELEMENT_STATE),
+                count_state=DoFn.StateParam(COUNT_STATE),
+                expiry_timer=DoFn.TimerParam(EXPIRY_TIMER)):
+      # Allowed lateness not supported in Python SDK
+      # https://beam.apache.org/documentation/programming-guide/#watermarks-and-late-data
+      expiry_timer.set(window.end)
+      element_state.add(element)
+      count_state.add(1)
+      count = count_state.read()
+      if count >= batch_size:
+        batch = [element for element in element_state.read()]
+        yield batch
+        element_state.clear()
+        count_state.clear()
+
+    @on_timer(EXPIRY_TIMER)
+    def expiry(self, element_state=DoFn.StateParam(ELEMENT_STATE),
+               count_state=DoFn.StateParam(COUNT_STATE)):
+      batch = [element for element in element_state.read()]
+      if batch:
+        yield batch
+        element_state.clear()
+        count_state.clear()
+
+  return _GroupIntoBatchesDoFn()
+
+
 class ToString(object):
   """
   PTransform for converting a PCollection element, KV or PCollection Iterable
@@ -682,11 +759,11 @@ class ToString(object):
     by the specific delimiter and the value.
     """
 
-    def __init__(self, delimiter=None, **kwargs):
+    def __init__(self, delimiter=None):
       self.delimiter = delimiter or ","
 
     def expand(self, pcoll):
-      input_type = typehints.KV[typehints.Any, typehints.Any]
+      input_type = typing.Tuple[typing.Any, typing.Any]
       output_type = str
       return (pcoll | ('%s:KeyVaueToString' % self.label >> (Map(
           lambda x: "{}{}{}".format(x[0], self.delimiter, x[1])))
@@ -698,7 +775,7 @@ class ToString(object):
     Transforms each element of the PCollection to a string.
     """
 
-    def __init__(self, delimiter=None, **kwargs):
+    def __init__(self, delimiter=None):
       self.delimiter = delimiter or ","
 
     def expand(self, pcoll):
@@ -715,11 +792,11 @@ class ToString(object):
     string. There is no trailing delimiter.
     """
 
-    def __init__(self, delimiter=None, **kwargs):
+    def __init__(self, delimiter=None):
       self.delimiter = delimiter or ","
 
     def expand(self, pcoll):
-      input_type = typehints.Iterable[typehints.Any]
+      input_type = typing.Iterable[typing.Any]
       output_type = str
       return (pcoll | ('%s:IterablesToString' % self.label >> (
           Map(lambda x: self.delimiter.join(str(_x) for _x in x)))
@@ -759,8 +836,8 @@ class Reify(object):
     def expand(self, pcoll):
       return pcoll | ParDo(self.add_window_info)
 
-  @typehints.with_input_types(typehints.KV[K, V])
-  @typehints.with_output_types(typehints.KV[K, V])
+  @typehints.with_input_types(typing.Tuple[K, V])
+  @typehints.with_output_types(typing.Tuple[K, V])
   class TimestampInValue(PTransform):
     """PTransform to wrap the Value in a KV pair in a TimestampedValue with
     the element's associated timestamp."""
@@ -773,8 +850,8 @@ class Reify(object):
     def expand(self, pcoll):
       return pcoll | ParDo(self.add_timestamp_info)
 
-  @typehints.with_input_types(typehints.KV[K, V])
-  @typehints.with_output_types(typehints.KV[K, V])
+  @typehints.with_input_types(typing.Tuple[K, V])
+  @typehints.with_output_types(typing.Tuple[K, V])
   class WindowInValue(PTransform):
     """PTransform to convert the Value in a KV pair into a tuple of
     (value, timestamp, window), with the whole element being wrapped inside a

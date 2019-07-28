@@ -22,7 +22,13 @@ import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.Sta
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import org.apache.beam.sdk.extensions.sql.impl.utils.CalciteUtils;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMultimap;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.CallImplementor;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.NullPolicy;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.ReflectiveCallNotNullImplementor;
@@ -35,7 +41,6 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Function
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.ImplementableFunction;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.ScalarFunction;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlOperatorBinding;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableMultimap;
 
 /**
  * Beam-customized version from {@link org.apache.calcite.schema.impl.ScalarFunctionImpl}, to
@@ -117,10 +122,61 @@ public class ScalarFunctionImpl extends UdfImplReflectiveFunctionBase
     return implementor;
   }
 
-  private static CallImplementor createImplementor(final Method method) {
+  /**
+   * Version of {@link ReflectiveCallNotNullImplementor} that does parameter conversion for Beam
+   * UDFs.
+   */
+  private static class ScalarReflectiveCallNotNullImplementor
+      extends ReflectiveCallNotNullImplementor {
+    ScalarReflectiveCallNotNullImplementor(Method method) {
+      super(method);
+    }
+
+    private static List<Expression> translate(List<Type> types, List<Expression> expressions) {
+      Preconditions.checkArgument(
+          types.size() == expressions.size(), "types.size() != expressions.size()");
+
+      final List<Expression> translated = new ArrayList<>();
+      for (int i = 0; i < expressions.size(); i++) {
+        translated.add(translate(types.get(i), expressions.get(i)));
+      }
+
+      return translated;
+    }
+
+    private static Expression translate(Type type, Expression expression) {
+      // NB: base class is called ReflectiveCallNotNullImplementor, but nulls are possible
+      //
+      // Calcite infers our UDF parameters as nullable, and WILL pass nullable expressions to this
+      // method. We could revisit this by explicitly asking users to add @Nullable annotation
+      // to UDF parameters, and not treating them as nullable by default, and then we can better
+      // determine if expression is possibly nullable by using reflection.
+
+      if (type == byte[].class && expression.type == ByteString.class) {
+        return Expressions.condition(
+            Expressions.equal(expression, Expressions.constant(null)),
+            Expressions.constant(null),
+            Expressions.call(expression, "getBytes"));
+      }
+
+      return expression;
+    }
+
+    @Override
+    public Expression implement(
+        RexToLixTranslator translator, RexCall call, List<Expression> translatedOperands) {
+      final List<Expression> translated =
+          translate(Arrays.asList(method.getParameterTypes()), translatedOperands);
+
+      // delegate to the underlying implementation to do the rest of translations
+      return super.implement(translator, call, translated);
+    }
+  }
+
+  private static CallImplementor createImplementor(Method method) {
     final NullPolicy nullPolicy = getNullPolicy(method);
     return RexImpTable.createImplementor(
-        new ReflectiveCallNotNullImplementor(method), nullPolicy, false);
+        new ScalarReflectiveCallNotNullImplementor(method), nullPolicy, false);
   }
 
   private static NullPolicy getNullPolicy(Method m) {

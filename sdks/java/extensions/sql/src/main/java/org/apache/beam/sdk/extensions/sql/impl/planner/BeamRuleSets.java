@@ -25,6 +25,8 @@ import org.apache.beam.sdk.extensions.sql.impl.rule.BeamBasicAggregationRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamCalcRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamEnumerableConverterRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamIntersectRule;
+import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinAssociateRule;
+import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinPushThroughJoinRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamMinusRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamSortRule;
@@ -45,6 +47,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.Filte
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.FilterProjectTransposeRule;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.FilterSetOpTransposeRule;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.FilterToCalcRule;
+import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.JoinCommuteRule;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.JoinPushExpressionsRule;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.ProjectCalcMergeRule;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.ProjectFilterTransposeRule;
@@ -58,7 +61,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.Union
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.rules.UnionToDistinctRule;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSet;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSets;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
 
 /**
  * {@link RuleSet} used in {@code BeamQueryPlanner}. It translates a standard Calcite {@link
@@ -103,6 +106,10 @@ public class BeamRuleSets {
 
           // join rules
           JoinPushExpressionsRule.INSTANCE,
+          JoinCommuteRule.INSTANCE,
+          BeamJoinAssociateRule.INSTANCE,
+          BeamJoinPushThroughJoinRule.RIGHT,
+          BeamJoinPushThroughJoinRule.LEFT,
 
           // remove union with only a single child
           UnionEliminatorRule.INSTANCE,

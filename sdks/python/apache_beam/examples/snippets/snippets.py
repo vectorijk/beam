@@ -33,8 +33,10 @@ from __future__ import absolute_import
 from __future__ import division
 
 import argparse
+import base64
 from builtins import object
 from builtins import range
+from decimal import Decimal
 
 from past.builtins import unicode
 
@@ -751,22 +753,22 @@ class CountingSource(iobase.BoundedSource):
     return OffsetRangeTracker(start_position, stop_position)
 
   def read(self, range_tracker):
-    for i in range(self._count):
+    for i in range(range_tracker.start_position(),
+                   range_tracker.stop_position()):
       if not range_tracker.try_claim(i):
         return
       self.records_read.inc()
       yield i
 
-  def split(self, desired_bundle_size, start_position=None,
-            stop_position=None):
+  def split(self, desired_bundle_size, start_position=None, stop_position=None):
     if start_position is None:
       start_position = 0
     if stop_position is None:
       stop_position = self._count
 
     bundle_start = start_position
-    while bundle_start < self._count:
-      bundle_stop = max(self._count, bundle_start + desired_bundle_size)
+    while bundle_start < stop_position:
+      bundle_stop = min(stop_position, bundle_start + desired_bundle_size)
       yield iobase.SourceBundle(weight=(bundle_stop - bundle_start),
                                 source=self,
                                 start_position=bundle_start,
@@ -1080,6 +1082,22 @@ def model_bigqueryio(p, write_project='', write_dataset='', write_table=''):
       datasetId='samples',
       tableId='weather_stations')
   # [END model_bigqueryio_table_spec_object]
+
+  # [START model_bigqueryio_data_types]
+  bigquery_data = [{
+      'string': 'abc',
+      'bytes': base64.b64encode(b'\xab\xac'),
+      'integer': 5,
+      'float': 0.5,
+      'numeric': Decimal('5'),
+      'boolean': True,
+      'timestamp': '2018-12-31 12:44:31.744957 UTC',
+      'date': '2018-12-31',
+      'time': '12:44:31',
+      'datetime': '2018-12-31T12:44:31',
+      'geography': 'POINT(30 10)'
+  }]
+  # [END model_bigqueryio_data_types]
 
   # [START model_bigqueryio_read_table]
   max_temperatures = (

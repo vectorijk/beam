@@ -18,8 +18,8 @@
 package org.apache.beam.runners.spark.translation;
 
 import static org.apache.beam.runners.spark.translation.TranslationUtils.canAvoidRddSerialization;
-import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkArgument;
-import static org.apache.beam.vendor.guava.v20_0.com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkState;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -63,9 +63,9 @@ import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.PValue;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.base.Optional;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.FluentIterable;
-import org.apache.beam.vendor.guava.v20_0.com.google.common.collect.Lists;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Optional;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.FluentIterable;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Lists;
 import org.apache.spark.HashPartitioner;
 import org.apache.spark.Partitioner;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -131,16 +131,16 @@ public final class TransformTranslator {
             WindowedValue.FullWindowedValueCoder.of(coder.getValueCoder(), windowFn.windowCoder());
 
         JavaRDD<WindowedValue<KV<K, Iterable<V>>>> groupedByKey;
+        Partitioner partitioner = getPartitioner(context);
         if (windowingStrategy.getWindowFn().isNonMerging()
             && windowingStrategy.getTimestampCombiner() == TimestampCombiner.END_OF_WINDOW) {
           // we can have a memory sensitive translation for non-merging windows
           groupedByKey =
               GroupNonMergingWindowsFunctions.groupByKeyAndWindow(
-                  inRDD, keyCoder, coder.getValueCoder(), windowingStrategy);
+                  inRDD, keyCoder, coder.getValueCoder(), windowingStrategy, partitioner);
         } else {
 
           // --- group by key only.
-          Partitioner partitioner = getPartitioner(context);
           JavaRDD<KV<K, Iterable<WindowedValue<V>>>> groupedByKeyOnly =
               GroupCombineFunctions.groupByKeyOnly(inRDD, keyCoder, wvCoder, partitioner);
 
@@ -317,8 +317,8 @@ public final class TransformTranslator {
         JavaRDD<WindowedValue<KV<K, OutputT>>> outRdd =
             accumulatePerKey
                 .flatMapValues(sparkCombineFn::extractOutput)
-                .map(TranslationUtils.fromPairFunction())
-                .map(TranslationUtils.toKVByWindowInValue());
+                .map(new TranslationUtils.FromPairFunction())
+                .map(new TranslationUtils.ToKVByWindowInValueFunction<>());
 
         context.putDataset(transform, new BoundedDataset<>(outRdd));
       }

@@ -45,9 +45,7 @@ KNOWN_COMPOSITES = frozenset([
 
 COMBINE_URNS = frozenset([
     common_urns.composites.COMBINE_PER_KEY.urn,
-    common_urns.combine_components.COMBINE_PGBKCV.urn,
-    common_urns.combine_components.COMBINE_MERGE_ACCUMULATORS.urn,
-    common_urns.combine_components.COMBINE_EXTRACT_OUTPUTS.urn])
+])
 
 PAR_DO_URNS = frozenset([
     common_urns.primitives.PAR_DO.urn,
@@ -55,7 +53,8 @@ PAR_DO_URNS = frozenset([
     common_urns.sdf_components.SPLIT_RESTRICTION.urn,
     common_urns.sdf_components.SPLIT_AND_SIZE_RESTRICTIONS.urn,
     common_urns.sdf_components.PROCESS_SIZED_ELEMENTS_AND_RESTRICTIONS.urn,
-    common_urns.sdf_components.PROCESS_ELEMENTS.urn])
+    common_urns.sdf_components.PROCESS_ELEMENTS.urn,
+])
 
 IMPULSE_BUFFER = b'impulse'
 
@@ -764,14 +763,14 @@ def expand_sdf(stages, context):
         main_input_id = transform.inputs[main_input_tag]
         element_coder_id = context.components.pcollections[
             main_input_id].coder_id
-        # KV[element, restriction]
+        # Tuple[element, restriction]
         paired_coder_id = context.add_or_get_coder_id(
             beam_runner_api_pb2.Coder(
                 spec=beam_runner_api_pb2.FunctionSpec(
                     urn=common_urns.coders.KV.urn),
                 component_coder_ids=[element_coder_id,
                                      pardo_payload.restriction_coder_id]))
-        # KV[KV[element, restriction], double]
+        # Tuple[Tuple[element, restriction], double]
         sized_coder_id = context.add_or_get_coder_id(
             beam_runner_api_pb2.Coder(
                 spec=beam_runner_api_pb2.FunctionSpec(
@@ -1013,9 +1012,6 @@ def greedily_fuse(stages, pipeline_context):
         consumers_by_pcoll[input].append(stage)
       for output in transform.outputs.values():
         producers_by_pcoll[output] = stage
-
-  logging.debug('consumers\n%s', consumers_by_pcoll)
-  logging.debug('producers\n%s', producers_by_pcoll)
 
   # Now try to fuse away all pcollections.
   for pcoll, producer in producers_by_pcoll.items():
@@ -1316,4 +1312,5 @@ def create_buffer_id(name, kind='materialize'):
 
 
 def split_buffer_id(buffer_id):
+  """A buffer id is "kind:pcollection_id". Split into (kind, pcoll_id). """
   return buffer_id.decode('utf-8').split(':', 1)
