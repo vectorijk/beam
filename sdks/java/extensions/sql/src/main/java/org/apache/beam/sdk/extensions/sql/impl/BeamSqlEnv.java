@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl;
 
-import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.Preconditions.checkNotNull;
 
 import java.lang.reflect.Method;
 import java.sql.SQLException;
@@ -48,7 +48,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.RelOptUtil
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Function;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlExecutableStatement;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSet;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Strings;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.Strings;
 
 /**
  * Contains the metadata of tables/UDF functions, and exposes APIs to

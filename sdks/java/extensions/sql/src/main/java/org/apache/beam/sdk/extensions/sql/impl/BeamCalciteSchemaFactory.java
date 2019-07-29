@@ -36,7 +36,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaFa
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaPlus;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaVersion;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Table;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableMap;
 
 /**
  * Factory classes that Calcite uses to create initial schema for JDBC connection.

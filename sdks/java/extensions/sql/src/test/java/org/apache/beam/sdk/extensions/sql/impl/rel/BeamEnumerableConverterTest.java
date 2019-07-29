@@ -49,7 +49,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDat
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexBuilder;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
-import org.apache.beam.vendor.guava.v20_0.com.google.thirdparty.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;

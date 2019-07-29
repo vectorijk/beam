@@ -47,10 +47,10 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.runtime.SqlFunc
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlKind;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlOperator;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.fun.SqlStdOperatorTable;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Joiner;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Lists;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Ordering;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.Joiner;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.Lists;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.Ordering;
 import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;

@@ -68,8 +68,8 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexInputRef
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexNode;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.Pair;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Optional;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.Optional;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
 
 /**
  * {@code BeamRelNode} to replace a {@code Join} node.

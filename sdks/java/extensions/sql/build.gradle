@@ -68,7 +68,7 @@ dependencies {
   provided project(":sdks:java:io:google-cloud-platform")
   provided library.java.kafka_clients
   shadowTest library.java.vendored_calcite_1_19_0
-  shadowTest library.java.vendored_guava_20_0
+  shadowTest library.java.vendored_guava_26_0_jre
   shadowTest library.java.junit
   shadowTest library.java.hamcrest_core
   shadowTest library.java.hamcrest_library
@@ -85,6 +85,7 @@ dependencies {
   permitUsedUndeclared "com.google.code.findbugs:jsr305:3.0.2"
   permitUnusedDeclared "net.jcip:jcip-annotations:1.0"
   permitUnusedDeclared "com.google.guava:guava:20.0"
+  permitUnusedDeclared library.java.vendored_guava_26_0_jre
 }
 
 // Copy Caclcite templates and our own template into the build directory

@@ -20,7 +20,7 @@ package org.apache.beam.sdk.extensions.sql.impl.rel;
 import static org.apache.beam.sdk.schemas.Schema.FieldType;
 import static org.apache.beam.sdk.schemas.Schema.TypeName;
 import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.util.DateTimeUtils.MILLIS_PER_DAY;
-import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.Preconditions.checkArgument;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -74,7 +74,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.validate.Sq
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.BuiltInMethod;
 import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.commons.compiler.CompileException;
 import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.janino.ScriptEvaluator;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableMap;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.ReadableInstant;

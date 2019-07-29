@@ -27,7 +27,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlOperator
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlSpecialOperator;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlWriter;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.parser.SqlParserPos;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
 
 /** Parse tree for column. */
 public class SqlColumnDeclaration extends SqlCall {

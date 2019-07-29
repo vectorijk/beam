@@ -37,8 +37,8 @@ vendorJava(
     "org.apache.calcite": "${prefix}.org.apache.calcite",
 
     // Calcite has Guava on its API surface
-    "com.google.common": "org.apache.beam.vendor.guava.v20_0.com.google.thirdparty",
-    "com.google.thirdparty": "org.apache.beam.vendor.guava.v20_0.com.google.thirdparty",
+    "com.google.common": "org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty",
+    "com.google.thirdparty": "org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty",
 
     // Making this self-contained, includes Calcite's dependencies
     "org.apache.commons": "${prefix}.org.apache.beam",
