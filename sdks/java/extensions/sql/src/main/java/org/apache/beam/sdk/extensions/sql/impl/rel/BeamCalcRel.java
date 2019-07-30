@@ -75,6 +75,7 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.BuiltInMet
 import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.commons.compiler.CompileException;
 import org.apache.beam.vendor.calcite.v1_19_0.org.codehaus.janino.ScriptEvaluator;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.Maps;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.ReadableInstant;
@@ -418,6 +419,9 @@ public class BeamCalcRel extends Calc implements BeamRelNode {
                 Expressions.equal(field, Expressions.constant(null)),
                 Expressions.constant(null),
                 Expressions.call(WrappedList.class, "of", field));
+      } else if (fromType.getTypeName().isMapType()
+          && fromType.getMapValueType().getTypeName().isCompositeType()) {
+        field = nullOr(field, Expressions.call(WrappedList.class, "ofMapValues", field));
       } else if (fromType.getTypeName() == TypeName.BYTES) {
         field =
             Expressions.condition(
@@ -484,6 +488,10 @@ public class BeamCalcRel extends Calc implements BeamRelNode {
 
     public static List<Object> of(Row row) {
       return new WrappedList(row.getValues());
+    }
+
+    public static Map<Object, List> ofMapValues(Map<Object, Row> map) {
+      return Maps.transformValues(map, val -> (val == null) ? null : WrappedList.of(val));
     }
 
     @Override

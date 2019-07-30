@@ -39,7 +39,6 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDat
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexNode;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.ModifiableTable;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.SchemaPlus;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Statistic;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.TranslatableTable;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableMap;
 
@@ -81,7 +80,7 @@ public class BeamCalciteTable extends AbstractQueryableTable
   }
 
   @Override
-  public Statistic getStatistic() {
+  public BeamTableStatistics getStatistic() {
     /*
      Changing class loader is required for the JDBC path. It is similar to what done in
      {@link BeamEnumerableConverter#toRowList} and {@link BeamEnumerableConverter#toEnumerable }.
