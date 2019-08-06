@@ -110,10 +110,10 @@ task copyFmppTemplatesFromCalciteCore(type: Copy) {
     line ->
       line.replace('import static org.apache.calcite.', 'import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.')
   }
-  filter{
-    line ->
-      line.replace('import org.slf4j.Logger', 'import org.apache.beam.vendor.calcite.v1_19_0.org.slf4j.Logger')
-  }
+//  filter{
+//    line ->
+//      line.replace('import org.slf4j.Logger', 'import org.apache.beam.vendor.calcite.v1_19_0.org.slf4j.Logger')
+//  }
 }
 
 // Generate the FMPP sources from the FMPP templates.
