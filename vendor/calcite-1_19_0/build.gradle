@@ -27,35 +27,34 @@ def calcite_version = "1.19.0"
 def avatica_version = "1.15.0"
 def prefix = "org.apache.beam.vendor.calcite.v1_19_0"
 
+List<String> packagesToRelocate = [
+  "com.esri",
+  "com.google.common",
+  "com.google.thirdparty",
+  "com.fasterxml",
+  "com.jayway",
+  "com.yahoo",
+  "org.apache.calcite",
+  "org.apache.commons",
+  "org.apache.http",
+  "org.codehaus",
+  "org.pentaho",
+  "org.yaml"
+]
+
 vendorJava(
   dependencies: [
     "org.apache.calcite:calcite-core:$calcite_version",
     "org.apache.calcite:calcite-linq4j:$calcite_version",
     "org.apache.calcite.avatica:avatica-core:$avatica_version",
+    "org.slf4j:slf4j-api:1.7.25"
   ],
-  relocations: [
-    "org.apache.calcite": "${prefix}.org.apache.calcite",
-
-    // Calcite has Guava on its API surface
-    "com.google.common": "org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty",
-    "com.google.thirdparty": "org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty",
-
-    // Making this self-contained, includes Calcite's dependencies
-    "org.apache.commons": "${prefix}.org.apache.beam",
-    "com.esri": "${prefix}.com.esri",
-    "com.fasterxml": "${prefix}.com.fasterxml",
-    "com.yahoo": "${prefix}.com.yahoo",
-    "com.jayway": "${prefix}.com.jayway",
-    "org.pentaho": "${prefix}.org.pentaho",
-    "org.codehaus": "${prefix}.org.codehaus",
-    "org.slf4j": "${prefix}.org.slf4j",
-    "org.apache.http": "${prefix}.org.apache.http",
-    "org.yaml": "${prefix}.org.yaml",
-    "org.codehaus.commons.compiler.properties": "${prefix}.org.codehaus.commons.compiler.properties"
-      // Protobuf is in here too...
-  ],
+  relocations: packagesToRelocate.collectEntries {
+    [ (it): "${prefix}.${it}" ]
+  },
   exclusions: [
-    "com/google/protobuf/**"
+    "com/google/protobuf/**",
+    "org/slf4j/**"
   ],
   groupId: group,
   artifactId: "beam-vendor-calcite-1_19_0",
