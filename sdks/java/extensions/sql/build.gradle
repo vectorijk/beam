@@ -22,12 +22,16 @@ plugins {
   id 'org.apache.beam.module'
   id 'ca.coglinc.javacc'
 }
-
 applyJavaNature(
   // javacc generated code produces lint warnings
   disableLintWarnings: ['dep-ann'],
   testShadowJar: true,
-  shadowClosure: {})
+  enableStrictDependencies: true,
+  shadowClosure: {
+    dependencies {
+      include(dependency(library.java.vendored_calcite_1_19_0))
+    }
+})
 
 description = "Apache Beam :: SDKs :: Java :: Extensions :: SQL"
 ext.summary = "Beam SQL provides a new interface to generate a Beam pipeline from SQL statement"
@@ -46,19 +50,19 @@ dependencies {
   fmppTask "org.freemarker:freemarker:2.3.28"
   fmppTemplates library.java.vendored_calcite_1_19_0
   shadow library.java.vendored_calcite_1_19_0
-//  shadow library.java.vendored_guava_26_0_jre // Internal use
-//  compile library.java.guava // Interfaces with Calcite use this
+  shadow library.java.vendored_guava_26_0_jre // Internal use
+  compile library.java.guava // Interfaces with Calcite use this
   shadow project(path: ":sdks:java:core", configuration: "shadow")
   shadow project(":sdks:java:extensions:join-library")
-//  shadow library.java.slf4j_api
-//  shadow library.java.commons_codec
-//  shadow library.java.commons_csv
-//  shadow library.java.commons_lang3
-//  shadow library.java.jackson_databind
-//  shadow library.java.jackson_dataformat_yaml
+  shadow library.java.slf4j_api
+  shadow library.java.commons_codec
+  shadow library.java.commons_csv
+  shadow library.java.commons_lang3
+  shadow library.java.jackson_databind
+  shadow library.java.jackson_dataformat_yaml
   shadow library.java.joda_time
   shadow "com.alibaba:fastjson:1.2.49"
-//  shadow "com.jayway.jsonpath:json-path:2.4.0"
+  shadow "com.jayway.jsonpath:json-path:2.4.0"
   shadow project(path: ":runners:direct-java", configuration: "shadow")
   provided project(":sdks:java:io:kafka")
   provided project(":sdks:java:io:google-cloud-platform")
@@ -80,8 +84,8 @@ dependencies {
   // but it doesn't matter which is used
   permitUsedUndeclared "com.google.code.findbugs:jsr305:3.0.2"
   permitUnusedDeclared "net.jcip:jcip-annotations:1.0"
-//  permitUnusedDeclared "com.google.guava:guava:20.0"
-//  permitUnusedDeclared library.java.vendored_guava_26_0_jre
+  permitUnusedDeclared "com.google.guava:guava:20.0"
+  permitUnusedDeclared library.java.vendored_guava_26_0_jre
 }
 
 // Copy Caclcite templates and our own template into the build directory
