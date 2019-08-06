@@ -19,6 +19,7 @@ package org.apache.beam.sdk.extensions.sql.impl;
 
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamLogicalConvention;
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamRelNode;
+import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.collect.ImmutableList;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.plan.Contexts;
@@ -54,7 +55,6 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RelConver
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSet;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.ValidationException;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.BuiltInMethod;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

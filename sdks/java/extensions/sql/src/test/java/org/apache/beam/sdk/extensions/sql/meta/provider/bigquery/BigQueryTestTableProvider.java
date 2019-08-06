@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.sql.meta.provider.bigquery;
 
-import static org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.MoreObjects.firstNonNull;
+import static org.apache.beam.vendor.calcite.v1_19_0.com.google.common.base.MoreObjects.firstNonNull;
 
 import java.util.HashMap;
 import java.util.Map;

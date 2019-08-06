@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl.transform.agg;
 
-import static org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.calcite.v1_19_0.com.google.common.base.Preconditions.checkArgument;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

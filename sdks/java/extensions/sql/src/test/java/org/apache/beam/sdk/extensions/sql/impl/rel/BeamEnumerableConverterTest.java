@@ -38,6 +38,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PDone;
 import org.apache.beam.sdk.values.POutput;
 import org.apache.beam.sdk.values.Row;
+import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.collect.ImmutableList;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.Enumerable;
@@ -49,7 +50,6 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDat
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexBuilder;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexLiteral;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;

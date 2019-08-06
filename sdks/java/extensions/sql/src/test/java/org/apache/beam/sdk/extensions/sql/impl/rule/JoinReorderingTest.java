@@ -31,6 +31,8 @@ import org.apache.beam.sdk.extensions.sql.meta.provider.test.TestTableProvider;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.values.Row;
+import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.collect.ImmutableMap;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.DataContext;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.EnumerableConvention;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.EnumerableRules;
@@ -66,8 +68,6 @@ import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.Programs;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSet;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.tools.RuleSets;
 import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.ImmutableBitSet;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableList;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableMap;
 import org.junit.Assert;
 import org.junit.Test;
 
