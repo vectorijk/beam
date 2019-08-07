@@ -31,6 +31,7 @@ List<String> packagesToRelocate = [
   "com.esri",
   "com.google.common",
   "com.google.thirdparty",
+  "com.google.protobuf",
   "com.fasterxml",
   "com.jayway",
   "com.yahoo",
@@ -47,13 +48,13 @@ vendorJava(
     "org.apache.calcite:calcite-core:$calcite_version",
     "org.apache.calcite:calcite-linq4j:$calcite_version",
     "org.apache.calcite.avatica:avatica-core:$avatica_version",
-    "org.slf4j:slf4j-api:1.7.25"
+    library.java.protobuf_java,
+    library.java.slf4j_api
   ],
   relocations: packagesToRelocate.collectEntries {
     [ (it): "${prefix}.${it}" ]
   },
   exclusions: [
-    "com/google/protobuf/**",
     "org/slf4j/**"
   ],
   groupId: group,
