@@ -33,7 +33,7 @@ import org.apache.beam.sdk.extensions.sql.meta.provider.bigquery.BigQueryTablePr
 import org.apache.beam.sdk.extensions.sql.meta.provider.pubsub.PubsubJsonTableProvider;
 import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTableProvider;
 import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.thirdparty.collect.ImmutableMap;
+import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.collect.ImmutableMap;
 
 /** Uses DataCatalog to get the source type and schema for a table. */
 public class DataCatalogTableProvider implements TableProvider {
