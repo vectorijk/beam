@@ -22,16 +22,7 @@ plugins {
   id 'org.apache.beam.module'
   id 'ca.coglinc.javacc'
 }
-applyJavaNature(
-  // javacc generated code produces lint warnings
-  disableLintWarnings: ['dep-ann'],
-  testShadowJar: true,
-  enableStrictDependencies: true,
-  shadowClosure: {
-    dependencies {
-      include(dependency(library.java.vendored_calcite_1_19_0))
-    }
-})
+applyJavaNature( disableLintWarnings: ['dep-ann'] )
 
 description = "Apache Beam :: SDKs :: Java :: Extensions :: SQL"
 ext.summary = "Beam SQL provides a new interface to generate a Beam pipeline from SQL statement"
@@ -49,39 +40,23 @@ dependencies {
   fmppTask "com.googlecode.fmpp-maven-plugin:fmpp-maven-plugin:1.0"
   fmppTask "org.freemarker:freemarker:2.3.28"
   fmppTemplates library.java.vendored_calcite_1_19_0
-  shadow library.java.vendored_calcite_1_19_0
-  shadow project(path: ":sdks:java:core", configuration: "shadow")
-  shadow project(":sdks:java:extensions:join-library")
-  shadow library.java.slf4j_api
-  shadow library.java.commons_codec
-  shadow library.java.commons_csv
-  shadow library.java.commons_lang3
-  shadow library.java.jackson_databind
-  shadow library.java.jackson_dataformat_yaml
-  shadow library.java.joda_time
-  shadow "com.alibaba:fastjson:1.2.49"
-  shadow "com.jayway.jsonpath:json-path:2.4.0"
-  shadow project(path: ":runners:direct-java", configuration: "shadow")
+  compile project(":sdks:java:core")
+  compile project(":sdks:java:extensions:join-library")
+  compile project(":runners:direct-java")
+  compile library.java.commons_csv
+  compile library.java.vendored_calcite_1_19_0
+  compile "com.alibaba:fastjson:1.2.49"
   provided project(":sdks:java:io:kafka")
   provided project(":sdks:java:io:google-cloud-platform")
   provided library.java.kafka_clients
-  shadowTest library.java.vendored_calcite_1_19_0
-  shadowTest library.java.vendored_guava_26_0_jre
-  shadowTest library.java.junit
-  shadowTest library.java.hamcrest_core
-  shadowTest library.java.hamcrest_library
-  shadowTest library.java.mockito_core
-  shadowTest library.java.quickcheck_core
-  shadowTestRuntimeClasspath library.java.slf4j_jdk14
-
-  // Dependencies that we don't directly reference
-  permitUnusedDeclared "com.jayway.jsonpath:json-path:2.4.0"
-  permitUnusedDeclared library.java.jackson_dataformat_yaml
-
-  // Dependencies where one or the other appears "used" depending on classpath,
-  // but it doesn't matter which is used
-  permitUsedUndeclared "com.google.code.findbugs:jsr305:3.0.2"
-  permitUnusedDeclared "net.jcip:jcip-annotations:1.0"
+  testCompile library.java.vendored_calcite_1_19_0
+  testCompile library.java.vendored_guava_26_0_jre
+  testCompile library.java.junit
+  testCompile library.java.hamcrest_core
+  testCompile library.java.hamcrest_library
+  testCompile library.java.mockito_core
+  testCompile library.java.quickcheck_core
+  testRuntimeClasspath library.java.slf4j_jdk14
 }
 
 // Copy Caclcite templates and our own template into the build directory
