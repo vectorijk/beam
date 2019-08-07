@@ -25,7 +25,7 @@ applyJavaNature()
 dependencies {
   compile library.java.grpc_google_cloud_datacatalog_v1beta1
   compile library.java.proto_google_cloud_datacatalog_v1beta1
-  provided project(path: ":sdks:java:extensions:sql", configuration: "shadow")
+  provided project(":sdks:java:extensions:sql")
 
   // For Data Catalog GRPC client
   provided library.java.grpc_all
