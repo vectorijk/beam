@@ -50,8 +50,6 @@ dependencies {
   fmppTask "org.freemarker:freemarker:2.3.28"
   fmppTemplates library.java.vendored_calcite_1_19_0
   shadow library.java.vendored_calcite_1_19_0
-  shadow library.java.vendored_guava_26_0_jre // Internal use
-  compile library.java.guava // Interfaces with Calcite use this
   shadow project(path: ":sdks:java:core", configuration: "shadow")
   shadow project(":sdks:java:extensions:join-library")
   shadow library.java.slf4j_api
@@ -84,8 +82,6 @@ dependencies {
   // but it doesn't matter which is used
   permitUsedUndeclared "com.google.code.findbugs:jsr305:3.0.2"
   permitUnusedDeclared "net.jcip:jcip-annotations:1.0"
-  permitUnusedDeclared "com.google.guava:guava:20.0"
-  permitUnusedDeclared library.java.vendored_guava_26_0_jre
 }
 
 // Copy Caclcite templates and our own template into the build directory
@@ -110,10 +106,6 @@ task copyFmppTemplatesFromCalciteCore(type: Copy) {
     line ->
       line.replace('import static org.apache.calcite.', 'import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.')
   }
-//  filter{
-//    line ->
-//      line.replace('import org.slf4j.Logger', 'import org.apache.beam.vendor.calcite.v1_19_0.org.slf4j.Logger')
-//  }
 }
 
 // Generate the FMPP sources from the FMPP templates.
