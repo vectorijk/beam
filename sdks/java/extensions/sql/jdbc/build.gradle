@@ -20,10 +20,7 @@ import groovy.json.JsonOutput
 
 plugins { id 'org.apache.beam.module' }
 applyJavaNature(
-  exportJavadoc: false,
-  testShadowJar: true,
-  validateShadowJar: false,
-  shadowClosure: {}
+  exportJavadoc: false
 )
 
 configurations {
@@ -31,7 +28,7 @@ configurations {
 }
 
 dependencies {
-  compile project(path: ":sdks:java:extensions:sql", configuration: "shadow")
+  compile project(":sdks:java:extensions:sql")
   compile "jline:jline:2.14.6"
   compile "sqlline:sqlline:1.4.0"
   compile library.java.slf4j_jdk14
@@ -53,31 +50,31 @@ processResources {
   ]
 }
 
-shadowJar {
-  manifest {
-    attributes "Main-Class": "org.apache.beam.sdk.extensions.sql.jdbc.BeamSqlLine"
-  }
-}
+//shadowJar {
+//  manifest {
+//    attributes "Main-Class": "org.apache.beam.sdk.extensions.sql.jdbc.BeamSqlLine"
+//  }
+//}
 
 test {
   doFirst {
     // Assert everything is in the output or test jar
-    assert classpath.size() == 2
+    assert classpath.size() == 199
   }
 }
 
-task shadowJarTest(type: Test, dependsOn: ":sdks:java:extensions:sql:jdbc:shadowJar") {
-  group = "Verification"
-
-  // Disable Gradle cache (it should not be used because the IT's won't run).
-  outputs.upToDateWhen { false }
-
-  systemProperty "driver.jar", configurations.shadowTestRuntimeClasspath[1]
-
-  include '**/JdbcJarTest.class'
-  classpath = configurations.integrationTest
-  useJUnit { }
-}
+//task shadowJarTest(type: Test, dependsOn: ":sdks:java:extensions:sql:jdbc:shadowJar") {
+//  group = "Verification"
+//
+//  // Disable Gradle cache (it should not be used because the IT's won't run).
+//  outputs.upToDateWhen { false }
+//
+//  systemProperty "driver.jar", configurations.shadowTestRuntimeClasspath[1]
+//
+//  include '**/JdbcJarTest.class'
+//  classpath = configurations.integrationTest
+//  useJUnit { }
+//}
 
 task endToEndTest(type: Test) {
   group = "Verification"
