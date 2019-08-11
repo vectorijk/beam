@@ -59,7 +59,7 @@ dependencies {
   testRuntimeClasspath library.java.slf4j_jdk14
 }
 
-// Copy Caclcite templates and our own template into the build directory
+// Copy Calcite templates and our own template into the build directory
 // so we have one location for the FMPP task to parse.
 task copyFmppTemplatesFromSrc(type: Copy) {
   from "src/main/codegen"

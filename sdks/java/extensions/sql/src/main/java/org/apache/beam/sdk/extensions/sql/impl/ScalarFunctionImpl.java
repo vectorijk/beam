@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl;
 
-import static org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.util.Static.RESOURCE;
+import static org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.util.Static.RESOURCE;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -27,25 +27,25 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.apache.beam.sdk.extensions.sql.impl.utils.CalciteUtils;
-import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.base.Preconditions;
-import org.apache.beam.vendor.calcite.v1_19_0.com.google.common.collect.ImmutableMultimap;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.CallImplementor;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.NullPolicy;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.ReflectiveCallNotNullImplementor;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.RexImpTable;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.adapter.enumerable.RexToLixTranslator;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.avatica.util.ByteString;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.function.SemiStrict;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.function.Strict;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.tree.Expression;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.linq4j.tree.Expressions;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataType;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.rex.RexCall;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.Function;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.ImplementableFunction;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.schema.ScalarFunction;
-import org.apache.beam.vendor.calcite.v1_19_0.org.apache.calcite.sql.SqlOperatorBinding;
+import org.apache.beam.vendor.calcite.v1_20_0.com.google.common.base.Preconditions;
+import org.apache.beam.vendor.calcite.v1_20_0.com.google.common.collect.ImmutableMultimap;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.adapter.enumerable.CallImplementor;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.adapter.enumerable.NullPolicy;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.adapter.enumerable.ReflectiveCallNotNullImplementor;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.adapter.enumerable.RexImpTable;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.adapter.enumerable.RexToLixTranslator;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.avatica.util.ByteString;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.linq4j.function.SemiStrict;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.linq4j.function.Strict;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.linq4j.tree.Expression;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.linq4j.tree.Expressions;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.rel.type.RelDataType;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.rex.RexCall;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.schema.Function;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.schema.ImplementableFunction;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.schema.ScalarFunction;
+import org.apache.beam.vendor.calcite.v1_20_0.org.apache.calcite.sql.SqlOperatorBinding;
 
 /**
  * Beam-customized version from {@link org.apache.calcite.schema.impl.ScalarFunctionImpl}, to
