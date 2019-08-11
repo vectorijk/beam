@@ -535,7 +535,7 @@ class BeamModulePlugin implements Plugin<Project> {
         stax2_api                                   : "org.codehaus.woodstox:stax2-api:3.1.4",
         vendored_grpc_1_21_0                        : "org.apache.beam:beam-vendor-grpc-1_21_0:0.1",
         vendored_guava_26_0_jre                     : "org.apache.beam:beam-vendor-guava-26_0-jre:0.1",
-        vendored_calcite_1_19_0                     : "org.apache.beam:beam-vendor-calcite-1_19_0:0.1-SNAPSHOT",
+        vendored_calcite_1_20_0                     : "org.apache.beam:beam-vendor-calcite-1_20_0:0.1-SNAPSHOT",
         woodstox_core_asl                           : "org.codehaus.woodstox:woodstox-core-asl:4.4.1",
         zstd_jni                                    : "com.github.luben:zstd-jni:1.3.8-3",
         quickcheck_core                             : "com.pholser:junit-quickcheck-core:$quickcheck_version",
