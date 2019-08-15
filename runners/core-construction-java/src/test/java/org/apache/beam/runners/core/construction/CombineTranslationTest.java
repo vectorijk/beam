@@ -15,18 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.runners.core.construction;
 
-import static com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkState;
 import static org.junit.Assert.assertEquals;
 
-import com.google.common.collect.ImmutableList;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.beam.model.pipeline.v1.RunnerApi;
 import org.apache.beam.model.pipeline.v1.RunnerApi.CombinePayload;
-import org.apache.beam.model.pipeline.v1.RunnerApi.Environment;
 import org.apache.beam.sdk.Pipeline.PipelineVisitor;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderRegistry;
@@ -46,6 +43,7 @@ import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.util.SerializableUtils;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -82,13 +80,13 @@ public class CombineTranslationTest {
     public void testToProto() throws Exception {
       PCollection<Integer> input = pipeline.apply(Create.of(1, 2, 3));
       input.apply(Combine.globally(combineFn));
-      final AtomicReference<AppliedPTransform<?, ?, Combine.PerKey<?, ?, ?>>> combine =
+      final AtomicReference<AppliedPTransform<?, ?, Combine.Globally<?, ?>>> combine =
           new AtomicReference<>();
       pipeline.traverseTopologically(
           new PipelineVisitor.Defaults() {
             @Override
             public void leaveCompositeTransform(Node node) {
-              if (node.getTransform() instanceof Combine.PerKey) {
+              if (node.getTransform() instanceof Combine.Globally) {
                 checkState(combine.get() == null);
                 combine.set((AppliedPTransform) node.toAppliedPTransform(getPipeline()));
               }
@@ -98,8 +96,10 @@ public class CombineTranslationTest {
       assertEquals(combineFn, combine.get().getTransform().getFn());
 
       SdkComponents sdkComponents = SdkComponents.create();
-      sdkComponents.registerEnvironment(Environment.newBuilder().setUrl("java").build());
-      CombinePayload combineProto = CombineTranslation.toProto(combine.get(), sdkComponents);
+      sdkComponents.registerEnvironment(Environments.createDockerEnvironment("java"));
+      CombinePayload combineProto =
+          CombineTranslation.CombineGloballyPayloadTranslator.payloadForCombineGlobally(
+              (AppliedPTransform) combine.get(), sdkComponents);
       RunnerApi.Components componentsProto = sdkComponents.toComponents();
 
       assertEquals(
@@ -123,13 +123,13 @@ public class CombineTranslationTest {
       PCollection<Integer> input = pipeline.apply(Create.of(1, 2, 3));
       CombineFnWithContext<Integer, int[], Integer> combineFn = new TestCombineFnWithContext();
       input.apply(Combine.globally(combineFn).withoutDefaults());
-      final AtomicReference<AppliedPTransform<?, ?, Combine.PerKey<?, ?, ?>>> combine =
+      final AtomicReference<AppliedPTransform<?, ?, Combine.Globally<?, ?>>> combine =
           new AtomicReference<>();
       pipeline.traverseTopologically(
           new PipelineVisitor.Defaults() {
             @Override
             public void leaveCompositeTransform(Node node) {
-              if (node.getTransform() instanceof Combine.PerKey) {
+              if (node.getTransform() instanceof Combine.Globally) {
                 checkState(combine.get() == null);
                 combine.set((AppliedPTransform) node.toAppliedPTransform(getPipeline()));
               }
@@ -139,8 +139,10 @@ public class CombineTranslationTest {
       assertEquals(combineFn, combine.get().getTransform().getFn());
 
       SdkComponents sdkComponents = SdkComponents.create();
-      sdkComponents.registerEnvironment(Environment.newBuilder().setUrl("java").build());
-      CombinePayload combineProto = CombineTranslation.toProto(combine.get(), sdkComponents);
+      sdkComponents.registerEnvironment(Environments.createDockerEnvironment("java"));
+      CombinePayload combineProto =
+          CombineTranslation.CombineGloballyPayloadTranslator.payloadForCombineGlobally(
+              (AppliedPTransform) combine.get(), sdkComponents);
       RunnerApi.Components componentsProto = sdkComponents.toComponents();
 
       assertEquals(
@@ -170,13 +172,13 @@ public class CombineTranslationTest {
           };
 
       input.apply(Combine.globally(combineFn).withSideInputs(sideInputs).withoutDefaults());
-      final AtomicReference<AppliedPTransform<?, ?, Combine.PerKey<?, ?, ?>>> combine =
+      final AtomicReference<AppliedPTransform<?, ?, Combine.Globally<?, ?>>> combine =
           new AtomicReference<>();
       pipeline.traverseTopologically(
           new PipelineVisitor.Defaults() {
             @Override
             public void leaveCompositeTransform(Node node) {
-              if (node.getTransform() instanceof Combine.PerKey) {
+              if (node.getTransform() instanceof Combine.Globally) {
                 checkState(combine.get() == null);
                 combine.set((AppliedPTransform) node.toAppliedPTransform(getPipeline()));
               }
@@ -184,8 +186,10 @@ public class CombineTranslationTest {
           });
 
       SdkComponents sdkComponents = SdkComponents.create();
-      sdkComponents.registerEnvironment(Environment.newBuilder().setUrl("java").build());
-      CombinePayload payload = CombineTranslation.toProto(combine.get(), sdkComponents);
+      sdkComponents.registerEnvironment(Environments.createDockerEnvironment("java"));
+      CombinePayload payload =
+          CombineTranslation.CombineGloballyPayloadTranslator.payloadForCombineGlobally(
+              (AppliedPTransform) combine.get(), sdkComponents);
     }
   }
 

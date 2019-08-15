@@ -46,13 +46,14 @@ class NativeTypeCompatibilityTest(unittest.TestCase):
         ('simple dict', typing.Dict[bytes, int],
          typehints.Dict[bytes, int]),
         ('simple list', typing.List[int], typehints.List[int]),
+        ('simple iterable', typing.Iterable[int], typehints.Iterable[int]),
         ('simple optional', typing.Optional[int], typehints.Optional[int]),
         ('simple set', typing.Set[float], typehints.Set[float]),
         ('simple unary tuple', typing.Tuple[bytes],
          typehints.Tuple[bytes]),
         ('simple union', typing.Union[int, bytes, float],
          typehints.Union[int, bytes, float]),
-        ('namedtuple', _TestNamedTuple, typehints.Any),
+        ('namedtuple', _TestNamedTuple, _TestNamedTuple),
         ('test class', _TestClass, _TestClass),
         ('test class in list', typing.List[_TestClass],
          typehints.List[_TestClass]),
@@ -66,7 +67,12 @@ class NativeTypeCompatibilityTest(unittest.TestCase):
         ('complex dict',
          typing.Dict[bytes, typing.List[typing.Tuple[bytes, _TestClass]]],
          typehints.Dict[bytes, typehints.List[typehints.Tuple[
-             bytes, _TestClass]]])
+             bytes, _TestClass]]]),
+        ('type var', typing.TypeVar('T'), typehints.TypeVariable('T')),
+        ('nested type var',
+         typing.Tuple[typing.TypeVar('K'), typing.TypeVar('V')],
+         typehints.Tuple[typehints.TypeVariable('K'),
+                         typehints.TypeVariable('V')]),
     ]
 
     for test_case in test_cases:
@@ -77,6 +83,14 @@ class NativeTypeCompatibilityTest(unittest.TestCase):
       self.assertEqual(
           native_type_compatibility.convert_to_beam_type(typing_type),
           beam_type, description)
+
+  def test_convert_nested_to_beam_type(self):
+    self.assertEqual(
+        typehints.List[typing.Any],
+        typehints.List[typehints.Any])
+    self.assertEqual(
+        typehints.List[typing.Dict[int, str]],
+        typehints.List[typehints.Dict[int, str]])
 
   def test_convert_to_beam_types(self):
     typing_types = [bytes, typing.List[bytes],

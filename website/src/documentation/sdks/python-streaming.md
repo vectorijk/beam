@@ -20,7 +20,7 @@ limitations under the License.
 
 # Python Streaming Pipelines
 
-Python streaming pipeline execution is experimentally available (with some
+Python streaming pipeline execution became available (with some
 [limitations](#unsupported-features)) starting with Beam SDK version 2.5.0.
 
 
@@ -108,7 +108,7 @@ The following simple bash script feeds lines of an input text file to your input
 topic:
 
 ```
-cat <YOUR_LOCAL_TEXT_FILE> | while read line; do gcloud pubsub topics publish <YOUR_INPUT_TOPIC_NAME> “ $line”; done
+cat <YOUR_LOCAL_TEXT_FILE> | while read line; do gcloud pubsub topics publish <YOUR_INPUT_TOPIC_NAME> --message "$line"; done
 ```
 
 Alternately, you can read from a publicly available Cloud Pub/Sub stream, such

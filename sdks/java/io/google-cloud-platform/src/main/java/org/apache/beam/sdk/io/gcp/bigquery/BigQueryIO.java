@@ -17,29 +17,30 @@
  */
 package org.apache.beam.sdk.io.gcp.bigquery;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.createJobIdToken;
+import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.createTempTableReference;
 import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.getExtractJobId;
 import static org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.resolveTempLocation;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkState;
 
 import com.google.api.client.json.JsonFactory;
+import com.google.api.services.bigquery.model.Clustering;
 import com.google.api.services.bigquery.model.Job;
 import com.google.api.services.bigquery.model.JobConfigurationQuery;
 import com.google.api.services.bigquery.model.JobReference;
 import com.google.api.services.bigquery.model.JobStatistics;
+import com.google.api.services.bigquery.model.Table;
+import com.google.api.services.bigquery.model.TableCell;
 import com.google.api.services.bigquery.model.TableReference;
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
 import com.google.api.services.bigquery.model.TimePartitioning;
 import com.google.auto.value.AutoValue;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.MoreObjects;
-import com.google.common.base.Predicates;
-import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
+import com.google.cloud.bigquery.storage.v1beta1.ReadOptions.TableReadOptions;
+import com.google.cloud.bigquery.storage.v1beta1.Storage.CreateReadSessionRequest;
+import com.google.cloud.bigquery.storage.v1beta1.Storage.ReadSession;
+import com.google.cloud.bigquery.storage.v1beta1.Storage.Stream;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +57,9 @@ import org.apache.beam.sdk.coders.CoderRegistry;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
+import org.apache.beam.sdk.extensions.gcp.util.Transport;
+import org.apache.beam.sdk.extensions.gcp.util.gcsfs.GcsPath;
+import org.apache.beam.sdk.extensions.protobuf.ProtoCoder;
 import org.apache.beam.sdk.io.BoundedSource;
 import org.apache.beam.sdk.io.FileSystems;
 import org.apache.beam.sdk.io.fs.MoveOptions;
@@ -66,17 +70,22 @@ import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.TableRefToJson;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.TableSchemaToJsonSchema;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.TableSpecToTableRef;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers.TimePartitioningToJson;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.TypedRead.Method;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryServices.DatasetService;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryServices.JobService;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryServices.StorageClient;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQuerySourceBase.ExtractResult;
 import org.apache.beam.sdk.io.gcp.bigquery.DynamicDestinationsHelpers.ConstantSchemaDestinations;
 import org.apache.beam.sdk.io.gcp.bigquery.DynamicDestinationsHelpers.ConstantTimePartitioningDestinations;
 import org.apache.beam.sdk.io.gcp.bigquery.DynamicDestinationsHelpers.SchemaFromViewDestinations;
 import org.apache.beam.sdk.io.gcp.bigquery.DynamicDestinationsHelpers.TableFunctionDestinations;
+import org.apache.beam.sdk.io.gcp.bigquery.PassThroughThenCleanup.CleanupOperation;
+import org.apache.beam.sdk.io.gcp.bigquery.PassThroughThenCleanup.ContextContainer;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.ValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.NestedValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
+import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
@@ -84,21 +93,28 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.Reshuffle;
 import org.apache.beam.sdk.transforms.SerializableFunction;
+import org.apache.beam.sdk.transforms.SerializableFunctions;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.transforms.display.DisplayData;
-import org.apache.beam.sdk.util.Transport;
-import org.apache.beam.sdk.util.gcsfs.GcsPath;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollection.IsBounded;
 import org.apache.beam.sdk.values.PCollectionTuple;
 import org.apache.beam.sdk.values.PCollectionView;
+import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TupleTagList;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.beam.sdk.values.ValueInSingleWindow;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.annotations.VisibleForTesting;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.MoreObjects;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Predicates;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Strings;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Lists;
 import org.joda.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -127,6 +143,34 @@ import org.slf4j.LoggerFactory;
  *   <li>[{@code project_id}]:[{@code dataset_id}].[{@code table_id}]
  *   <li>[{@code dataset_id}].[{@code table_id}]
  * </ul>
+ *
+ * <h3>BigQuery Concepts</h3>
+ *
+ * <p>Tables have rows ({@link TableRow}) and each row has cells ({@link TableCell}). A table has a
+ * schema ({@link TableSchema}), which in turn describes the schema of each cell ({@link
+ * TableFieldSchema}). The terms field and cell are used interchangeably.
+ *
+ * <p>{@link TableSchema}: describes the schema (types and order) for values in each row. It has one
+ * attribute, ‘fields’, which is list of {@link TableFieldSchema} objects.
+ *
+ * <p>{@link TableFieldSchema}: describes the schema (type, name) for one field. It has several
+ * attributes, including 'name' and 'type'. Common values for the type attribute are: 'STRING',
+ * 'INTEGER', 'FLOAT', 'BOOLEAN', 'NUMERIC', 'GEOGRAPHY'. All possible values are described at: <a
+ * href="https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types">
+ * https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types</a>
+ *
+ * <p>{@link TableRow}: Holds all values in a table row. Has one attribute, 'f', which is a list of
+ * {@link TableCell} instances.
+ *
+ * <p>{@link TableCell}: Holds the value for one cell (or field). Has one attribute, 'v', which is
+ * the value of the table cell.
+ *
+ * <p>As of Beam 2.7.0, the NUMERIC data type is supported. This data type supports high-precision
+ * decimal numbers (precision of 38 digits, scale of 9 digits). The GEOGRAPHY data type works with
+ * Well-Known Text (See <a href="https://en.wikipedia.org/wiki/Well-known_text">
+ * https://en.wikipedia.org/wiki/Well-known_text</a>) format for reading and writing to BigQuery.
+ * BigQuery IO requires values of BYTES datatype to be encoded using base64 encoding when writing to
+ * BigQuery. When bytes are read from BigQuery they are returned as base64-encoded strings.
  *
  * <h3>Reading</h3>
  *
@@ -188,7 +232,16 @@ import org.slf4j.LoggerFactory;
  * BigQueryIO.Write#withFormatFunction(SerializableFunction)}.
  *
  * <pre>{@code
- * class Quote { Instant timestamp; String exchange; String symbol; double price; }
+ * class Quote {
+ *   final Instant timestamp;
+ *   final String exchange;
+ *   final String symbol;
+ *   final double price;
+ *
+ *   Quote(Instant timestamp, String exchange, String symbol, double price) {
+ *     // initialize all member variables.
+ *   }
+ * }
  *
  * PCollection<Quote> quotes = ...
  *
@@ -209,6 +262,34 @@ import org.slf4j.LoggerFactory;
  * existing table, replace the table, or verify that the table is empty. Note that the dataset being
  * written to must already exist. Unbounded PCollections can only be written using {@link
  * Write.WriteDisposition#WRITE_EMPTY} or {@link Write.WriteDisposition#WRITE_APPEND}.
+ *
+ * <p>BigQueryIO supports automatically inferring the BigQuery table schema from the Beam schema on
+ * the input PCollection. Beam can also automatically format the input into a TableRow in this case,
+ * if no format function is provide. In the above example, the quotes PCollection has a schema that
+ * Beam infers from the Quote POJO. So the write could be done more simply as follows:
+ *
+ * <pre>{@code
+ * {@literal @}DefaultSchema(JavaFieldSchema.class)
+ * class Quote {
+ *   final Instant timestamp;
+ *   final String exchange;
+ *   final String symbol;
+ *   final double price;
+ *
+ *   {@literal @}SchemaCreate
+ *   Quote(Instant timestamp, String exchange, String symbol, double price) {
+ *     // initialize all member variables.
+ *   }
+ * }
+ *
+ * PCollection<Quote> quotes = ...
+ *
+ * quotes.apply(BigQueryIO
+ *     .<Quote>write()
+ *     .to("my-project:my_dataset.my_table")
+ *     .useBeamSchema()
+ *     .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_TRUNCATE));
+ * }</pre>
  *
  * <h3>Loading historical data into time-partitioned BigQuery tables</h3>
  *
@@ -356,6 +437,14 @@ public class BigQueryIO {
     return read(new TableRowParser()).withCoder(TableRowJsonCoder.of());
   }
 
+  /** Like {@link #readTableRows()} but with {@link Schema} support. */
+  public static TypedRead<TableRow> readTableRowsWithSchema() {
+    return read(new TableRowParser())
+        .withCoder(TableRowJsonCoder.of())
+        .withBeamRowConverters(
+            BigQueryUtils.tableRowToBeamRow(), BigQueryUtils.tableRowFromBeamRow());
+  }
+
   /**
    * Reads from a BigQuery table or query and returns a {@link PCollection} with one element per
    * each row of the table or query result, parsed from the BigQuery AVRO format using the specified
@@ -382,6 +471,7 @@ public class BigQueryIO {
         .setWithTemplateCompatibility(false)
         .setBigQueryServices(new BigQueryServicesImpl())
         .setParseFn(parseFn)
+        .setMethod(Method.DEFAULT)
         .build();
   }
 
@@ -528,6 +618,27 @@ public class BigQueryIO {
   /** Implementation of {@link BigQueryIO#read(SerializableFunction)}. */
   @AutoValue
   public abstract static class TypedRead<T> extends PTransform<PBegin, PCollection<T>> {
+    /** Determines the method used to read data from BigQuery. */
+    @Experimental(Experimental.Kind.SOURCE_SINK)
+    public enum Method {
+      /** The default behavior if no method is explicitly set. Currently {@link #EXPORT}. */
+      DEFAULT,
+
+      /**
+       * Export data to Google Cloud Storage in Avro format and read data files from that location.
+       */
+      EXPORT,
+
+      /** Read the contents of a table directly using the BigQuery storage API. */
+      DIRECT_READ,
+    }
+
+    interface ToBeamRowFunction<T>
+        extends SerializableFunction<Schema, SerializableFunction<T, Row>> {}
+
+    interface FromBeamRowFunction<T>
+        extends SerializableFunction<Schema, SerializableFunction<Row, T>> {}
+
     abstract Builder<T> toBuilder();
 
     @AutoValue.Builder
@@ -550,11 +661,25 @@ public class BigQueryIO {
 
       abstract Builder<T> setQueryLocation(String location);
 
+      @Experimental(Experimental.Kind.SOURCE_SINK)
+      abstract Builder<T> setMethod(Method method);
+
+      @Experimental(Experimental.Kind.SOURCE_SINK)
+      abstract Builder<T> setReadOptions(TableReadOptions readOptions);
+
       abstract TypedRead<T> build();
 
       abstract Builder<T> setParseFn(SerializableFunction<SchemaAndRecord, T> parseFn);
 
       abstract Builder<T> setCoder(Coder<T> coder);
+
+      abstract Builder<T> setKmsKey(String kmsKey);
+
+      @Experimental(Experimental.Kind.SCHEMAS)
+      abstract Builder<T> setToBeamRowFn(ToBeamRowFunction<T> toRowFn);
+
+      @Experimental(Experimental.Kind.SCHEMAS)
+      abstract Builder<T> setFromBeamRowFn(FromBeamRowFunction<T> fromRowFn);
     }
 
     @Nullable
@@ -583,8 +708,26 @@ public class BigQueryIO {
     @Nullable
     abstract String getQueryLocation();
 
+    @Experimental(Experimental.Kind.SOURCE_SINK)
+    abstract Method getMethod();
+
+    @Experimental(Experimental.Kind.SOURCE_SINK)
+    @Nullable
+    abstract TableReadOptions getReadOptions();
+
     @Nullable
     abstract Coder<T> getCoder();
+
+    @Nullable
+    abstract String getKmsKey();
+
+    @Nullable
+    @Experimental(Experimental.Kind.SCHEMAS)
+    abstract ToBeamRowFunction<T> getToBeamRowFn();
+
+    @Nullable
+    @Experimental(Experimental.Kind.SCHEMAS)
+    abstract FromBeamRowFunction<T> getFromBeamRowFn();
 
     /**
      * An enumeration type for the priority of a query.
@@ -626,26 +769,37 @@ public class BigQueryIO {
       }
     }
 
-    private BigQuerySourceBase<T> createSource(String jobUuid, Coder<T> coder) {
-      BigQuerySourceBase<T> source;
+    private BigQuerySourceDef createSourceDef() {
+      BigQuerySourceDef sourceDef;
       if (getQuery() == null) {
-        source =
-            BigQueryTableSource.create(
-                jobUuid, getTableProvider(), getBigQueryServices(), coder, getParseFn());
+        sourceDef = BigQueryTableSourceDef.create(getBigQueryServices(), getTableProvider());
       } else {
-        source =
-            BigQueryQuerySource.create(
-                jobUuid,
+        sourceDef =
+            BigQueryQuerySourceDef.create(
+                getBigQueryServices(),
                 getQuery(),
                 getFlattenResults(),
                 getUseLegacySql(),
-                getBigQueryServices(),
-                coder,
-                getParseFn(),
                 MoreObjects.firstNonNull(getQueryPriority(), QueryPriority.BATCH),
-                getQueryLocation());
+                getQueryLocation(),
+                getKmsKey());
       }
-      return source;
+      return sourceDef;
+    }
+
+    private BigQueryStorageQuerySource<T> createStorageQuerySource(
+        String stepUuid, Coder<T> outputCoder) {
+      return BigQueryStorageQuerySource.create(
+          stepUuid,
+          getQuery(),
+          getFlattenResults(),
+          getUseLegacySql(),
+          MoreObjects.firstNonNull(getQueryPriority(), QueryPriority.BATCH),
+          getQueryLocation(),
+          getKmsKey(),
+          getParseFn(),
+          outputCoder,
+          getBigQueryServices());
     }
 
     private static final String QUERY_VALIDATION_FAILURE_ERROR =
@@ -658,19 +812,21 @@ public class BigQueryIO {
       // read is properly specified.
       BigQueryOptions bqOptions = options.as(BigQueryOptions.class);
 
-      String tempLocation = bqOptions.getTempLocation();
-      checkArgument(
-          !Strings.isNullOrEmpty(tempLocation),
-          "BigQueryIO.Read needs a GCS temp location to store temp files.");
-      if (getBigQueryServices() == null) {
-        try {
-          GcsPath.fromUri(tempLocation);
-        } catch (IllegalArgumentException e) {
-          throw new IllegalArgumentException(
-              String.format(
-                  "BigQuery temp location expected a valid 'gs://' path, but was given '%s'",
-                  tempLocation),
-              e);
+      if (getMethod() != Method.DIRECT_READ) {
+        String tempLocation = bqOptions.getTempLocation();
+        checkArgument(
+            !Strings.isNullOrEmpty(tempLocation),
+            "BigQueryIO.Read needs a GCS temp location to store temp files.");
+        if (getBigQueryServices() == null) {
+          try {
+            GcsPath.fromUri(tempLocation);
+          } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                String.format(
+                    "BigQuery temp location expected a valid 'gs://' path, but was given '%s'",
+                    tempLocation),
+                e);
+          }
         }
       }
 
@@ -739,8 +895,25 @@ public class BigQueryIO {
       }
       checkArgument(getParseFn() != null, "A parseFn is required");
 
+      // if both toRowFn and fromRowFn values are set, enable Beam schema support
+      boolean beamSchemaEnabled = false;
+      if (getToBeamRowFn() != null && getFromBeamRowFn() != null) {
+        beamSchemaEnabled = true;
+      }
+
       Pipeline p = input.getPipeline();
       final Coder<T> coder = inferCoder(p.getCoderRegistry());
+
+      if (getMethod() == Method.DIRECT_READ) {
+        return expandForDirectRead(input, coder);
+      }
+
+      checkArgument(
+          getReadOptions() == null,
+          "Invalid BigQueryIO.Read: Specifies table read options, "
+              + "which only applies when using Method.DIRECT_READ");
+
+      final BigQuerySourceDef sourceDef = createSourceDef();
       final PCollectionView<String> jobIdTokenView;
       PCollection<String> jobIdTokenCollection;
       PCollection<T> rows;
@@ -751,7 +924,10 @@ public class BigQueryIO {
             p.apply("TriggerIdCreation", Create.of(staticJobUuid))
                 .apply("ViewId", View.asSingleton());
         // Apply the traditional Source model.
-        rows = p.apply(org.apache.beam.sdk.io.Read.from(createSource(staticJobUuid, coder)));
+        rows =
+            p.apply(
+                org.apache.beam.sdk.io.Read.from(
+                    sourceDef.toSource(staticJobUuid, coder, getParseFn())));
       } else {
         // Create a singleton job ID token at execution time.
         jobIdTokenCollection =
@@ -777,7 +953,8 @@ public class BigQueryIO {
                           @ProcessElement
                           public void processElement(ProcessContext c) throws Exception {
                             String jobUuid = c.element();
-                            BigQuerySourceBase<T> source = createSource(jobUuid, coder);
+                            BigQuerySourceBase<T> source =
+                                sourceDef.toSource(jobUuid, coder, getParseFn());
                             BigQueryOptions options =
                                 c.getPipelineOptions().as(BigQueryOptions.class);
                             ExtractResult res = source.extractFiles(options);
@@ -808,13 +985,15 @@ public class BigQueryIO {
                                     BigQueryHelpers.fromJsonString(
                                         c.sideInput(schemaView), TableSchema.class);
                                 String jobUuid = c.sideInput(jobIdTokenView);
-                                BigQuerySourceBase<T> source = createSource(jobUuid, coder);
+                                BigQuerySourceBase<T> source =
+                                    sourceDef.toSource(jobUuid, coder, getParseFn());
                                 List<BoundedSource<T>> sources =
                                     source.createSources(
                                         ImmutableList.of(
                                             FileSystems.matchNewResource(
                                                 c.element(), false /* is directory */)),
-                                        schema);
+                                        schema,
+                                        null);
                                 checkArgument(sources.size() == 1, "Expected exactly one source.");
                                 BoundedSource<T> avroSource = sources.get(0);
                                 BoundedSource.BoundedReader<T> reader =
@@ -854,6 +1033,197 @@ public class BigQueryIO {
               }
             }
           };
+
+      rows = rows.apply(new PassThroughThenCleanup<>(cleanupOperation, jobIdTokenView));
+
+      if (beamSchemaEnabled) {
+        BigQueryOptions bqOptions = p.getOptions().as(BigQueryOptions.class);
+        Schema beamSchema = sourceDef.getBeamSchema(bqOptions);
+        SerializableFunction<T, Row> toBeamRow = getToBeamRowFn().apply(beamSchema);
+        SerializableFunction<Row, T> fromBeamRow = getFromBeamRowFn().apply(beamSchema);
+
+        rows.setSchema(beamSchema, toBeamRow, fromBeamRow);
+      }
+      return rows;
+    }
+
+    private PCollection<T> expandForDirectRead(PBegin input, Coder<T> outputCoder) {
+      ValueProvider<TableReference> tableProvider = getTableProvider();
+      Pipeline p = input.getPipeline();
+      if (tableProvider != null) {
+        // No job ID is required. Read directly from BigQuery storage.
+        return p.apply(
+            org.apache.beam.sdk.io.Read.from(
+                BigQueryStorageTableSource.create(
+                    tableProvider,
+                    getReadOptions(),
+                    getParseFn(),
+                    outputCoder,
+                    getBigQueryServices())));
+      }
+
+      checkArgument(
+          getReadOptions() == null,
+          "Invalid BigQueryIO.Read: Specifies table read options, "
+              + "which only applies when reading from a table");
+
+      //
+      // N.B. All of the code below exists because the BigQuery storage API can't (yet) read from
+      // all anonymous tables, so we need the job ID to reason about the name of the destination
+      // table for the query to read the data and subsequently delete the table and dataset. Once
+      // the storage API can handle anonymous tables, the storage source should be modified to use
+      // anonymous tables and all of the code related to job ID generation and table and dataset
+      // cleanup can be removed. [BEAM-6931]
+      //
+
+      PCollectionView<String> jobIdTokenView;
+      PCollection<T> rows;
+
+      if (!getWithTemplateCompatibility()) {
+        // Create a singleton job ID token at pipeline construction time.
+        String staticJobUuid = BigQueryHelpers.randomUUIDString();
+        jobIdTokenView =
+            p.apply("TriggerIdCreation", Create.of(staticJobUuid))
+                .apply("ViewId", View.asSingleton());
+        // Apply the traditional Source model.
+        rows =
+            p.apply(
+                org.apache.beam.sdk.io.Read.from(
+                    createStorageQuerySource(staticJobUuid, outputCoder)));
+      } else {
+        // Create a singleton job ID token at pipeline execution time.
+        PCollection<String> jobIdTokenCollection =
+            p.apply("TriggerIdCreation", Create.of("ignored"))
+                .apply(
+                    "CreateJobId",
+                    MapElements.via(
+                        new SimpleFunction<String, String>() {
+                          @Override
+                          public String apply(String input) {
+                            return BigQueryHelpers.randomUUIDString();
+                          }
+                        }));
+
+        jobIdTokenView = jobIdTokenCollection.apply("ViewId", View.asSingleton());
+
+        TupleTag<Stream> streamsTag = new TupleTag<>();
+        TupleTag<ReadSession> readSessionTag = new TupleTag<>();
+        TupleTag<String> tableSchemaTag = new TupleTag<>();
+
+        PCollectionTuple tuple =
+            jobIdTokenCollection.apply(
+                "RunQueryJob",
+                ParDo.of(
+                        new DoFn<String, Stream>() {
+                          @ProcessElement
+                          public void processElement(ProcessContext c) throws Exception {
+                            BigQueryOptions options =
+                                c.getPipelineOptions().as(BigQueryOptions.class);
+                            String jobUuid = c.element();
+                            // Execute the query and get the destination table holding the results.
+                            // The getTargetTable call runs a new instance of the query and returns
+                            // the destination table created to hold the results.
+                            BigQueryStorageQuerySource<T> querySource =
+                                createStorageQuerySource(jobUuid, outputCoder);
+                            Table queryResultTable = querySource.getTargetTable(options);
+
+                            // Create a read session without specifying a desired stream count and
+                            // let the BigQuery storage server pick the number of streams.
+                            CreateReadSessionRequest request =
+                                CreateReadSessionRequest.newBuilder()
+                                    .setParent("projects/" + options.getProject())
+                                    .setTableReference(
+                                        BigQueryHelpers.toTableRefProto(
+                                            queryResultTable.getTableReference()))
+                                    .setRequestedStreams(0)
+                                    .build();
+
+                            ReadSession readSession;
+                            try (StorageClient storageClient =
+                                getBigQueryServices().getStorageClient(options)) {
+                              readSession = storageClient.createReadSession(request);
+                            }
+
+                            for (Stream stream : readSession.getStreamsList()) {
+                              c.output(stream);
+                            }
+
+                            c.output(readSessionTag, readSession);
+                            c.output(
+                                tableSchemaTag,
+                                BigQueryHelpers.toJsonString(queryResultTable.getSchema()));
+                          }
+                        })
+                    .withOutputTags(
+                        streamsTag, TupleTagList.of(readSessionTag).and(tableSchemaTag)));
+
+        tuple.get(streamsTag).setCoder(ProtoCoder.of(Stream.class));
+        tuple.get(readSessionTag).setCoder(ProtoCoder.of(ReadSession.class));
+        tuple.get(tableSchemaTag).setCoder(StringUtf8Coder.of());
+
+        PCollectionView<ReadSession> readSessionView =
+            tuple.get(readSessionTag).apply("ReadSessionView", View.asSingleton());
+        PCollectionView<String> tableSchemaView =
+            tuple.get(tableSchemaTag).apply("TableSchemaView", View.asSingleton());
+
+        rows =
+            tuple
+                .get(streamsTag)
+                .apply(Reshuffle.viaRandomKey())
+                .apply(
+                    ParDo.of(
+                            new DoFn<Stream, T>() {
+                              @ProcessElement
+                              public void processElement(ProcessContext c) throws Exception {
+                                ReadSession readSession = c.sideInput(readSessionView);
+                                TableSchema tableSchema =
+                                    BigQueryHelpers.fromJsonString(
+                                        c.sideInput(tableSchemaView), TableSchema.class);
+                                Stream stream = c.element();
+
+                                BigQueryStorageStreamSource<T> streamSource =
+                                    BigQueryStorageStreamSource.create(
+                                        readSession,
+                                        stream,
+                                        tableSchema,
+                                        getParseFn(),
+                                        outputCoder,
+                                        getBigQueryServices());
+
+                                // Read all of the data from the stream. In the event that this work
+                                // item fails and is rescheduled, the same rows will be returned in
+                                // the same order.
+                                BoundedSource.BoundedReader<T> reader =
+                                    streamSource.createReader(c.getPipelineOptions());
+                                for (boolean more = reader.start(); more; more = reader.advance()) {
+                                  c.output(reader.getCurrent());
+                                }
+                              }
+                            })
+                        .withSideInputs(readSessionView, tableSchemaView))
+                .setCoder(outputCoder);
+      }
+
+      PassThroughThenCleanup.CleanupOperation cleanupOperation =
+          new CleanupOperation() {
+            @Override
+            void cleanup(ContextContainer c) throws Exception {
+              BigQueryOptions options = c.getPipelineOptions().as(BigQueryOptions.class);
+              String jobUuid = c.getJobId();
+
+              TableReference tempTable =
+                  createTempTableReference(
+                      options.getProject(), createJobIdToken(options.getJobName(), jobUuid));
+
+              DatasetService datasetService = getBigQueryServices().getDatasetService(options);
+              LOG.info("Deleting temporary table with query results {}", tempTable);
+              datasetService.deleteTable(tempTable);
+              LOG.info(
+                  "Deleting temporary dataset with query results {}", tempTable.getDatasetId());
+              datasetService.deleteDataset(tempTable.getProjectId(), tempTable.getDatasetId());
+            }
+          };
+
       return rows.apply(new PassThroughThenCleanup<>(cleanupOperation, jobIdTokenView));
     }
 
@@ -902,6 +1272,22 @@ public class BigQueryIO {
      */
     public TypedRead<T> withCoder(Coder<T> coder) {
       return toBuilder().setCoder(coder).build();
+    }
+
+    /** For query sources, use this Cloud KMS key to encrypt any temporary tables created. */
+    public TypedRead<T> withKmsKey(String kmsKey) {
+      return toBuilder().setKmsKey(kmsKey).build();
+    }
+
+    /**
+     * Sets the functions to convert elements to/from {@link Row} objects.
+     *
+     * <p>Setting these conversion functions is necessary to enable {@link Schema} support.
+     */
+    @Experimental(Experimental.Kind.SCHEMAS)
+    public TypedRead<T> withBeamRowConverters(
+        ToBeamRowFunction<T> toRowFn, FromBeamRowFunction<T> fromRowFn) {
+      return toBuilder().setToBeamRowFn(toRowFn).setFromBeamRowFn(fromRowFn).build();
     }
 
     /** See {@link Read#from(String)}. */
@@ -968,6 +1354,18 @@ public class BigQueryIO {
       return toBuilder().setQueryLocation(location).build();
     }
 
+    /** See {@link Method}. */
+    @Experimental(Experimental.Kind.SOURCE_SINK)
+    public TypedRead<T> withMethod(Method method) {
+      return toBuilder().setMethod(method).build();
+    }
+
+    /** Read options, including a list of selected columns and push-down SQL filter text. */
+    @Experimental(Experimental.Kind.SOURCE_SINK)
+    public TypedRead<T> withReadOptions(TableReadOptions readOptions) {
+      return toBuilder().setReadOptions(readOptions).build();
+    }
+
     @Experimental(Experimental.Kind.SOURCE_SINK)
     public TypedRead<T> withTemplateCompatibility() {
       return toBuilder().setWithTemplateCompatibility(true).build();
@@ -989,11 +1387,11 @@ public class BigQueryIO {
     List<Long> counts = jobStats.getExtract().getDestinationUriFileCounts();
     if (counts.size() != 1) {
       String errorMessage =
-          (counts.isEmpty()
+          counts.isEmpty()
               ? "No destination uri file count received."
               : String.format(
                   "More than one destination uri file count received. First two are %s, %s",
-                  counts.get(0), counts.get(1)));
+                  counts.get(0), counts.get(1));
       throw new RuntimeException(errorMessage);
     }
     long filesCount = counts.get(0);
@@ -1018,7 +1416,7 @@ public class BigQueryIO {
    * function must be provided to convert each input element into a {@link TableRow} using {@link
    * Write#withFormatFunction(SerializableFunction)}.
    *
-   * <p>In BigQuery, each table has an encosing dataset. The dataset being written must already
+   * <p>In BigQuery, each table has an enclosing dataset. The dataset being written must already
    * exist.
    *
    * <p>By default, tables will be created if they do not exist, which corresponds to a {@link
@@ -1052,6 +1450,13 @@ public class BigQueryIO {
         .setWriteDisposition(Write.WriteDisposition.WRITE_EMPTY)
         .setNumFileShards(0)
         .setMethod(Write.Method.DEFAULT)
+        .setExtendedErrorInfo(false)
+        .setSkipInvalidRows(false)
+        .setIgnoreUnknownValues(false)
+        .setMaxFilesPerPartition(BatchLoads.DEFAULT_MAX_FILES_PER_PARTITION)
+        .setMaxBytesPerPartition(BatchLoads.DEFAULT_MAX_BYTES_PER_PARTITION)
+        .setOptimizeWrites(false)
+        .setUseBeamSchema(false)
         .build();
   }
 
@@ -1125,6 +1530,9 @@ public class BigQueryIO {
     @Nullable
     abstract ValueProvider<String> getJsonTimePartitioning();
 
+    @Nullable
+    abstract Clustering getClustering();
+
     abstract CreateDisposition getCreateDisposition();
 
     abstract WriteDisposition getWriteDisposition();
@@ -1144,6 +1552,10 @@ public class BigQueryIO {
 
     abstract int getNumFileShards();
 
+    abstract int getMaxFilesPerPartition();
+
+    abstract long getMaxBytesPerPartition();
+
     @Nullable
     abstract Duration getTriggeringFrequency();
 
@@ -1157,6 +1569,19 @@ public class BigQueryIO {
 
     @Nullable
     abstract ValueProvider<String> getCustomGcsTempLocation();
+
+    abstract boolean getExtendedErrorInfo();
+
+    abstract Boolean getSkipInvalidRows();
+
+    abstract Boolean getIgnoreUnknownValues();
+
+    @Nullable
+    abstract String getKmsKey();
+
+    abstract Boolean getOptimizeWrites();
+
+    abstract Boolean getUseBeamSchema();
 
     abstract Builder<T> toBuilder();
 
@@ -1177,6 +1602,8 @@ public class BigQueryIO {
 
       abstract Builder<T> setJsonTimePartitioning(ValueProvider<String> jsonTimePartitioning);
 
+      abstract Builder<T> setClustering(Clustering clustering);
+
       abstract Builder<T> setCreateDisposition(CreateDisposition createDisposition);
 
       abstract Builder<T> setWriteDisposition(WriteDisposition writeDisposition);
@@ -1193,6 +1620,10 @@ public class BigQueryIO {
 
       abstract Builder<T> setNumFileShards(int numFileShards);
 
+      abstract Builder<T> setMaxFilesPerPartition(int maxFilesPerPartition);
+
+      abstract Builder<T> setMaxBytesPerPartition(long maxBytesPerPartition);
+
       abstract Builder<T> setTriggeringFrequency(Duration triggeringFrequency);
 
       abstract Builder<T> setMethod(Method method);
@@ -1202,6 +1633,18 @@ public class BigQueryIO {
       abstract Builder<T> setFailedInsertRetryPolicy(InsertRetryPolicy retryPolicy);
 
       abstract Builder<T> setCustomGcsTempLocation(ValueProvider<String> customGcsTempLocation);
+
+      abstract Builder<T> setExtendedErrorInfo(boolean extendedErrorInfo);
+
+      abstract Builder<T> setSkipInvalidRows(Boolean skipInvalidRows);
+
+      abstract Builder<T> setIgnoreUnknownValues(Boolean ignoreUnknownValues);
+
+      abstract Builder<T> setKmsKey(String kmsKey);
+
+      abstract Builder<T> setOptimizeWrites(Boolean optimizeWrites);
+
+      abstract Builder<T> setUseBeamSchema(Boolean useBeamSchema);
 
       abstract Write<T> build();
     }
@@ -1295,6 +1738,10 @@ public class BigQueryIO {
     /**
      * Writes to table specified by the specified table function. The table is a function of {@link
      * ValueInSingleWindow}, so can be determined by the value or by the window.
+     *
+     * <p>If the function produces destinations configured with clustering fields, ensure that
+     * {@link #withClustering()} is also set so that the clustering configurations get properly
+     * encoded and decoded.
      */
     public Write<T> to(
         SerializableFunction<ValueInSingleWindow<T>, TableDestination> tableFunction) {
@@ -1302,7 +1749,13 @@ public class BigQueryIO {
       return toBuilder().setTableFunction(tableFunction).build();
     }
 
-    /** Writes to the table and schema specified by the {@link DynamicDestinations} object. */
+    /**
+     * Writes to the table and schema specified by the {@link DynamicDestinations} object.
+     *
+     * <p>If any of the returned destinations are configured with clustering fields, ensure that the
+     * passed {@link DynamicDestinations} object returns {@link TableDestinationCoderV3} when {@link
+     * DynamicDestinations#getDestinationCoder()} is called.
+     */
     public Write<T> to(DynamicDestinations<T, ?> dynamicDestinations) {
       checkArgument(dynamicDestinations != null, "dynamicDestinations can not be null");
       return toBuilder().setDynamicDestinations(dynamicDestinations).build();
@@ -1310,7 +1763,6 @@ public class BigQueryIO {
 
     /** Formats the user's type into a {@link TableRow} to be written to BigQuery. */
     public Write<T> withFormatFunction(SerializableFunction<T, TableRow> formatFunction) {
-      checkArgument(formatFunction != null, "formatFunction can not be null");
       return toBuilder().setFormatFunction(formatFunction).build();
     }
 
@@ -1362,7 +1814,7 @@ public class BigQueryIO {
      * Allows newly created tables to include a {@link TimePartitioning} class. Can only be used
      * when writing to a single table. If {@link #to(SerializableFunction)} or {@link
      * #to(DynamicDestinations)} is used to write dynamic tables, time partitioning can be directly
-     * in the returned {@link TableDestination}.
+     * set in the returned {@link TableDestination}.
      */
     public Write<T> withTimePartitioning(TimePartitioning partitioning) {
       checkArgument(partitioning != null, "partitioning can not be null");
@@ -1386,6 +1838,34 @@ public class BigQueryIO {
       return toBuilder().setJsonTimePartitioning(partitioning).build();
     }
 
+    /**
+     * Specifies the clustering fields to use when writing to a single output table. Can only be
+     * used when {@link#withTimePartitioning(TimePartitioning)} is set. If {@link
+     * #to(SerializableFunction)} or {@link #to(DynamicDestinations)} is used to write to dynamic
+     * tables, the fields here will be ignored; call {@link #withClustering()} instead.
+     */
+    public Write<T> withClustering(Clustering clustering) {
+      checkArgument(clustering != null, "clustering can not be null");
+      return toBuilder().setClustering(clustering).build();
+    }
+
+    /**
+     * Allows writing to clustered tables when {@link #to(SerializableFunction)} or {@link
+     * #to(DynamicDestinations)} is used. The returned {@link TableDestination} objects should
+     * specify the time partitioning and clustering fields per table. If writing to a single table,
+     * use {@link #withClustering(Clustering)} instead to pass a {@link Clustering} instance that
+     * specifies the static clustering fields to use.
+     *
+     * <p>Setting this option enables use of {@link TableDestinationCoderV3} which encodes
+     * clustering information. The updated coder is compatible with non-clustered tables, so can be
+     * freely set for newly deployed pipelines, but note that pipelines using an older coder must be
+     * drained before setting this option, since {@link TableDestinationCoderV3} will not be able to
+     * read state written with a previous version.
+     */
+    public Write<T> withClustering() {
+      return toBuilder().setClustering(new Clustering()).build();
+    }
+
     /** Specifies whether the table should be created if it does not exist. */
     public Write<T> withCreateDisposition(CreateDisposition createDisposition) {
       checkArgument(createDisposition != null, "createDisposition can not be null");
@@ -1405,7 +1885,7 @@ public class BigQueryIO {
     }
 
     /**
-     * Specfies a policy for handling fPailed inserts.
+     * Specfies a policy for handling failed inserts.
      *
      * <p>Currently this only is allowed when writing an unbounded collection to BigQuery. Bounded
      * collections are written using batch load jobs, so we don't get per-element failures.
@@ -1465,7 +1945,7 @@ public class BigQueryIO {
 
     /**
      * Control how many file shards are written when using BigQuery load jobs. Applicable only when
-     * also setting {@link #withTriggeringFrequency}. The default value is 1000.
+     * also setting {@link #withTriggeringFrequency}.
      */
     @Experimental
     public Write<T> withNumFileShards(int numFileShards) {
@@ -1482,6 +1962,56 @@ public class BigQueryIO {
       return toBuilder().setCustomGcsTempLocation(customGcsTempLocation).build();
     }
 
+    /**
+     * Enables extended error information by enabling {@link WriteResult#getFailedInsertsWithErr()}
+     *
+     * <p>ATM this only works if using {@link Method#STREAMING_INSERTS}. See {@link
+     * Write#withMethod(Method)}.
+     */
+    public Write<T> withExtendedErrorInfo() {
+      return toBuilder().setExtendedErrorInfo(true).build();
+    }
+
+    /**
+     * Insert all valid rows of a request, even if invalid rows exist. This is only applicable when
+     * the write method is set to {@link Method#STREAMING_INSERTS}. The default value is false,
+     * which causes the entire request to fail if any invalid rows exist.
+     */
+    public Write<T> skipInvalidRows() {
+      return toBuilder().setSkipInvalidRows(true).build();
+    }
+
+    /**
+     * Accept rows that contain values that do not match the schema. The unknown values are ignored.
+     * Default is false, which treats unknown values as errors.
+     */
+    public Write<T> ignoreUnknownValues() {
+      return toBuilder().setIgnoreUnknownValues(true).build();
+    }
+
+    public Write<T> withKmsKey(String kmsKey) {
+      return toBuilder().setKmsKey(kmsKey).build();
+    }
+
+    /**
+     * If true, enables new codepaths that are expected to use less resources while writing to
+     * BigQuery. Not enabled by default in order to maintain backwards compatibility.
+     */
+    @Experimental
+    public Write<T> optimizedWrites() {
+      return toBuilder().setOptimizeWrites(true).build();
+    }
+
+    /**
+     * If true, then the BigQuery schema will be inferred from the input schema. If no
+     * formatFunction is set, then BigQueryIO will automatically turn the input records into
+     * TableRows that match the schema.
+     */
+    @Experimental
+    public Write<T> useBeamSchema() {
+      return toBuilder().setUseBeamSchema(true).build();
+    }
+
     @VisibleForTesting
     /** This method is for test usage only */
     public Write<T> withTestServices(BigQueryServices testServices) {
@@ -1489,8 +2019,17 @@ public class BigQueryIO {
       return toBuilder().setBigQueryServices(testServices).build();
     }
 
-    @VisibleForTesting
-    Write<T> withMaxFilesPerBundle(int maxFilesPerBundle) {
+    /**
+     * Control how many files will be written concurrently by a single worker when using BigQuery
+     * load jobs before spilling to a shuffle. When data comes into this transform, it is written to
+     * one file per destination per worker. When there are more files than maxFilesPerBundle
+     * (DEFAULT: 20), the data is shuffled (i.e. Grouped By Destination), and written to files
+     * one-by-one-per-worker. This flag sets the maximum number of files that a single worker can
+     * write concurrently before shuffling the data. This flag should be used with caution. Setting
+     * a high number can increase the memory pressure on workers, and setting a low number can make
+     * a pipeline slower (due to the need to shuffle data).
+     */
+    public Write<T> withMaxFilesPerBundle(int maxFilesPerBundle) {
       checkArgument(
           maxFilesPerBundle > 0, "maxFilesPerBundle must be > 0, but was: %s", maxFilesPerBundle);
       return toBuilder().setMaxFilesPerBundle(maxFilesPerBundle).build();
@@ -1500,6 +2039,24 @@ public class BigQueryIO {
     Write<T> withMaxFileSize(long maxFileSize) {
       checkArgument(maxFileSize > 0, "maxFileSize must be > 0, but was: %s", maxFileSize);
       return toBuilder().setMaxFileSize(maxFileSize).build();
+    }
+
+    @VisibleForTesting
+    Write<T> withMaxFilesPerPartition(int maxFilesPerPartition) {
+      checkArgument(
+          maxFilesPerPartition > 0,
+          "maxFilesPerPartition must be > 0, but was: %s",
+          maxFilesPerPartition);
+      return toBuilder().setMaxFilesPerPartition(maxFilesPerPartition).build();
+    }
+
+    @VisibleForTesting
+    Write<T> withMaxBytesPerPartition(long maxBytesPerPartition) {
+      checkArgument(
+          maxBytesPerPartition > 0,
+          "maxFilesPerPartition must be > 0, but was: %s",
+          maxBytesPerPartition);
+      return toBuilder().setMaxBytesPerPartition(maxBytesPerPartition).build();
     }
 
     @Override
@@ -1544,26 +2101,12 @@ public class BigQueryIO {
               || getDynamicDestinations() != null,
           "must set the table reference of a BigQueryIO.Write transform");
 
-      checkArgument(
-          getFormatFunction() != null,
-          "A function must be provided to convert type into a TableRow. "
-              + "use BigQueryIO.Write.withFormatFunction to provide a formatting function.");
-
-      // Require a schema if creating one or more tables.
-      checkArgument(
-          getCreateDisposition() != CreateDisposition.CREATE_IF_NEEDED
-              || getJsonSchema() != null
-              || getDynamicDestinations() != null
-              || getSchemaFromView() != null,
-          "CreateDisposition is CREATE_IF_NEEDED, however no schema was provided.");
-
       List<?> allToArgs =
           Lists.newArrayList(getJsonTableRef(), getTableFunction(), getDynamicDestinations());
       checkArgument(
           1
               == Iterables.size(
-                  allToArgs
-                      .stream()
+                  allToArgs.stream()
                       .filter(Predicates.notNull()::apply)
                       .collect(Collectors.toList())),
           "Exactly one of jsonTableRef, tableFunction, or " + "dynamicDestinations must be set");
@@ -1573,8 +2116,7 @@ public class BigQueryIO {
       checkArgument(
           2
               > Iterables.size(
-                  allSchemaArgs
-                      .stream()
+                  allSchemaArgs.stream()
                       .filter(Predicates.notNull()::apply)
                       .collect(Collectors.toList())),
           "No more than one of jsonSchema, schemaFromView, or dynamicDestinations may " + "be set");
@@ -1604,6 +2146,11 @@ public class BigQueryIO {
             "The supplied getTableFunction object can directly set TimePartitioning."
                 + " There is no need to call BigQueryIO.Write.withTimePartitioning.");
       }
+      if (getClustering() != null && getClustering().getFields() != null) {
+        checkArgument(
+            getJsonTimePartitioning() != null,
+            "Clustering fields can only be set when TimePartitioning is set.");
+      }
 
       DynamicDestinations<T, ?> dynamicDestinations = getDynamicDestinations();
       if (dynamicDestinations == null) {
@@ -1612,7 +2159,8 @@ public class BigQueryIO {
               DynamicDestinationsHelpers.ConstantTableDestinations.fromJsonTableRef(
                   getJsonTableRef(), getTableDescription());
         } else if (getTableFunction() != null) {
-          dynamicDestinations = new TableFunctionDestinations<>(getTableFunction());
+          dynamicDestinations =
+              new TableFunctionDestinations<>(getTableFunction(), getClustering() != null);
         }
 
         // Wrap with a DynamicDestinations class that will provide a schema. There might be no
@@ -1631,8 +2179,10 @@ public class BigQueryIO {
         // Wrap with a DynamicDestinations class that will provide the proper TimePartitioning.
         if (getJsonTimePartitioning() != null) {
           dynamicDestinations =
-              new ConstantTimePartitioningDestinations(
-                  dynamicDestinations, getJsonTimePartitioning());
+              new ConstantTimePartitioningDestinations<>(
+                  (DynamicDestinations<T, TableDestination>) dynamicDestinations,
+                  getJsonTimePartitioning(),
+                  StaticValueProvider.of(BigQueryHelpers.toJsonString(getClustering())));
         }
       }
       return expandTyped(input, dynamicDestinations);
@@ -1640,6 +2190,38 @@ public class BigQueryIO {
 
     private <DestinationT> WriteResult expandTyped(
         PCollection<T> input, DynamicDestinations<T, DestinationT> dynamicDestinations) {
+      boolean optimizeWrites = getOptimizeWrites();
+      SerializableFunction<T, TableRow> formatFunction = getFormatFunction();
+      if (getUseBeamSchema()) {
+        checkArgument(input.hasSchema());
+        optimizeWrites = true;
+        if (formatFunction == null) {
+          // If no format function set, then we will automatically convert the input type to a
+          // TableRow.
+          formatFunction = BigQueryUtils.toTableRow(input.getToRowFunction());
+        }
+        // Infer the TableSchema from the input Beam schema.
+        TableSchema tableSchema = BigQueryUtils.toTableSchema(input.getSchema());
+        dynamicDestinations =
+            new ConstantSchemaDestinations<>(
+                dynamicDestinations,
+                StaticValueProvider.of(BigQueryHelpers.toJsonString(tableSchema)));
+      } else {
+        // Require a schema if creating one or more tables.
+        checkArgument(
+            getCreateDisposition() != CreateDisposition.CREATE_IF_NEEDED
+                || getJsonSchema() != null
+                || getDynamicDestinations() != null
+                || getSchemaFromView() != null,
+            "CreateDisposition is CREATE_IF_NEEDED, however no schema was provided.");
+      }
+
+      checkArgument(
+          formatFunction != null,
+          "A function must be provided to convert type into a TableRow. "
+              + "use BigQueryIO.Write.withFormatFunction to provide a formatting function."
+              + "A format function is not required if Beam schemas are used.");
+
       Coder<DestinationT> destinationCoder = null;
       try {
         destinationCoder =
@@ -1649,13 +2231,43 @@ public class BigQueryIO {
         throw new RuntimeException(e);
       }
 
-      PCollection<KV<DestinationT, TableRow>> rowsWithDestination =
-          input
-              .apply("PrepareWrite", new PrepareWrite<>(dynamicDestinations, getFormatFunction()))
-              .setCoder(KvCoder.of(destinationCoder, TableRowJsonCoder.of()));
-
       Method method = resolveMethod(input);
+      if (optimizeWrites) {
+        PCollection<KV<DestinationT, T>> rowsWithDestination =
+            input
+                .apply(
+                    "PrepareWrite",
+                    new PrepareWrite<>(dynamicDestinations, SerializableFunctions.identity()))
+                .setCoder(KvCoder.of(destinationCoder, input.getCoder()));
+        return continueExpandTyped(
+            rowsWithDestination,
+            input.getCoder(),
+            destinationCoder,
+            dynamicDestinations,
+            formatFunction,
+            method);
+      } else {
+        PCollection<KV<DestinationT, TableRow>> rowsWithDestination =
+            input
+                .apply("PrepareWrite", new PrepareWrite<>(dynamicDestinations, formatFunction))
+                .setCoder(KvCoder.of(destinationCoder, TableRowJsonCoder.of()));
+        return continueExpandTyped(
+            rowsWithDestination,
+            TableRowJsonCoder.of(),
+            destinationCoder,
+            dynamicDestinations,
+            SerializableFunctions.identity(),
+            method);
+      }
+    }
 
+    private <DestinationT, ElementT> WriteResult continueExpandTyped(
+        PCollection<KV<DestinationT, ElementT>> input,
+        Coder<ElementT> elementCoder,
+        Coder<DestinationT> destinationCoder,
+        DynamicDestinations<T, DestinationT> dynamicDestinations,
+        SerializableFunction<ElementT, TableRow> toRowFunction,
+        Method method) {
       if (method == Method.STREAMING_INSERTS) {
         checkArgument(
             getWriteDisposition() != WriteDisposition.WRITE_TRUNCATE,
@@ -1663,17 +2275,22 @@ public class BigQueryIO {
         InsertRetryPolicy retryPolicy =
             MoreObjects.firstNonNull(getFailedInsertRetryPolicy(), InsertRetryPolicy.alwaysRetry());
 
-        StreamingInserts<DestinationT> streamingInserts =
-            new StreamingInserts<>(getCreateDisposition(), dynamicDestinations)
+        StreamingInserts<DestinationT, ElementT> streamingInserts =
+            new StreamingInserts<>(
+                    getCreateDisposition(), dynamicDestinations, elementCoder, toRowFunction)
                 .withInsertRetryPolicy(retryPolicy)
-                .withTestServices((getBigQueryServices()));
-        return rowsWithDestination.apply(streamingInserts);
+                .withTestServices(getBigQueryServices())
+                .withExtendedErrorInfo(getExtendedErrorInfo())
+                .withSkipInvalidRows(getSkipInvalidRows())
+                .withIgnoreUnknownValues(getIgnoreUnknownValues())
+                .withKmsKey(getKmsKey());
+        return input.apply(streamingInserts);
       } else {
         checkArgument(
             getFailedInsertRetryPolicy() == null,
             "Record-insert retry policies are not supported when using BigQuery load jobs.");
 
-        BatchLoads<DestinationT> batchLoads =
+        BatchLoads<DestinationT, ElementT> batchLoads =
             new BatchLoads<>(
                 getWriteDisposition(),
                 getCreateDisposition(),
@@ -1681,7 +2298,11 @@ public class BigQueryIO {
                 dynamicDestinations,
                 destinationCoder,
                 getCustomGcsTempLocation(),
-                getLoadJobProjectId());
+                getLoadJobProjectId(),
+                getIgnoreUnknownValues(),
+                elementCoder,
+                toRowFunction,
+                getKmsKey());
         batchLoads.setTestServices(getBigQueryServices());
         if (getMaxFilesPerBundle() != null) {
           batchLoads.setMaxNumWritersPerBundle(getMaxFilesPerBundle());
@@ -1689,9 +2310,17 @@ public class BigQueryIO {
         if (getMaxFileSize() != null) {
           batchLoads.setMaxFileSize(getMaxFileSize());
         }
+        batchLoads.setMaxFilesPerPartition(getMaxFilesPerPartition());
+        batchLoads.setMaxBytesPerPartition(getMaxBytesPerPartition());
+
+        // When running in streaming (unbounded mode) we want to retry failed load jobs
+        // indefinitely. Failing the bundle is expensive, so we set a fairly high limit on retries.
+        if (IsBounded.UNBOUNDED.equals(input.isBounded())) {
+          batchLoads.setMaxRetryJobs(1000);
+        }
         batchLoads.setTriggeringFrequency(getTriggeringFrequency());
         batchLoads.setNumFileShards(getNumFileShards());
-        return rowsWithDestination.apply(batchLoads);
+        return input.apply(batchLoads);
       }
     }
 

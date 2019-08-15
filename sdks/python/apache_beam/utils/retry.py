@@ -27,6 +27,7 @@ needed right now use a @retry.no_retries decorator.
 
 from __future__ import absolute_import
 
+import functools
 import logging
 import random
 import sys
@@ -103,11 +104,31 @@ def retry_on_server_errors_filter(exception):
   return not isinstance(exception, PermanentException)
 
 
+# TODO(BEAM-6202): Dataflow returns 404 for job ids that actually exist.
+# Retry on those errors.
+def retry_on_server_errors_and_notfound_filter(exception):
+  if HttpError is not None and isinstance(exception, HttpError):
+    if exception.status_code == 404:  # 404 Not Found
+      return True
+  return retry_on_server_errors_filter(exception)
+
+
 def retry_on_server_errors_and_timeout_filter(exception):
   if HttpError is not None and isinstance(exception, HttpError):
     if exception.status_code == 408:  # 408 Request Timeout
       return True
   return retry_on_server_errors_filter(exception)
+
+
+def retry_on_server_errors_timeout_or_quota_issues_filter(exception):
+  """Retry on server, timeout and 403 errors.
+
+  403 errors can be accessDenied, billingNotEnabled, and also quotaExceeded,
+  rateLimitExceeded."""
+  if HttpError is not None and isinstance(exception, HttpError):
+    if exception.status_code == 403:
+      return True
+  return retry_on_server_errors_and_timeout_filter(exception)
 
 
 def retry_on_beam_io_error_filter(exception):
@@ -174,6 +195,7 @@ def with_exponential_backoff(
 
   def real_decorator(fun):
     """The real decorator whose purpose is to return the wrapped function."""
+    @functools.wraps(fun)
     def wrapper(*args, **kwargs):
       retry_intervals = iter(
           FuzzedExponentialIntervals(
@@ -209,7 +231,6 @@ def with_exponential_backoff(
             # Traceback objects in locals can cause reference cycles that will
             # prevent garbage collection. Clear it now since we do not need
             # it anymore.
-            sys.exc_clear()
             exn_traceback = None
 
     return wrapper

@@ -55,7 +55,8 @@ if not getattr(dill, '_dill', None):
 def _is_nested_class(cls):
   """Returns true if argument is a class object that appears to be nested."""
   return (isinstance(cls, type)
-          and cls.__module__ != '__builtin__'
+          and cls.__module__ != 'builtins'     # Python 3
+          and cls.__module__ != '__builtin__'  # Python 2
           and cls.__name__ not in sys.modules[cls.__module__].__dict__)
 
 
@@ -163,9 +164,22 @@ if 'save_module' in dir(dill.dill):
     obj_id = id(obj)
     if not known_module_dicts or '__file__' in obj or '__package__' in obj:
       if obj_id not in known_module_dicts:
+        # Trigger loading of lazily loaded modules (such as pytest vendored
+        # modules).
+        # This first pass over sys.modules needs to iterate on a copy of
+        # sys.modules since lazy loading modifies the dictionary, hence the use
+        # of list().
+        for m in list(sys.modules.values()):
+          try:
+            _ = m.__dict__
+          except AttributeError:
+            pass
+
         for m in sys.modules.values():
           try:
-            if m and m.__name__ != '__main__':
+            if (m
+                and m.__name__ != '__main__'
+                and isinstance(m, dill.dill.ModuleType)):
               d = m.__dict__
               known_module_dicts[id(d)] = m, d
           except AttributeError:
@@ -183,6 +197,13 @@ if 'save_module' in dir(dill.dill):
     else:
       return old_save_module_dict(pickler, obj)
   dill.dill.save_module_dict = new_save_module_dict
+
+  if hasattr(types, "MappingProxyType"):
+    @dill.dill.register(types.MappingProxyType)
+    def save_mappingproxy(pickler, obj):
+      # pickling mappingproxy AS IS, not as dict
+      # inspired from https://github.com/cloudpipe/cloudpickle/pull/245
+      pickler.save_reduce(types.MappingProxyType, (dict(obj),), obj=obj)
 
   def _nest_dill_logging():
     """Prefix all dill logging with its depth in the callstack.

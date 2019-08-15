@@ -20,9 +20,10 @@ import CommonJobProperties as commonJobProperties
 import PostcommitJobBuilder
 
 // This job runs the suite of ValidatesRunner tests against the Samza runner.
-PostcommitJobBuilder.postCommitJob('beam_PostCommit_Java_ValidatesRunner_Samza_Gradle',
+PostcommitJobBuilder.postCommitJob('beam_PostCommit_Java_ValidatesRunner_Samza',
   'Run Samza ValidatesRunner', 'Apache Samza Runner ValidatesRunner Tests', this) {
   description('Runs the ValidatesRunner suite on the Samza runner.')
+  previousNames(/beam_PostCommit_Java_ValidatesRunner_Samza_Gradle/)
 
   // Set common parameters.
   commonJobProperties.setTopLevelMainJobProperties(delegate)
@@ -36,7 +37,7 @@ PostcommitJobBuilder.postCommitJob('beam_PostCommit_Java_ValidatesRunner_Samza_G
   steps {
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-runners-samza:validatesRunner')
+      tasks(':runners:samza:validatesRunner')
       commonJobProperties.setGradleSwitches(delegate)
     }
   }

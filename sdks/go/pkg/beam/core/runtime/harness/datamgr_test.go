@@ -22,7 +22,6 @@ import (
 	"log"
 	"testing"
 
-	"github.com/apache/beam/sdks/go/pkg/beam/core/runtime/exec"
 	pb "github.com/apache/beam/sdks/go/pkg/beam/model/fnexecution_v1"
 )
 
@@ -38,10 +37,7 @@ func (f *fakeClient) Recv() (*pb.Elements, error) {
 	elemData := pb.Elements_Data{
 		InstructionReference: "inst_ref",
 		Data:                 data,
-		Target: &pb.Target{
-			PrimitiveTransformReference: "ptr",
-			Name: "instruction_name",
-		},
+		PtransformId:         "ptr",
 	}
 
 	msg := pb.Elements{}
@@ -80,19 +76,16 @@ func TestDataChannelTerminateOnClose(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	done := make(chan bool, 1)
 	client := &fakeClient{t: t, done: done}
-	c, err := makeDataChannel(context.Background(), nil, client, exec.Port{})
-	if err != nil {
-		t.Errorf("Unexpected error in makeDataChannel: %v", err)
-	}
+	c := makeDataChannel(context.Background(), "id", client)
 
-	r, err := c.OpenRead(context.Background(), exec.StreamID{Port: exec.Port{URL: ""}, Target: exec.Target{ID: "ptr", Name: "instruction_name"}, InstID: "inst_ref"})
+	r := c.OpenRead(context.Background(), "ptr", "inst_ref")
 	var read = make([]byte, 4)
 
 	// We don't read up all the buffered data, but immediately close the reader.
 	// Previously, since nothing was consuming the incoming gRPC data, the whole
 	// data channel would get stuck, and the client.Recv() call was eventually
 	// no longer called.
-	_, err = r.Read(read)
+	_, err := r.Read(read)
 	if err != nil {
 		t.Errorf("Unexpected error from read: %v", err)
 	}

@@ -17,12 +17,9 @@
  */
 package org.apache.beam.fn.harness;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
 
 import com.google.auto.service.AutoService;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
@@ -30,15 +27,17 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import org.apache.beam.fn.harness.DoFnPTransformRunnerFactory.Context;
 import org.apache.beam.fn.harness.state.FnApiStateAccessor;
-import org.apache.beam.model.fnexecution.v1.BeamFnApi.BundleSplit.Application;
-import org.apache.beam.model.fnexecution.v1.BeamFnApi.BundleSplit.DelayedApplication;
+import org.apache.beam.model.fnexecution.v1.BeamFnApi.BundleApplication;
+import org.apache.beam.model.fnexecution.v1.BeamFnApi.DelayedBundleApplication;
 import org.apache.beam.runners.core.OutputAndTimeBoundedSplittableProcessElementInvoker;
 import org.apache.beam.runners.core.OutputWindowedValue;
 import org.apache.beam.runners.core.SplittableProcessElementInvoker;
 import org.apache.beam.runners.core.construction.PTransformTranslation;
+import org.apache.beam.runners.core.construction.Timer;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.fn.data.FnDataReceiver;
 import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.state.TimeDomain;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.reflect.DoFnInvoker;
 import org.apache.beam.sdk.transforms.reflect.DoFnInvokers;
@@ -50,7 +49,11 @@ import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.util.WindowedValue.FullWindowedValueCoder;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.TupleTag;
-import org.apache.beam.vendor.protobuf.v3.com.google.protobuf.ByteString;
+import org.apache.beam.vendor.grpc.v1p21p0.com.google.protobuf.ByteString;
+import org.apache.beam.vendor.grpc.v1p21p0.com.google.protobuf.util.Timestamps;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 
@@ -68,7 +71,9 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
 
   static class Factory<InputT, RestrictionT, OutputT>
       extends DoFnPTransformRunnerFactory<
-          KV<InputT, RestrictionT>, InputT, OutputT,
+          KV<InputT, RestrictionT>,
+          InputT,
+          OutputT,
           SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>> {
 
     @Override
@@ -82,7 +87,7 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
           context,
           windowedCoder,
           (Collection<FnDataReceiver<WindowedValue<OutputT>>>)
-              (Collection) context.tagToConsumer.get(context.mainOutputTag),
+              (Collection) context.localNameToConsumer.get(context.mainOutputTag.getId()),
           Iterables.getOnlyElement(context.pTransform.getInputsMap().keySet()));
     }
   }
@@ -151,8 +156,7 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
     processElementTyped(elem);
   }
 
-  private <PositionT, TrackerT extends RestrictionTracker<RestrictionT, PositionT>>
-      void processElementTyped(WindowedValue<KV<InputT, RestrictionT>> elem) {
+  private <PositionT> void processElementTyped(WindowedValue<KV<InputT, RestrictionT>> elem) {
     checkArgument(
         elem.getWindows().size() == 1,
         "SPLITTABLE_PROCESS_ELEMENTS expects its input to be in 1 window, but got %s windows",
@@ -170,9 +174,9 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
             (Coder<BoundedWindow>) context.windowCoder,
             () -> elem,
             () -> window);
-    TrackerT tracker = doFnInvoker.invokeNewTracker(elem.getValue().getValue());
-    OutputAndTimeBoundedSplittableProcessElementInvoker<
-            InputT, OutputT, RestrictionT, PositionT, TrackerT>
+    RestrictionTracker<RestrictionT, PositionT> tracker =
+        doFnInvoker.invokeNewTracker(elem.getValue().getValue());
+    OutputAndTimeBoundedSplittableProcessElementInvoker<InputT, OutputT, RestrictionT, PositionT>
         processElementInvoker =
             new OutputAndTimeBoundedSplittableProcessElementInvoker<>(
                 context.doFn,
@@ -196,7 +200,7 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
                       Collection<? extends BoundedWindow> windows,
                       PaneInfo pane) {
                     Collection<FnDataReceiver<WindowedValue<AdditionalOutputT>>> consumers =
-                        (Collection) context.tagToConsumer.get(tag);
+                        (Collection) context.localNameToConsumer.get(tag.getId());
                     if (consumers == null) {
                       throw new IllegalArgumentException(
                           String.format("Unknown output tag %s", tag));
@@ -208,7 +212,7 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
                 executor,
                 10000,
                 Duration.standardSeconds(10));
-    SplittableProcessElementInvoker<InputT, OutputT, RestrictionT, TrackerT>.Result result =
+    SplittableProcessElementInvoker<InputT, OutputT, RestrictionT, PositionT>.Result result =
         processElementInvoker.invokeProcessElement(doFnInvoker, element, tracker);
     this.stateAccessor = null;
 
@@ -225,14 +229,14 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
-      Application primaryApplication =
-          Application.newBuilder()
+      BundleApplication primaryApplication =
+          BundleApplication.newBuilder()
               .setPtransformId(context.ptransformId)
               .setInputId(mainInputId)
               .setElement(primaryBytes.toByteString())
               .build();
-      Application residualApplication =
-          Application.newBuilder()
+      BundleApplication residualApplication =
+          BundleApplication.newBuilder()
               .setPtransformId(context.ptransformId)
               .setInputId(mainInputId)
               .setElement(residualBytes.toByteString())
@@ -240,11 +244,20 @@ public class SplittableProcessElementsRunner<InputT, RestrictionT, OutputT>
       context.splitListener.split(
           ImmutableList.of(primaryApplication),
           ImmutableList.of(
-              DelayedApplication.newBuilder()
+              DelayedBundleApplication.newBuilder()
                   .setApplication(residualApplication)
-                  .setDelaySec(0.001 * result.getContinuation().resumeDelay().getMillis())
+                  .setRequestedExecutionTime(
+                      Timestamps.fromMillis(
+                          System.currentTimeMillis()
+                              + result.getContinuation().resumeDelay().getMillis()))
                   .build()));
     }
+  }
+
+  @Override
+  public void processTimer(
+      String timerId, TimeDomain timeDomain, WindowedValue<KV<Object, Timer>> input) {
+    throw new UnsupportedOperationException("Timers are unsupported in a SplittableDoFn.");
   }
 
   @Override

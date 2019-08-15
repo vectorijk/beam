@@ -21,6 +21,7 @@ from __future__ import absolute_import
 
 import functools
 import inspect
+import sys
 import unittest
 from builtins import next
 from builtins import range
@@ -30,6 +31,7 @@ from apache_beam.typehints import Any
 from apache_beam.typehints import Tuple
 from apache_beam.typehints import TypeCheckError
 from apache_beam.typehints import Union
+from apache_beam.typehints import native_type_compatibility
 from apache_beam.typehints import with_input_types
 from apache_beam.typehints import with_output_types
 from apache_beam.typehints.decorators import GeneratorWrapper
@@ -38,6 +40,7 @@ from apache_beam.typehints.decorators import _interleave_type_check
 from apache_beam.typehints.decorators import _positional_arg_hints
 from apache_beam.typehints.decorators import get_type_hints
 from apache_beam.typehints.decorators import getcallargs_forhints
+from apache_beam.typehints.decorators import getfullargspec
 from apache_beam.typehints.typehints import is_consistent_with
 
 
@@ -66,7 +69,7 @@ def check_type_hints(f):
             kwargs[var] = new_value
           else:
             args = list(args)
-            for ix, pvar in enumerate(inspect.getargspec(f).args):
+            for ix, pvar in enumerate(getfullargspec(f).args):
               if pvar == var:
                 args[ix] = new_value
                 break
@@ -96,11 +99,13 @@ class SubClass(SuperClass):
 class TypeHintTestCase(unittest.TestCase):
 
   def assertCompatible(self, base, sub):  # pylint: disable=invalid-name
+    base, sub = native_type_compatibility.convert_to_beam_types([base, sub])
     self.assertTrue(
         is_consistent_with(sub, base),
         '%s is not consistent with %s' % (sub, base))
 
   def assertNotCompatible(self, base, sub):  # pylint: disable=invalid-name
+    base, sub = native_type_compatibility.convert_to_beam_type([base, sub])
     self.assertFalse(
         is_consistent_with(sub, base),
         '%s is consistent with %s' % (sub, base))
@@ -225,6 +230,17 @@ class UnionHintTestCase(TypeHintTestCase):
                      "instance of one of: ('float', 'int'), received str "
                      "instead.",
                      e.exception.args[0])
+
+  def test_dict_union(self):
+    hint = Union[typehints.Dict[Any, int],
+                 typehints.Dict[Union[()], Union[()]]]
+    self.assertEqual(typehints.Dict[Any, int], hint)
+
+  def test_empty_union(self):
+    self.assertEqual(typehints.Union[()],
+                     typehints.Union[typehints.Union[()], typehints.Union[()]])
+    self.assertEqual(int,
+                     typehints.Union[typehints.Union[()], int])
 
 
 class OptionalHintTestCase(TypeHintTestCase):
@@ -476,8 +492,8 @@ class KVHintTestCase(TypeHintTestCase):
       typehints.KV[int, str, bool]
 
     self.assertEqual("Length of parameters to a KV type-hint must be "
-                     "exactly 2. Passed parameters: (<type 'int'>, <type "
-                     "'str'>, <type 'bool'>), have a length of 3.",
+                     "exactly 2. Passed parameters: ({}, {}, {}), have a "
+                     "length of 3.".format(int, str, bool),
                      e.exception.args[0])
 
   def test_getitem_proxy_to_tuple(self):
@@ -505,8 +521,8 @@ class DictHintTestCase(TypeHintTestCase):
       typehints.Dict[float, int, bool]
 
     self.assertEqual("Length of parameters to a Dict type-hint must be "
-                     "exactly 2. Passed parameters: (<type 'float'>, <type "
-                     "'int'>, <type 'bool'>), have a length of 3.",
+                     "exactly 2. Passed parameters: ({}, {}, {}), have a "
+                     "length of 3.".format(float, int, bool),
                      e.exception.args[0])
 
   def test_key_type_must_be_valid_composite_param(self):
@@ -591,8 +607,8 @@ class SetHintTestCase(TypeHintTestCase):
     with self.assertRaises(TypeError) as e:
       typehints.Set[list]
     self.assertEqual("Parameter to a Set hint must be a non-sequence, a "
-                     "type, or a TypeConstraint. <type 'list'> is an "
-                     "instance of type.",
+                     "type, or a TypeConstraint. {} is an instance of "
+                     "type.".format(list),
                      e.exception.args[0])
 
   def test_compatibility(self):
@@ -810,8 +826,8 @@ class TakesDecoratorTestCase(TypeHintTestCase):
       m = 'a'
       foo(m)
     self.assertEqual("Type-hint for argument: 'a' violated. Expected an "
-                     "instance of <type 'int'>, instead found an "
-                     "instance of <type 'str'>.",
+                     "instance of {}, instead found an instance of "
+                     "{}.".format(int, type(m)),
                      e.exception.args[0])
 
   def test_composite_type_assertion(self):
@@ -861,11 +877,12 @@ class TakesDecoratorTestCase(TypeHintTestCase):
       return a - b
 
     with self.assertRaises(TypeCheckError) as e:
-      sub(1, 'two')
+      m = 'two'
+      sub(1, m)
 
     self.assertEqual("Type-hint for argument: 'b' violated. Expected an "
-                     "instance of <type 'int'>, instead found an instance "
-                     "of <type 'str'>.",
+                     "instance of {}, instead found an instance of "
+                     "{}.".format(int, type(m)),
                      e.exception.args[0])
 
   def test_valid_only_positional_arguments(self):
@@ -907,11 +924,12 @@ class ReturnsDecoratorTestCase(TypeHintTestCase):
     def foo(a):
       return 'test'
     with self.assertRaises(TypeCheckError) as e:
-      foo(4)
+      m = 4
+      foo(m)
 
     self.assertEqual("Type-hint for return type violated. Expected an "
-                     "instance of <type 'int'>, instead found an instance "
-                     "of <type 'str'>.",
+                     "instance of {}, instead found an instance of "
+                     "{}.".format(int, type('test')),
                      e.exception.args[0])
 
   def test_type_check_simple_type(self):
@@ -1045,24 +1063,82 @@ class DecoratorHelpers(TypeHintTestCase):
     self.assertFalse(is_consistent_with(Union[str, int], str))
 
   def test_positional_arg_hints(self):
-    self.assertEquals(typehints.Any, _positional_arg_hints('x', {}))
-    self.assertEquals(int, _positional_arg_hints('x', {'x': int}))
-    self.assertEquals(typehints.Tuple[int, typehints.Any],
-                      _positional_arg_hints(['x', 'y'], {'x': int}))
+    self.assertEqual(typehints.Any, _positional_arg_hints('x', {}))
+    self.assertEqual(int, _positional_arg_hints('x', {'x': int}))
+    self.assertEqual(typehints.Tuple[int, typehints.Any],
+                     _positional_arg_hints(['x', 'y'], {'x': int}))
 
   def test_getcallargs_forhints(self):
     def func(a, b_c, *d):
       b, c = b_c # pylint: disable=unused-variable
       return None
-    self.assertEquals(
+    self.assertEqual(
         {'a': Any, 'b_c': Any, 'd': Tuple[Any, ...]},
         getcallargs_forhints(func, *[Any, Any]))
-    self.assertEquals(
+    self.assertEqual(
         {'a': Any, 'b_c': Any, 'd': Tuple[Any, ...]},
         getcallargs_forhints(func, *[Any, Any, Any, int]))
-    self.assertEquals(
+    self.assertEqual(
         {'a': int, 'b_c': Tuple[str, Any], 'd': Tuple[Any, ...]},
         getcallargs_forhints(func, *[int, Tuple[str, Any]]))
+
+  def test_getcallargs_forhints_builtins(self):
+    if sys.version_info.major < 3:
+      self.assertEqual(
+          {'_': str,
+           '__unknown__varargs': Tuple[Any, ...],
+           '__unknown__keywords': typehints.Dict[Any, Any]},
+          getcallargs_forhints(str.upper, str))
+      self.assertEqual(
+          {'_': str,
+           '__unknown__varargs': Tuple[Any, ...],
+           '__unknown__keywords': typehints.Dict[Any, Any]},
+          getcallargs_forhints(str.strip, str, str))
+      self.assertEqual(
+          {'_': str,
+           '__unknown__varargs': Tuple[Any, ...],
+           '__unknown__keywords': typehints.Dict[Any, Any]},
+          getcallargs_forhints(str.join, str, list))
+    elif sys.version_info.minor < 7:
+      # Signatures for builtins are not supported in 3.5 and 3.6.
+      self.assertEqual({}, getcallargs_forhints(str.upper, str))
+      self.assertEqual({}, getcallargs_forhints(str.strip, str, str))
+      self.assertEqual({}, getcallargs_forhints(str.join, str, list))
+    else:
+      self.assertEqual(
+          {'self': str},
+          getcallargs_forhints(str.upper, str))
+      # str.strip has an optional second argument.
+      self.assertEqual({'self': str, 'chars': Any},
+                       getcallargs_forhints(str.strip, str))
+      self.assertEqual({'self': str, 'iterable': list},
+                       getcallargs_forhints(str.join, str, list))
+
+
+class TestCoerceToKvType(TypeHintTestCase):
+  def test_coercion_success(self):
+    cases = [
+        ((Any, ), typehints.KV[Any, Any]),
+        ((typehints.KV[Any, Any],), typehints.KV[Any, Any]),
+        ((typehints.Tuple[str, int],), typehints.KV[str, int]),
+    ]
+    for args, expected in cases:
+      self.assertEqual(typehints.coerce_to_kv_type(*args), expected)
+      self.assertCompatible(args[0], expected)
+
+  def test_coercion_fail(self):
+    cases = [
+        ((str, 'label', 'producer'), r'producer.*compatible'),
+        ((Tuple[str],), r'two components'),
+        # It seems that the only Unions that may be successfully coerced are not
+        # Unions but Any (e.g. Union[Any, Tuple[Any, Any]] is Any).
+        ((Union[str, int],), r'compatible'),
+        ((Union,), r'compatible'),
+        ((typehints.List[Any],), r'compatible'),
+    ]
+    for args, regex in cases:
+      with self.assertRaisesRegexp(ValueError, regex):
+        typehints.coerce_to_kv_type(*args)
 
 
 if __name__ == '__main__':

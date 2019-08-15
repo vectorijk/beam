@@ -18,7 +18,7 @@
 package org.apache.beam.sdk.io.gcp.spanner;
 
 import com.google.cloud.spanner.Mutation;
-import com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
 
 final class MutationUtils {
   private MutationUtils() {}

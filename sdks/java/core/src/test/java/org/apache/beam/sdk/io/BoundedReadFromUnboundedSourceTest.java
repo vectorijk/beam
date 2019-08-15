@@ -37,15 +37,16 @@ import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.VarIntCoder;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.testing.NeedsRunner;
 import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.testing.TestPipeline;
-import org.apache.beam.sdk.testing.ValidatesRunner;
 import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.display.DisplayData;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -62,19 +63,20 @@ public class BoundedReadFromUnboundedSourceTest implements Serializable {
   @Rule public transient TestPipeline p = TestPipeline.create();
 
   @Test
-  @Category(ValidatesRunner.class)
+  @Category(NeedsRunner.class)
   public void testNoDedup() throws Exception {
     test(false, false);
   }
 
   @Test
-  @Category(ValidatesRunner.class)
+  @Category(NeedsRunner.class)
   public void testDedup() throws Exception {
     test(true, false);
   }
 
-  @Test
-  @Category(ValidatesRunner.class)
+  @Test(timeout = 15000L)
+  @Ignore("https://issues.apache.org/jira/browse/BEAM-6354")
+  @Category(NeedsRunner.class)
   public void testTimeBound() throws Exception {
     test(false, true);
   }

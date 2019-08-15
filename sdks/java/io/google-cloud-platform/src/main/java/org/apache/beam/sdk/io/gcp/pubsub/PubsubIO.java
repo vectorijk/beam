@@ -17,10 +17,10 @@
  */
 package org.apache.beam.sdk.io.gcp.pubsub;
 
-import static com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkState;
 
+import com.google.api.client.util.Clock;
 import com.google.auto.value.AutoValue;
-import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.Message;
 import java.io.IOException;
 import java.io.Serializable;
@@ -28,10 +28,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
+import javax.naming.SizeLimitExceededException;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.reflect.ReflectData;
 import org.apache.beam.sdk.PipelineRunner;
+import org.apache.beam.sdk.annotations.Experimental;
+import org.apache.beam.sdk.annotations.Experimental.Kind;
 import org.apache.beam.sdk.coders.AvroCoder;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderException;
@@ -44,6 +50,8 @@ import org.apache.beam.sdk.io.gcp.pubsub.PubsubClient.TopicPath;
 import org.apache.beam.sdk.options.ValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.NestedValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
+import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.sdk.schemas.utils.AvroUtils;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.PTransform;
@@ -56,6 +64,10 @@ import org.apache.beam.sdk.util.CoderUtils;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PDone;
+import org.apache.beam.sdk.values.Row;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.annotations.VisibleForTesting;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.MoreObjects;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
 import org.joda.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -427,7 +439,10 @@ public class PubsubIO {
 
   /** Returns A {@link PTransform} that continuously reads from a Google Cloud Pub/Sub stream. */
   private static <T> Read<T> read() {
-    return new AutoValue_PubsubIO_Read.Builder<T>().setNeedsAttributes(false).build();
+    return new AutoValue_PubsubIO_Read.Builder<T>()
+        .setNeedsAttributes(false)
+        .setPubsubClientFactory(FACTORY)
+        .build();
   }
 
   /**
@@ -437,6 +452,7 @@ public class PubsubIO {
    */
   public static Read<PubsubMessage> readMessages() {
     return new AutoValue_PubsubIO_Read.Builder<PubsubMessage>()
+        .setPubsubClientFactory(FACTORY)
         .setCoder(PubsubMessagePayloadOnlyCoder.of())
         .setParseFn(new IdentityMessageFn())
         .setNeedsAttributes(false)
@@ -450,6 +466,7 @@ public class PubsubIO {
    */
   public static Read<PubsubMessage> readMessagesWithAttributes() {
     return new AutoValue_PubsubIO_Read.Builder<PubsubMessage>()
+        .setPubsubClientFactory(FACTORY)
         .setCoder(PubsubMessageWithAttributesCoder.of())
         .setParseFn(new IdentityMessageFn())
         .setNeedsAttributes(true)
@@ -461,8 +478,12 @@ public class PubsubIO {
    * Pub/Sub stream.
    */
   public static Read<String> readStrings() {
-    return PubsubIO.<String>read()
-        .withCoderAndParseFn(StringUtf8Coder.of(), new ParsePayloadAsUtf8());
+    return new AutoValue_PubsubIO_Read.Builder<String>()
+        .setNeedsAttributes(false)
+        .setPubsubClientFactory(FACTORY)
+        .setCoder(StringUtf8Coder.of())
+        .setParseFn(new ParsePayloadAsUtf8())
+        .build();
   }
 
   /**
@@ -474,7 +495,12 @@ public class PubsubIO {
     // We should not be relying on the fact that ProtoCoder's wire format is identical to
     // the protobuf wire format, as the wire format is not part of a coder's API.
     ProtoCoder<T> coder = ProtoCoder.of(messageClass);
-    return PubsubIO.<T>read().withCoderAndParseFn(coder, new ParsePayloadUsingCoder<>(coder));
+    return new AutoValue_PubsubIO_Read.Builder<T>()
+        .setNeedsAttributes(false)
+        .setPubsubClientFactory(FACTORY)
+        .setCoder(coder)
+        .setParseFn(new ParsePayloadUsingCoder<>(coder))
+        .build();
   }
 
   /**
@@ -486,7 +512,58 @@ public class PubsubIO {
     // We should not be relying on the fact that AvroCoder's wire format is identical to
     // the Avro wire format, as the wire format is not part of a coder's API.
     AvroCoder<T> coder = AvroCoder.of(clazz);
-    return PubsubIO.<T>read().withCoderAndParseFn(coder, new ParsePayloadUsingCoder<>(coder));
+    return new AutoValue_PubsubIO_Read.Builder<T>()
+        .setNeedsAttributes(false)
+        .setPubsubClientFactory(FACTORY)
+        .setCoder(coder)
+        .setParseFn(new ParsePayloadUsingCoder<>(coder))
+        .build();
+  }
+
+  /**
+   * Returns a {@link PTransform} that continuously reads binary encoded Avro messages into the Avro
+   * {@link GenericRecord} type.
+   *
+   * <p>Beam will infer a schema for the Avro schema. This allows the output to be used by SQL and
+   * by the schema-transform library.
+   */
+  @Experimental(Kind.SCHEMAS)
+  public static Read<GenericRecord> readAvroGenericRecords(org.apache.avro.Schema avroSchema) {
+    Schema schema = AvroUtils.getSchema(GenericRecord.class, avroSchema);
+    AvroCoder<GenericRecord> coder = AvroCoder.of(GenericRecord.class, avroSchema);
+    return new AutoValue_PubsubIO_Read.Builder<GenericRecord>()
+        .setNeedsAttributes(false)
+        .setPubsubClientFactory(FACTORY)
+        .setBeamSchema(schema)
+        .setToRowFn(AvroUtils.getToRowFunction(GenericRecord.class, avroSchema))
+        .setFromRowFn(AvroUtils.getFromRowFunction(GenericRecord.class))
+        .setParseFn(new ParsePayloadUsingCoder<>(coder))
+        .build();
+  }
+
+  /**
+   * Returns a {@link PTransform} that continuously reads binary encoded Avro messages of the
+   * specific type.
+   *
+   * <p>Beam will infer a schema for the Avro schema. This allows the output to be used by SQL and
+   * by the schema-transform library.
+   */
+  @Experimental(Kind.SCHEMAS)
+  public static <T> Read<T> readAvrosWithBeamSchema(Class<T> clazz) {
+    if (clazz.equals(GenericRecord.class)) {
+      throw new IllegalArgumentException("For GenericRecord, please call readAvroGenericRecords");
+    }
+    org.apache.avro.Schema avroSchema = ReflectData.get().getSchema(clazz);
+    AvroCoder<T> coder = AvroCoder.of(clazz);
+    Schema schema = AvroUtils.getSchema(clazz, null);
+    return new AutoValue_PubsubIO_Read.Builder<T>()
+        .setNeedsAttributes(false)
+        .setPubsubClientFactory(FACTORY)
+        .setBeamSchema(schema)
+        .setToRowFn(AvroUtils.getToRowFunction(clazz, avroSchema))
+        .setFromRowFn(AvroUtils.getFromRowFunction(clazz))
+        .setParseFn(new ParsePayloadUsingCoder<>(coder))
+        .build();
   }
 
   /** Returns A {@link PTransform} that writes to a Google Cloud Pub/Sub stream. */
@@ -533,6 +610,9 @@ public class PubsubIO {
     abstract ValueProvider<PubsubTopic> getTopicProvider();
 
     @Nullable
+    abstract PubsubClient.PubsubClientFactory getPubsubClientFactory();
+
+    @Nullable
     abstract ValueProvider<PubsubSubscription> getSubscriptionProvider();
 
     /** The name of the message attribute to read timestamps from. */
@@ -551,6 +631,18 @@ public class PubsubIO {
     @Nullable
     abstract SimpleFunction<PubsubMessage, T> getParseFn();
 
+    @Nullable
+    abstract Schema getBeamSchema();
+
+    @Nullable
+    abstract SerializableFunction<T, Row> getToRowFn();
+
+    @Nullable
+    abstract SerializableFunction<Row, T> getFromRowFn();
+
+    @Nullable
+    abstract Clock getClock();
+
     abstract boolean getNeedsAttributes();
 
     abstract Builder<T> toBuilder();
@@ -558,6 +650,8 @@ public class PubsubIO {
     @AutoValue.Builder
     abstract static class Builder<T> {
       abstract Builder<T> setTopicProvider(ValueProvider<PubsubTopic> topic);
+
+      abstract Builder<T> setPubsubClientFactory(PubsubClient.PubsubClientFactory clientFactory);
 
       abstract Builder<T> setSubscriptionProvider(ValueProvider<PubsubSubscription> subscription);
 
@@ -569,7 +663,15 @@ public class PubsubIO {
 
       abstract Builder<T> setParseFn(SimpleFunction<PubsubMessage, T> parseFn);
 
+      abstract Builder<T> setBeamSchema(@Nullable Schema beamSchema);
+
+      abstract Builder<T> setToRowFn(@Nullable SerializableFunction<T, Row> toRowFn);
+
+      abstract Builder<T> setFromRowFn(@Nullable SerializableFunction<Row, T> fromRowFn);
+
       abstract Builder<T> setNeedsAttributes(boolean needsAttributes);
+
+      abstract Builder<T> setClock(@Nullable Clock clock);
 
       abstract Read<T> build();
     }
@@ -626,6 +728,16 @@ public class PubsubIO {
     }
 
     /**
+     * The default client to write to Pub/Sub is the {@link PubsubJsonClient}, created by the {@link
+     * PubsubJsonClient.PubsubJsonClientFactory}. This function allows to change the Pub/Sub client
+     * by providing another {@link PubsubClient.PubsubClientFactory} like the {@link
+     * PubsubGrpcClientFactory}.
+     */
+    public Read<T> withClientFactory(PubsubClient.PubsubClientFactory factory) {
+      return toBuilder().setPubsubClientFactory(factory).build();
+    }
+
+    /**
      * When reading from Cloud Pub/Sub where record timestamps are provided as Pub/Sub message
      * attributes, specifies the name of the attribute that contains the timestamp.
      *
@@ -676,8 +788,18 @@ public class PubsubIO {
      * output type T must be registered or set on the output via {@link
      * PCollection#setCoder(Coder)}.
      */
-    private Read<T> withCoderAndParseFn(Coder<T> coder, SimpleFunction<PubsubMessage, T> parseFn) {
+    public Read<T> withCoderAndParseFn(Coder<T> coder, SimpleFunction<PubsubMessage, T> parseFn) {
       return toBuilder().setCoder(coder).setParseFn(parseFn).build();
+    }
+
+    @VisibleForTesting
+    /**
+     * Set's the internal Clock.
+     *
+     * <p>Only for use by unit tests.
+     */
+    Read<T> withClock(Clock clock) {
+      return toBuilder().setClock(clock).build();
     }
 
     @Override
@@ -703,14 +825,18 @@ public class PubsubIO {
               : NestedValueProvider.of(getSubscriptionProvider(), new SubscriptionPathTranslator());
       PubsubUnboundedSource source =
           new PubsubUnboundedSource(
-              FACTORY,
+              getClock(),
+              Optional.ofNullable(getPubsubClientFactory()).orElse(FACTORY),
               null /* always get project from runtime PipelineOptions */,
               topicPath,
               subscriptionPath,
               getTimestampAttribute(),
               getIdAttribute(),
               getNeedsAttributes());
-      return input.apply(source).apply(MapElements.via(getParseFn())).setCoder(getCoder());
+      PCollection<T> read = input.apply(source).apply(MapElements.via(getParseFn()));
+      return (getBeamSchema() != null)
+          ? read.setSchema(getBeamSchema(), getToRowFn(), getFromRowFn())
+          : read.setCoder(getCoder());
     }
 
     @Override
@@ -732,8 +858,22 @@ public class PubsubIO {
   /** Implementation of {@link #write}. */
   @AutoValue
   public abstract static class Write<T> extends PTransform<PCollection<T>, PDone> {
+    private static final int MAX_PUBLISH_BATCH_BYTE_SIZE_DEFAULT = 10 * 1024 * 1024;
+    private static final int MAX_PUBLISH_BATCH_SIZE = 100;
+
     @Nullable
     abstract ValueProvider<PubsubTopic> getTopicProvider();
+
+    @Nullable
+    abstract PubsubClient.PubsubClientFactory getPubsubClientFactory();
+
+    /** the batch size for bulk submissions to pubsub. */
+    @Nullable
+    abstract Integer getMaxBatchSize();
+
+    /** the maximum batch size, by bytes. */
+    @Nullable
+    abstract Integer getMaxBatchBytesSize();
 
     /** The name of the message attribute to publish message timestamps in. */
     @Nullable
@@ -752,6 +892,12 @@ public class PubsubIO {
     @AutoValue.Builder
     abstract static class Builder<T> {
       abstract Builder<T> setTopicProvider(ValueProvider<PubsubTopic> topicProvider);
+
+      abstract Builder<T> setPubsubClientFactory(PubsubClient.PubsubClientFactory factory);
+
+      abstract Builder<T> setMaxBatchSize(Integer batchSize);
+
+      abstract Builder<T> setMaxBatchBytesSize(Integer maxBatchBytesSize);
 
       abstract Builder<T> setTimestampAttribute(String timestampAttribute);
 
@@ -777,6 +923,39 @@ public class PubsubIO {
       return toBuilder()
           .setTopicProvider(NestedValueProvider.of(topic, new TopicTranslator()))
           .build();
+    }
+
+    /**
+     * The default client to write to Pub/Sub is the {@link PubsubJsonClient}, created by the {@link
+     * PubsubJsonClient.PubsubJsonClientFactory}. This function allows to change the Pub/Sub client
+     * by providing another {@link PubsubClient.PubsubClientFactory} like the {@link
+     * PubsubGrpcClientFactory}.
+     */
+    public Write<T> withClientFactory(PubsubClient.PubsubClientFactory factory) {
+      return toBuilder().setPubsubClientFactory(factory).build();
+    }
+
+    /**
+     * Writes to Pub/Sub are batched to efficiently send data. The value of the attribute will be a
+     * number representing the number of Pub/Sub messages to queue before sending off the bulk
+     * request. For example, if given 1000 the write sink will wait until 1000 messages have been
+     * received, or the pipeline has finished, whichever is first.
+     *
+     * <p>Pub/Sub has a limitation of 10mb per individual request/batch. This attribute was
+     * requested dynamic to allow larger Pub/Sub messages to be sent using this source. Thus
+     * allowing customizable batches and control of number of events before the 10mb size limit is
+     * hit.
+     */
+    public Write<T> withMaxBatchSize(int batchSize) {
+      return toBuilder().setMaxBatchSize(batchSize).build();
+    }
+
+    /**
+     * Writes to Pub/Sub are limited by 10mb in general. This attribute controls the maximum allowed
+     * bytes to be sent to Pub/Sub in a single batched message.
+     */
+    public Write<T> withMaxBatchBytesSize(int maxBatchBytesSize) {
+      return toBuilder().setMaxBatchBytesSize(maxBatchBytesSize).build();
     }
 
     /**
@@ -819,20 +998,31 @@ public class PubsubIO {
       if (getTopicProvider() == null) {
         throw new IllegalStateException("need to set the topic of a PubsubIO.Write transform");
       }
+
       switch (input.isBounded()) {
         case BOUNDED:
-          input.apply(ParDo.of(new PubsubBoundedWriter()));
+          input.apply(
+              ParDo.of(
+                  new PubsubBoundedWriter(
+                      MoreObjects.firstNonNull(getMaxBatchSize(), MAX_PUBLISH_BATCH_SIZE),
+                      MoreObjects.firstNonNull(
+                          getMaxBatchBytesSize(), MAX_PUBLISH_BATCH_BYTE_SIZE_DEFAULT))));
           return PDone.in(input.getPipeline());
         case UNBOUNDED:
           return input
               .apply(MapElements.via(getFormatFn()))
               .apply(
                   new PubsubUnboundedSink(
-                      FACTORY,
+                      Optional.ofNullable(getPubsubClientFactory()).orElse(FACTORY),
                       NestedValueProvider.of(getTopicProvider(), new TopicPathTranslator()),
                       getTimestampAttribute(),
                       getIdAttribute(),
-                      100 /* numShards */));
+                      100 /* numShards */,
+                      MoreObjects.firstNonNull(
+                          getMaxBatchSize(), PubsubUnboundedSink.DEFAULT_PUBLISH_BATCH_SIZE),
+                      MoreObjects.firstNonNull(
+                          getMaxBatchBytesSize(),
+                          PubsubUnboundedSink.DEFAULT_PUBLISH_BATCH_BYTES)));
       }
       throw new RuntimeException(); // cases are exhaustive.
     }
@@ -850,32 +1040,59 @@ public class PubsubIO {
      * <p>Public so can be suppressed by runners.
      */
     public class PubsubBoundedWriter extends DoFn<T, Void> {
-
-      private static final int MAX_PUBLISH_BATCH_SIZE = 100;
       private transient List<OutgoingMessage> output;
       private transient PubsubClient pubsubClient;
+      private transient int currentOutputBytes;
+
+      private int maxPublishBatchByteSize;
+      private int maxPublishBatchSize;
+
+      PubsubBoundedWriter(int maxPublishBatchSize, int maxPublishBatchByteSize) {
+        this.maxPublishBatchSize = maxPublishBatchSize;
+        this.maxPublishBatchByteSize = maxPublishBatchByteSize;
+      }
+
+      PubsubBoundedWriter() {
+        this(MAX_PUBLISH_BATCH_SIZE, MAX_PUBLISH_BATCH_BYTE_SIZE_DEFAULT);
+      }
 
       @StartBundle
       public void startBundle(StartBundleContext c) throws IOException {
         this.output = new ArrayList<>();
+        this.currentOutputBytes = 0;
+
         // NOTE: idAttribute is ignored.
         this.pubsubClient =
-            FACTORY.newClient(
-                getTimestampAttribute(), null, c.getPipelineOptions().as(PubsubOptions.class));
+            Optional.ofNullable(getPubsubClientFactory())
+                .orElse(FACTORY)
+                .newClient(
+                    getTimestampAttribute(), null, c.getPipelineOptions().as(PubsubOptions.class));
       }
 
       @ProcessElement
-      public void processElement(ProcessContext c) throws IOException {
+      public void processElement(ProcessContext c) throws IOException, SizeLimitExceededException {
         byte[] payload;
         PubsubMessage message = getFormatFn().apply(c.element());
         payload = message.getPayload();
         Map<String, String> attributes = message.getAttributeMap();
-        // NOTE: The record id is always null.
-        output.add(new OutgoingMessage(payload, attributes, c.timestamp().getMillis(), null));
 
-        if (output.size() >= MAX_PUBLISH_BATCH_SIZE) {
+        if (payload.length > maxPublishBatchByteSize) {
+          String msg =
+              String.format(
+                  "Pub/Sub message size (%d) exceeded maximum batch size (%d)",
+                  payload.length, maxPublishBatchByteSize);
+          throw new SizeLimitExceededException(msg);
+        }
+
+        // Checking before adding the message stops us from violating the max bytes
+        if (((currentOutputBytes + payload.length) >= maxPublishBatchByteSize)
+            || (output.size() >= maxPublishBatchSize)) {
           publish();
         }
+
+        // NOTE: The record id is always null.
+        output.add(new OutgoingMessage(payload, attributes, c.timestamp().getMillis(), null));
+        currentOutputBytes += payload.length;
       }
 
       @FinishBundle
@@ -884,6 +1101,7 @@ public class PubsubIO {
           publish();
         }
         output = null;
+        currentOutputBytes = 0;
         pubsubClient.close();
         pubsubClient = null;
       }
@@ -895,6 +1113,7 @@ public class PubsubIO {
                 PubsubClient.topicPathFromName(topic.project, topic.topic), output);
         checkState(n == output.size());
         output.clear();
+        currentOutputBytes = 0;
       }
 
       @Override

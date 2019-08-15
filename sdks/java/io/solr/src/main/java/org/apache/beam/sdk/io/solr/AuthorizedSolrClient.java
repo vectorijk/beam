@@ -17,7 +17,7 @@
  */
 package org.apache.beam.sdk.io.solr;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
 
 import java.io.Closeable;
 import java.io.IOException;

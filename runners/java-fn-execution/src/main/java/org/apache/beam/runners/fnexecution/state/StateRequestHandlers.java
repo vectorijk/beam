@@ -15,12 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.runners.fnexecution.state;
 
-import static com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkState;
 
-import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Iterator;
@@ -46,7 +44,8 @@ import org.apache.beam.sdk.fn.stream.DataStreams;
 import org.apache.beam.sdk.fn.stream.DataStreams.ElementDelimitedOutputStream;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.util.common.Reiterable;
-import org.apache.beam.vendor.protobuf.v3.com.google.protobuf.ByteString;
+import org.apache.beam.vendor.grpc.v1p21p0.com.google.protobuf.ByteString;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
 import org.apache.beam.vendor.sdk.v2.sdk.extensions.protobuf.ByteStringCoder;
 
 /**
@@ -146,8 +145,8 @@ public class StateRequestHandlers {
    * <p>Note that this factory should be thread safe.
    */
   @ThreadSafe
-  public interface BagUserStateHandlerFactory {
-    <K, V, W extends BoundedWindow> BagUserStateHandler<K, V, W> forUserState(
+  public interface BagUserStateHandlerFactory<K, V, W extends BoundedWindow> {
+    BagUserStateHandler<K, V, W> forUserState(
         String pTransformId,
         String userStateId,
         Coder<K> keyCoder,
@@ -155,10 +154,10 @@ public class StateRequestHandlers {
         Coder<W> windowCoder);
 
     /** Throws a {@link UnsupportedOperationException} on the first access. */
-    static BagUserStateHandlerFactory unsupported() {
-      return new BagUserStateHandlerFactory() {
+    static <K, V, W extends BoundedWindow> BagUserStateHandlerFactory<K, V, W> unsupported() {
+      return new BagUserStateHandlerFactory<K, V, W>() {
         @Override
-        public <K, V, W extends BoundedWindow> BagUserStateHandler<K, V, W> forUserState(
+        public BagUserStateHandler<K, V, W> forUserState(
             String pTransformId,
             String userStateId,
             Coder<K> keyCoder,

@@ -19,6 +19,7 @@ package org.apache.beam.runners.flink.translation.wrappers.streaming;
 
 import static org.apache.beam.runners.core.TimerInternals.TimerData;
 
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -35,6 +36,7 @@ import org.apache.beam.runners.core.TimerInternalsFactory;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.DoFnSchemaInformation;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.values.KV;
@@ -53,7 +55,7 @@ public class WindowDoFnOperator<K, InputT, OutputT>
   public WindowDoFnOperator(
       SystemReduceFn<K, InputT, ?, OutputT, BoundedWindow> systemReduceFn,
       String stepName,
-      Coder<WindowedValue<KeyedWorkItem<K, InputT>>> inputCoder,
+      Coder<WindowedValue<KeyedWorkItem<K, InputT>>> windowedInputCoder,
       TupleTag<KV<K, OutputT>> mainOutputTag,
       List<TupleTag<?>> additionalOutputTags,
       OutputManagerFactory<KV<K, OutputT>> outputManagerFactory,
@@ -66,7 +68,9 @@ public class WindowDoFnOperator<K, InputT, OutputT>
     super(
         null,
         stepName,
-        inputCoder,
+        windowedInputCoder,
+        null,
+        Collections.emptyMap(),
         mainOutputTag,
         additionalOutputTags,
         outputManagerFactory,
@@ -75,7 +79,8 @@ public class WindowDoFnOperator<K, InputT, OutputT>
         sideInputs,
         options,
         keyCoder,
-        keySelector);
+        keySelector,
+        DoFnSchemaInformation.create());
 
     this.systemReduceFn = systemReduceFn;
   }
@@ -119,7 +124,8 @@ public class WindowDoFnOperator<K, InputT, OutputT>
   }
 
   @Override
-  public void fireTimer(InternalTimer<?, TimerData> timer) {
+  protected void fireTimer(InternalTimer<ByteBuffer, TimerData> timer) {
+    timerInternals.cleanupPendingTimer(timer.getNamespace());
     doFnRunner.processElement(
         WindowedValue.valueInGlobalWindow(
             KeyedWorkItems.timersWorkItem(

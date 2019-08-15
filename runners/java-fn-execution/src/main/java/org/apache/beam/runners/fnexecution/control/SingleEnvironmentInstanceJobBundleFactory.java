@@ -15,36 +15,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.runners.fnexecution.control;
 
-import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import org.apache.beam.model.fnexecution.v1.BeamFnApi.Target;
 import org.apache.beam.model.pipeline.v1.RunnerApi.Environment;
 import org.apache.beam.runners.core.construction.graph.ExecutableStage;
 import org.apache.beam.runners.fnexecution.GrpcFnServer;
 import org.apache.beam.runners.fnexecution.control.ProcessBundleDescriptors.ExecutableProcessBundleDescriptor;
 import org.apache.beam.runners.fnexecution.data.GrpcDataService;
-import org.apache.beam.runners.fnexecution.data.RemoteInputDestination;
 import org.apache.beam.runners.fnexecution.environment.EnvironmentFactory;
 import org.apache.beam.runners.fnexecution.environment.RemoteEnvironment;
 import org.apache.beam.runners.fnexecution.state.GrpcStateService;
 import org.apache.beam.runners.fnexecution.state.StateRequestHandler;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.fn.IdGenerator;
-import org.apache.beam.sdk.fn.IdGenerators;
 import org.apache.beam.sdk.fn.data.FnDataReceiver;
 import org.apache.beam.sdk.util.WindowedValue;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
 
 /**
  * A {@link JobBundleFactory} which can manage a single instance of an {@link Environment}.
  *
- * @deprecated replace with a {@link DockerJobBundleFactory} when appropriate if the {@link
+ * @deprecated replace with a {@link DefaultJobBundleFactory} when appropriate if the {@link
  *     EnvironmentFactory} is a {@link
  *     org.apache.beam.runners.fnexecution.environment.DockerEnvironmentFactory}, or create an
  *     {@code InProcessJobBundleFactory} and inline the creation of the environment if appropriate.
@@ -54,8 +50,10 @@ public class SingleEnvironmentInstanceJobBundleFactory implements JobBundleFacto
   public static JobBundleFactory create(
       EnvironmentFactory environmentFactory,
       GrpcFnServer<GrpcDataService> data,
-      GrpcFnServer<GrpcStateService> state) {
-    return new SingleEnvironmentInstanceJobBundleFactory(environmentFactory, data, state);
+      GrpcFnServer<GrpcStateService> state,
+      IdGenerator idGenerator) {
+    return new SingleEnvironmentInstanceJobBundleFactory(
+        environmentFactory, data, state, idGenerator);
   }
 
   private final EnvironmentFactory environmentFactory;
@@ -63,29 +61,30 @@ public class SingleEnvironmentInstanceJobBundleFactory implements JobBundleFacto
   private final GrpcFnServer<GrpcDataService> dataService;
   private final GrpcFnServer<GrpcStateService> stateService;
 
-  private final ConcurrentMap<ExecutableStage, StageBundleFactory<?>> stageBundleFactories =
+  private final ConcurrentMap<ExecutableStage, StageBundleFactory> stageBundleFactories =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<Environment, RemoteEnvironment> environments =
       new ConcurrentHashMap<>();
 
-  private final IdGenerator idGenerator = IdGenerators.incrementingLongs();
+  private final IdGenerator idGenerator;
 
   private SingleEnvironmentInstanceJobBundleFactory(
       EnvironmentFactory environmentFactory,
       GrpcFnServer<GrpcDataService> dataService,
-      GrpcFnServer<GrpcStateService> stateService) {
+      GrpcFnServer<GrpcStateService> stateService,
+      IdGenerator idGenerator) {
     this.environmentFactory = environmentFactory;
     this.dataService = dataService;
     this.stateService = stateService;
+    this.idGenerator = idGenerator;
   }
 
   @Override
-  public <T> StageBundleFactory<T> forStage(ExecutableStage executableStage) {
-    return (StageBundleFactory<T>)
-        stageBundleFactories.computeIfAbsent(executableStage, this::createBundleFactory);
+  public StageBundleFactory forStage(ExecutableStage executableStage) {
+    return stageBundleFactories.computeIfAbsent(executableStage, this::createBundleFactory);
   }
 
-  private <T> StageBundleFactory<T> createBundleFactory(ExecutableStage stage) {
+  private StageBundleFactory createBundleFactory(ExecutableStage stage) {
     RemoteEnvironment remoteEnv =
         environments.computeIfAbsent(
             stage.getEnvironment(),
@@ -104,18 +103,19 @@ public class SingleEnvironmentInstanceJobBundleFactory implements JobBundleFacto
     try {
       descriptor =
           ProcessBundleDescriptors.fromExecutableStage(
-              idGenerator.getId(), stage, dataService.getApiServiceDescriptor());
+              idGenerator.getId(),
+              stage,
+              dataService.getApiServiceDescriptor(),
+              stateService.getApiServiceDescriptor());
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
-    RemoteInputDestination<? super WindowedValue<?>> destination =
-        descriptor.getRemoteInputDestination();
-    SdkHarnessClient.BundleProcessor<T> bundleProcessor =
+    SdkHarnessClient.BundleProcessor bundleProcessor =
         sdkHarnessClient.getProcessor(
             descriptor.getProcessBundleDescriptor(),
-            (RemoteInputDestination<WindowedValue<T>>) (RemoteInputDestination) destination,
+            descriptor.getRemoteInputDestinations(),
             stateService.getService());
-    return new BundleProcessorStageBundleFactory<>(descriptor, bundleProcessor);
+    return new BundleProcessorStageBundleFactory(descriptor, bundleProcessor);
   }
 
   @Override
@@ -137,39 +137,43 @@ public class SingleEnvironmentInstanceJobBundleFactory implements JobBundleFacto
     }
   }
 
-  private static class BundleProcessorStageBundleFactory<T> implements StageBundleFactory<T> {
+  private static class BundleProcessorStageBundleFactory implements StageBundleFactory {
     private final ExecutableProcessBundleDescriptor descriptor;
-    private final SdkHarnessClient.BundleProcessor<T> processor;
+    private final SdkHarnessClient.BundleProcessor processor;
 
     private BundleProcessorStageBundleFactory(
-        ExecutableProcessBundleDescriptor descriptor,
-        SdkHarnessClient.BundleProcessor<T> processor) {
+        ExecutableProcessBundleDescriptor descriptor, SdkHarnessClient.BundleProcessor processor) {
       this.descriptor = descriptor;
       this.processor = processor;
     }
 
     @Override
-    public RemoteBundle<T> getBundle(
+    public RemoteBundle getBundle(
         OutputReceiverFactory outputReceiverFactory,
         StateRequestHandler stateRequestHandler,
         BundleProgressHandler progressHandler) {
-      Map<Target, RemoteOutputReceiver<?>> outputReceivers = new HashMap<>();
-      for (Map.Entry<Target, Coder<WindowedValue<?>>> targetCoders :
-          descriptor.getOutputTargetCoders().entrySet()) {
+      Map<String, RemoteOutputReceiver<?>> outputReceivers = new HashMap<>();
+      for (Map.Entry<String, Coder<WindowedValue<?>>> remoteOutputCoder :
+          descriptor.getRemoteOutputCoders().entrySet()) {
         String bundleOutputPCollection =
             Iterables.getOnlyElement(
                 descriptor
                     .getProcessBundleDescriptor()
-                    .getTransformsOrThrow(targetCoders.getKey().getPrimitiveTransformReference())
+                    .getTransformsOrThrow(remoteOutputCoder.getKey())
                     .getInputsMap()
                     .values());
         FnDataReceiver<WindowedValue<?>> outputReceiver =
             outputReceiverFactory.create(bundleOutputPCollection);
         outputReceivers.put(
-            targetCoders.getKey(),
-            RemoteOutputReceiver.of((Coder) targetCoders.getValue(), outputReceiver));
+            remoteOutputCoder.getKey(),
+            RemoteOutputReceiver.of(remoteOutputCoder.getValue(), outputReceiver));
       }
       return processor.newBundle(outputReceivers, stateRequestHandler, progressHandler);
+    }
+
+    @Override
+    public ExecutableProcessBundleDescriptor getProcessBundleDescriptor() {
+      return descriptor;
     }
 
     @Override

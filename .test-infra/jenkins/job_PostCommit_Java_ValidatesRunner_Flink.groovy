@@ -20,12 +20,13 @@ import CommonJobProperties as commonJobProperties
 import PostcommitJobBuilder
 
 // This job runs the suite of ValidatesRunner tests against the Flink runner.
-PostcommitJobBuilder.postCommitJob('beam_PostCommit_Java_ValidatesRunner_Flink_Gradle',
+PostcommitJobBuilder.postCommitJob('beam_PostCommit_Java_ValidatesRunner_Flink',
   'Run Flink ValidatesRunner', 'Apache Flink Runner ValidatesRunner Tests', this) {
   description('Runs the ValidatesRunner suite on the Flink runner.')
 
   // Set common parameters.
   commonJobProperties.setTopLevelMainJobProperties(delegate)
+  previousNames(/beam_PostCommit_Java_ValidatesRunner_Flink_Gradle/)
 
   // Publish all test results to Jenkins
   publishers {
@@ -36,7 +37,7 @@ PostcommitJobBuilder.postCommitJob('beam_PostCommit_Java_ValidatesRunner_Flink_G
   steps {
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-runners-flink_2.11:validatesRunner')
+      tasks(':runners:flink:1.5:validatesRunner')
       commonJobProperties.setGradleSwitches(delegate)
     }
   }

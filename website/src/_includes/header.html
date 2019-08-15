@@ -35,10 +35,13 @@
           <a href="{{ site.baseurl }}/documentation/">Documentation</a>
         </li>
         <li>
-          <a href="{{ site.baseurl }}/documentation/sdks/java/">SDKS</a>
+          <a href="{{ site.baseurl }}/documentation/sdks/java/">Languages</a>
         </li>
         <li>
           <a href="{{ site.baseurl }}/documentation/runners/capability-matrix/">RUNNERS</a>
+        </li>
+        <li>
+          <a href="{{ site.baseurl }}/roadmap/">Roadmap</a>
         </li>
         <li>
           <a href="{{ site.baseurl }}/contribute/">Contribute</a>
@@ -49,6 +52,22 @@
         <li><a href="{{ site.baseurl }}/blog">Blog</a></li>
       </ul>
       <ul class="nav navbar-nav navbar-right">
+        <li>
+          <div style="width: 300px;">
+            <script>
+              (function() {
+                var cx = '012923275103528129024:4emlchv9wzi';
+                var gcse = document.createElement('script');
+                gcse.type = 'text/javascript';
+                gcse.async = true;
+                gcse.src = 'https://cse.google.com/cse.js?cx=' + cx;
+                var s = document.getElementsByTagName('script')[0];
+                s.parentNode.insertBefore(gcse, s);
+              })();
+            </script>
+            <gcse:search></gcse:search>
+          </div>
+        </li>
         <li class="dropdown">
           <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false"><img src="https://www.apache.org/foundation/press/kit/feather_small.png" alt="Apache Logo" style="height:20px;"><span class="caret"></span></a>
           <ul class="dropdown-menu dropdown-menu-right">
@@ -59,6 +78,16 @@
             <li><a href="http://www.apache.org/foundation/sponsorship.html">Sponsorship</a></li>
             <li><a href="https://www.apache.org/foundation/policies/conduct">Code of Conduct</a></li>
           </ul>
+        </li>
+        <li>
+          <!--
+            data-proofer-ignore disables link checking from website test automation.
+            GitHub links will not resolve until the markdown source is available on the master branch.
+            New pages would fail validation during development / PR test automation.
+          -->
+          <a href="https://github.com/apache/beam/edit/master/website/src/{{ page.path }}" data-proofer-ignore>
+            <i class="far fa-edit fa-lg" alt="Edit on GitHub" title="Edit on GitHub"></i>
+          </a>
         </li>
       </ul>
     </div>

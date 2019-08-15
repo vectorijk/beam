@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-apply plugin: org.apache.beam.gradle.BeamModulePlugin
+plugins { id 'org.apache.beam.module' }
+
+// Do not relocate guava to avoid issues with Cassandra's version.
 applyJavaNature()
 provideIntegrationTestingDependencies()
 enableJavaPerformanceTesting()
@@ -24,19 +26,24 @@ enableJavaPerformanceTesting()
 description = "Apache Beam :: SDKs :: Java :: IO :: Cassandra"
 ext.summary = "IO to read and write with Apache Cassandra database"
 
-def cassandra_version = "3.5.0"
+// compatible with all Cassandra versions up to 3.11.3
+def achilles_version = "6.0.2"
 
 dependencies {
-  compile library.java.guava
-  shadow project(path: ":beam-sdks-java-core", configuration: "shadow")
-  shadow library.java.slf4j_api
-  shadow "com.datastax.cassandra:cassandra-driver-core:$cassandra_version"
-  shadow "com.datastax.cassandra:cassandra-driver-mapping:$cassandra_version"
-  testCompile project(path: ":beam-runners-direct-java", configuration: "shadow")
-  testCompile project(path: ":beam-sdks-java-io-common", configuration: "shadowTest")
+  compile library.java.vendored_guava_26_0_jre
+  compile project(path: ":sdks:java:core", configuration: "shadow")
+  compile library.java.slf4j_api
+  compile library.java.cassandra_driver_core
+  compile library.java.cassandra_driver_mapping
+  testCompile project(path: ":sdks:java:io:common", configuration: "testRuntime")
   testCompile library.java.junit
   testCompile library.java.hamcrest_core
   testCompile library.java.hamcrest_library
-  testCompile library.java.slf4j_jdk14
   testCompile library.java.mockito_core
+
+  // for embedded cassandra
+  testCompile group: 'info.archinnov', name: 'achilles-junit', version: "$achilles_version"
+  testCompile library.java.jackson_jaxb_annotations
+  testRuntimeOnly library.java.slf4j_jdk14
+  testRuntimeOnly project(":runners:direct-java")
 }

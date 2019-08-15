@@ -17,28 +17,28 @@
  */
 
 import CommonJobProperties as commonJobProperties
+import CommonTestProperties.TriggeringContext
 import NexmarkBigqueryProperties
+import NexmarkBuilder as Nexmark
 import NoPhraseTriggeringPostCommitBuilder
+import PhraseTriggeringPostCommitBuilder
 
 // This job runs the suite of ValidatesRunner tests against the Spark runner.
 NoPhraseTriggeringPostCommitBuilder.postCommitJob('beam_PostCommit_Java_Nexmark_Spark',
         'Spark Runner Nexmark Tests', this) {
   description('Runs the Nexmark suite on the Spark runner.')
 
-  // Execute concurrent builds if necessary.
-  concurrentBuild()
-
   // Set common parameters.
-  commonJobProperties.setTopLevelMainJobProperties(delegate, 'master', 240)
+  commonJobProperties.setTopLevelMainJobProperties(delegate, 'master', 240, true, 'beam-perf')
 
   // Gradle goals for this job.
   steps {
     shell('echo *** RUN NEXMARK IN BATCH MODE USING SPARK RUNNER ***')
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-sdks-java-nexmark:run')
+      tasks(':sdks:java:testing:nexmark:run')
       commonJobProperties.setGradleSwitches(delegate)
-      switches('-Pnexmark.runner=":beam-runners-spark"' +
+      switches('-Pnexmark.runner=":runners:spark"' +
               ' -Pnexmark.args="' +
               [NexmarkBigqueryProperties.nexmarkBigQueryArgs,
               '--runner=SparkRunner',
@@ -51,9 +51,9 @@ NoPhraseTriggeringPostCommitBuilder.postCommitJob('beam_PostCommit_Java_Nexmark_
     shell('echo *** RUN NEXMARK SQL IN BATCH MODE USING SPARK RUNNER ***')
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-sdks-java-nexmark:run')
+      tasks(':sdks:java:testing:nexmark:run')
       commonJobProperties.setGradleSwitches(delegate)
-      switches('-Pnexmark.runner=":beam-runners-spark"' +
+      switches('-Pnexmark.runner=":runners:spark"' +
               ' -Pnexmark.args="' +
               [NexmarkBigqueryProperties.nexmarkBigQueryArgs,
               '--runner=SparkRunner',
@@ -65,4 +65,20 @@ NoPhraseTriggeringPostCommitBuilder.postCommitJob('beam_PostCommit_Java_Nexmark_
               '--monitorJobs=true'].join(' '))
     }
   }
+}
+
+PhraseTriggeringPostCommitBuilder.postCommitJob('beam_PostCommit_Java_Nexmark_Spark',
+        'Run Spark Runner Nexmark Tests', 'Spark Runner Nexmark Tests', this) {
+
+  description('Runs the Nexmark suite on the Spark runner against a Pull Request, on demand.')
+
+  commonJobProperties.setTopLevelMainJobProperties(delegate, 'master', 240)
+
+  def final JOB_SPECIFIC_OPTIONS = [
+          'suite'        : 'SMOKE',
+          'streamTimeout': 60
+  ]
+
+  // Spark doesn't run streaming jobs, therefore run only batch variants.
+  Nexmark.batchOnlyJob(delegate, JOB_SPECIFIC_OPTIONS, TriggeringContext.PR)
 }

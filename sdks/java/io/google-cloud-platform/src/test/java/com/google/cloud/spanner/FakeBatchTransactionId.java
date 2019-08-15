@@ -18,8 +18,8 @@
 package com.google.cloud.spanner;
 
 import com.google.cloud.Timestamp;
-import com.google.common.base.Objects;
 import com.google.protobuf.ByteString;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Objects;
 
 /**
  * A fake {@link BatchTransactionId} object.

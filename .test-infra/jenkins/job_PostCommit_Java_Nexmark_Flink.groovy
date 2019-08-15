@@ -17,87 +17,99 @@
  */
 
 import CommonJobProperties as commonJobProperties
+import CommonTestProperties.Runner
+import CommonTestProperties.SDK
+import CommonTestProperties.TriggeringContext
 import NexmarkBigqueryProperties
+import NexmarkBuilder as Nexmark
 import NoPhraseTriggeringPostCommitBuilder
+import PhraseTriggeringPostCommitBuilder
 
 // This job runs the suite of ValidatesRunner tests against the Flink runner.
 NoPhraseTriggeringPostCommitBuilder.postCommitJob('beam_PostCommit_Java_Nexmark_Flink',
         'Flink Runner Nexmark Tests', this) {
   description('Runs the Nexmark suite on the Flink runner.')
 
-  // Execute concurrent builds if necessary.
-  concurrentBuild()
-
   // Set common parameters.
-  commonJobProperties.setTopLevelMainJobProperties(delegate, 'master', 240)
+  commonJobProperties.setTopLevelMainJobProperties(delegate, 'master', 240, true, 'beam-perf')
 
   // Gradle goals for this job.
   steps {
     shell('echo *** RUN NEXMARK IN BATCH MODE USING FLINK RUNNER ***')
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-sdks-java-nexmark:run')
+      tasks(':sdks:java:testing:nexmark:run')
       commonJobProperties.setGradleSwitches(delegate)
-      switches('-Pnexmark.runner=":beam-runners-flink_2.11"' +
+      switches('-Pnexmark.runner=":runners:flink:1.5"' +
               ' -Pnexmark.args="' +
               [NexmarkBigqueryProperties.nexmarkBigQueryArgs,
-              '--runner=FlinkRunner',
               '--streaming=false',
               '--suite=SMOKE',
               '--streamTimeout=60' ,
               '--manageResources=false',
-              '--monitorJobs=true',
-              '--flinkMaster=local"'].join(' '))
+              '--monitorJobs=true"'
+              ].join(' '))
     }
     shell('echo *** RUN NEXMARK IN STREAMING MODE USING FLINK RUNNER ***')
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-sdks-java-nexmark:run')
+      tasks(':sdks:java:testing:nexmark:run')
       commonJobProperties.setGradleSwitches(delegate)
-      switches('-Pnexmark.runner=":beam-runners-flink_2.11"' +
+      switches('-Pnexmark.runner=":runners:flink:1.5"' +
               ' -Pnexmark.args="' +
               [NexmarkBigqueryProperties.nexmarkBigQueryArgs,
-              '--runner=FlinkRunner',
               '--streaming=true',
               '--suite=SMOKE',
               '--streamTimeout=60' ,
               '--manageResources=false',
-              '--monitorJobs=true',
-              '--flinkMaster=local"'].join(' '))
+              '--monitorJobs=true"'
+              ].join(' '))
     }
     shell('echo *** RUN NEXMARK IN SQL BATCH MODE USING FLINK RUNNER ***')
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-sdks-java-nexmark:run')
+      tasks(':sdks:java:testing:nexmark:run')
       commonJobProperties.setGradleSwitches(delegate)
-      switches('-Pnexmark.runner=":beam-runners-flink_2.11"' +
+      switches('-Pnexmark.runner=":runners:flink:1.5"' +
               ' -Pnexmark.args="' +
               [NexmarkBigqueryProperties.nexmarkBigQueryArgs,
-              '--runner=FlinkRunner',
               '--queryLanguage=sql',
               '--streaming=false',
               '--suite=SMOKE',
               '--streamTimeout=60' ,
-              '--manageResources=false',
-              '--monitorJobs=true',
-              '--flinkMaster=local"'].join(' '))
+              '--manageResources=false"'
+              ].join(' '))
     }
     shell('echo *** RUN NEXMARK IN SQL STREAMING MODE USING FLINK RUNNER ***')
     gradle {
       rootBuildScriptDir(commonJobProperties.checkoutDir)
-      tasks(':beam-sdks-java-nexmark:run')
+      tasks(':sdks:java:testing:nexmark:run')
       commonJobProperties.setGradleSwitches(delegate)
-      switches('-Pnexmark.runner=":beam-runners-flink_2.11"' +
+      switches('-Pnexmark.runner=":runners:flink:1.5"' +
               ' -Pnexmark.args="' +
               [NexmarkBigqueryProperties.nexmarkBigQueryArgs,
-              '--runner=FlinkRunner',
               '--queryLanguage=sql',
               '--streaming=true',
               '--suite=SMOKE',
               '--streamTimeout=60' ,
               '--manageResources=false',
-              '--monitorJobs=true',
-              '--flinkMaster=local"'].join(' '))
+              '--monitorJobs=true"'
+              ].join(' '))
     }
   }
+}
+
+PhraseTriggeringPostCommitBuilder.postCommitJob('beam_PostCommit_Java_Nexmark_Flink',
+        'Run Flink Runner Nexmark Tests', 'Flink Runner Nexmark Tests', this) {
+
+  description('Runs the Nexmark suite on the Flink runner against a Pull Request, on demand.')
+
+  commonJobProperties.setTopLevelMainJobProperties(delegate, 'master', 240)
+
+  def final JOB_SPECIFIC_OPTIONS = [
+          'suite'        : 'SMOKE',
+          'streamTimeout': 60,
+  ]
+
+  Nexmark.standardJob(delegate, Runner.FLINK, SDK.JAVA, JOB_SPECIFIC_OPTIONS, TriggeringContext.PR)
 }

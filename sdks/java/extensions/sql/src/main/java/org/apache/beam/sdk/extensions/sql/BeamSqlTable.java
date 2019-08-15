@@ -15,9 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.beam.sdk.extensions.sql;
 
+import org.apache.beam.sdk.extensions.sql.impl.BeamTableStatistics;
+import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
@@ -32,6 +33,15 @@ public interface BeamSqlTable {
   /** create a {@code IO.write()} instance to write to target. */
   POutput buildIOWriter(PCollection<Row> input);
 
+  /** Whether this table is bounded (known to be finite) or unbounded (may or may not be finite). */
+  PCollection.IsBounded isBounded();
+
   /** Get the schema info of the table. */
   Schema getSchema();
+
+  /**
+   * Estimates the number of rows or the rate for unbounded Tables. If it is not possible to
+   * estimate the row count or rate it will return BeamTableStatistics.BOUNDED_UNKNOWN.
+   */
+  BeamTableStatistics getTableStatistics(PipelineOptions options);
 }

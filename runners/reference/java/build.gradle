@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-apply plugin: org.apache.beam.gradle.BeamModulePlugin
+plugins { id 'org.apache.beam.module' }
 applyJavaNature()
 
 description = "Apache Beam :: Runners :: Reference :: Java"
@@ -24,15 +24,20 @@ ext.summary = """A Java implementation of the Beam Model which utilizes the port
 framework to execute user-definied functions."""
 
 
+configurations {
+  validatesRunner
+}
+
 dependencies {
-  shadow project(path: ":beam-model-pipeline", configuration: "shadow")
-  shadow project(path: ":beam-runners-core-construction-java", configuration: "shadow")
-  shadow project(path: ":beam-sdks-java-fn-execution", configuration: "shadow")
-  shadow library.java.slf4j_api
-  shadowTest project(path: ":beam-runners-core-construction-java", configuration: "shadowTest")
-  shadowTest library.java.guava
-  shadowTest library.java.hamcrest_core
-  shadowTest library.java.junit
-  shadowTest library.java.mockito_core
-  shadowTest library.java.slf4j_jdk14
+  compile library.java.vendored_guava_26_0_jre
+  compile library.java.hamcrest_library
+  compile project(":runners:java-fn-execution")
+  compile project(path: ":sdks:java:harness", configuration: "shadow")
+  compile library.java.vendored_grpc_1_21_0
+  compile library.java.slf4j_api
+  testCompile project(path: ":runners:core-construction-java", configuration: "testRuntime")
+  testCompile library.java.hamcrest_core
+  testCompile library.java.junit
+  testCompile library.java.mockito_core
+  testCompile library.java.slf4j_jdk14
 }

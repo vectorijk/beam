@@ -17,14 +17,16 @@
  */
 package org.apache.beam.sdk.extensions.sql.impl.planner;
 
-import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.beam.sdk.annotations.Internal;
 import org.apache.beam.sdk.extensions.sql.impl.rel.BeamRelNode;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamAggregationRule;
+import org.apache.beam.sdk.extensions.sql.impl.rule.BeamBasicAggregationRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamCalcRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamEnumerableConverterRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamIntersectRule;
+import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinAssociateRule;
+import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinPushThroughJoinRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamJoinRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamMinusRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamSortRule;
@@ -32,6 +34,7 @@ import org.apache.beam.sdk.extensions.sql.impl.rule.BeamUncollectRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamUnionRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamUnnestRule;
 import org.apache.beam.sdk.extensions.sql.impl.rule.BeamValuesRule;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.rules.AggregateJoinTransposeRule;
@@ -45,6 +48,7 @@ import org.apache.calcite.rel.rules.FilterJoinRule;
 import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
 import org.apache.calcite.rel.rules.FilterSetOpTransposeRule;
 import org.apache.calcite.rel.rules.FilterToCalcRule;
+import org.apache.calcite.rel.rules.JoinCommuteRule;
 import org.apache.calcite.rel.rules.JoinPushExpressionsRule;
 import org.apache.calcite.rel.rules.ProjectCalcMergeRule;
 import org.apache.calcite.rel.rules.ProjectFilterTransposeRule;
@@ -54,7 +58,6 @@ import org.apache.calcite.rel.rules.ProjectSortTransposeRule;
 import org.apache.calcite.rel.rules.ProjectToCalcRule;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.rel.rules.SortProjectTransposeRule;
-import org.apache.calcite.rel.rules.SortRemoveRule;
 import org.apache.calcite.rel.rules.UnionEliminatorRule;
 import org.apache.calcite.rel.rules.UnionToDistinctRule;
 import org.apache.calcite.tools.RuleSet;
@@ -73,7 +76,7 @@ public class BeamRuleSets {
           ProjectCalcMergeRule.INSTANCE,
           FilterToCalcRule.INSTANCE,
           ProjectToCalcRule.INSTANCE,
-          // https://issues.apache.org/jira/browse/BEAM-4522
+          // disabled due to https://issues.apache.org/jira/browse/BEAM-6810
           // CalcRemoveRule.INSTANCE,
           CalcMergeRule.INSTANCE,
 
@@ -103,6 +106,10 @@ public class BeamRuleSets {
 
           // join rules
           JoinPushExpressionsRule.INSTANCE,
+          JoinCommuteRule.INSTANCE,
+          BeamJoinAssociateRule.INSTANCE,
+          BeamJoinPushThroughJoinRule.RIGHT,
+          BeamJoinPushThroughJoinRule.LEFT,
 
           // remove union with only a single child
           UnionEliminatorRule.INSTANCE,
@@ -120,7 +127,8 @@ public class BeamRuleSets {
           // AggregateReduceFunctionsRule.INSTANCE,
 
           // remove unnecessary sort rule
-          SortRemoveRule.INSTANCE,
+          // https://issues.apache.org/jira/browse/BEAM-5073
+          // SortRemoveRule.INSTANCE,
 
           // prune empty results rules
           PruneEmptyRules.AGGREGATE_INSTANCE,
@@ -135,6 +143,7 @@ public class BeamRuleSets {
       ImmutableList.of(
           BeamCalcRule.INSTANCE,
           BeamAggregationRule.INSTANCE,
+          BeamBasicAggregationRule.INSTANCE,
           BeamSortRule.INSTANCE,
           BeamValuesRule.INSTANCE,
           BeamIntersectRule.INSTANCE,

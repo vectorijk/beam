@@ -17,21 +17,15 @@
  */
 package org.apache.beam.fn.harness;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
 
-import com.google.common.collect.ImmutableListMultimap;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.apache.beam.fn.harness.control.BundleSplitListener;
 import org.apache.beam.fn.harness.data.BeamFnDataClient;
+import org.apache.beam.fn.harness.data.PCollectionConsumerRegistry;
+import org.apache.beam.fn.harness.data.PTransformFunctionRegistry;
 import org.apache.beam.fn.harness.state.BeamFnStateClient;
 import org.apache.beam.fn.harness.state.SideInputSpec;
 import org.apache.beam.model.pipeline.v1.RunnerApi;
@@ -41,18 +35,30 @@ import org.apache.beam.model.pipeline.v1.RunnerApi.ParDoPayload;
 import org.apache.beam.runners.core.construction.PCollectionViewTranslation;
 import org.apache.beam.runners.core.construction.ParDoTranslation;
 import org.apache.beam.runners.core.construction.RehydratedComponents;
+import org.apache.beam.runners.core.construction.Timer;
+import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.fn.data.FnDataReceiver;
-import org.apache.beam.sdk.fn.function.ThrowingRunnable;
 import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.schemas.SchemaCoder;
+import org.apache.beam.sdk.state.TimeDomain;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.Materializations;
+import org.apache.beam.sdk.transforms.reflect.DoFnSignature;
+import org.apache.beam.sdk.transforms.reflect.DoFnSignatures;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.util.WindowedValue;
 import org.apache.beam.sdk.util.WindowedValue.WindowedValueCoder;
+import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableListMultimap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ListMultimap;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Maps;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Sets;
 
 /** A {@link PTransformRunnerFactory} for transforms invoking a {@link DoFn}. */
 abstract class DoFnPTransformRunnerFactory<
@@ -66,6 +72,9 @@ abstract class DoFnPTransformRunnerFactory<
 
     void processElement(WindowedValue<T> input) throws Exception;
 
+    void processTimer(
+        String timerId, TimeDomain timeDomain, WindowedValue<KV<Object, Timer>> input);
+
     void finishBundle() throws Exception;
   }
 
@@ -74,42 +83,62 @@ abstract class DoFnPTransformRunnerFactory<
       PipelineOptions pipelineOptions,
       BeamFnDataClient beamFnDataClient,
       BeamFnStateClient beamFnStateClient,
-      String ptransformId,
+      String pTransformId,
       PTransform pTransform,
       Supplier<String> processBundleInstructionId,
       Map<String, PCollection> pCollections,
       Map<String, RunnerApi.Coder> coders,
       Map<String, RunnerApi.WindowingStrategy> windowingStrategies,
-      Multimap<String, FnDataReceiver<WindowedValue<?>>> pCollectionIdsToConsumers,
-      Consumer<ThrowingRunnable> addStartFunction,
-      Consumer<ThrowingRunnable> addFinishFunction,
+      PCollectionConsumerRegistry pCollectionConsumerRegistry,
+      PTransformFunctionRegistry startFunctionRegistry,
+      PTransformFunctionRegistry finishFunctionRegistry,
       BundleSplitListener splitListener) {
     Context<FnInputT, OutputT> context =
         new Context<>(
             pipelineOptions,
             beamFnStateClient,
-            ptransformId,
+            pTransformId,
             pTransform,
             processBundleInstructionId,
             pCollections,
             coders,
             windowingStrategies,
-            pCollectionIdsToConsumers,
+            pCollectionConsumerRegistry,
             splitListener);
 
     RunnerT runner = createRunner(context);
 
     // Register the appropriate handlers.
-    addStartFunction.accept(runner::startBundle);
+    startFunctionRegistry.register(pTransformId, runner::startBundle);
     Iterable<String> mainInput =
         Sets.difference(
-            pTransform.getInputsMap().keySet(), context.parDoPayload.getSideInputsMap().keySet());
+            pTransform.getInputsMap().keySet(),
+            Sets.union(
+                context.parDoPayload.getSideInputsMap().keySet(),
+                context.parDoPayload.getTimerSpecsMap().keySet()));
     for (String localInputName : mainInput) {
-      pCollectionIdsToConsumers.put(
+      pCollectionConsumerRegistry.register(
           pTransform.getInputsOrThrow(localInputName),
+          pTransformId,
           (FnDataReceiver) (FnDataReceiver<WindowedValue<TransformInputT>>) runner::processElement);
     }
-    addFinishFunction.accept(runner::finishBundle);
+
+    // Register as a consumer for each timer PCollection.
+    for (String localName : context.parDoPayload.getTimerSpecsMap().keySet()) {
+      TimeDomain timeDomain =
+          DoFnSignatures.getTimerSpecOrThrow(
+                  context.doFnSignature.timerDeclarations().get(localName), context.doFn)
+              .getTimeDomain();
+      pCollectionConsumerRegistry.register(
+          pTransform.getInputsOrThrow(localName),
+          pTransformId,
+          (FnDataReceiver)
+              timer ->
+                  runner.processTimer(
+                      localName, timeDomain, (WindowedValue<KV<Object, Timer>>) timer));
+    }
+
+    finishFunctionRegistry.register(pTransformId, runner::finishBundle);
     return runner;
   }
 
@@ -123,15 +152,18 @@ abstract class DoFnPTransformRunnerFactory<
     final Supplier<String> processBundleInstructionId;
     final RehydratedComponents rehydratedComponents;
     final DoFn<InputT, OutputT> doFn;
+    final DoFnSignature doFnSignature;
     final TupleTag<OutputT> mainOutputTag;
     final Coder<?> inputCoder;
+    final SchemaCoder<InputT> schemaCoder;
     final Coder<?> keyCoder;
+    final SchemaCoder<OutputT> mainOutputSchemaCoder;
     final Coder<? extends BoundedWindow> windowCoder;
     final WindowingStrategy<InputT, ?> windowingStrategy;
     final Map<TupleTag<?>, SideInputSpec> tagToSideInputSpecMap;
     Map<TupleTag<?>, Coder<?>> outputCoders;
     final ParDoPayload parDoPayload;
-    final ListMultimap<TupleTag<?>, FnDataReceiver<WindowedValue<?>>> tagToConsumer;
+    final ListMultimap<String, FnDataReceiver<WindowedValue<?>>> localNameToConsumer;
     final BundleSplitListener splitListener;
 
     Context(
@@ -143,7 +175,7 @@ abstract class DoFnPTransformRunnerFactory<
         Map<String, PCollection> pCollections,
         Map<String, RunnerApi.Coder> coders,
         Map<String, RunnerApi.WindowingStrategy> windowingStrategies,
-        Multimap<String, FnDataReceiver<WindowedValue<?>>> pCollectionIdsToConsumers,
+        PCollectionConsumerRegistry pCollectionConsumerRegistry,
         BundleSplitListener splitListener) {
       this.pipelineOptions = pipelineOptions;
       this.beamFnStateClient = beamFnStateClient;
@@ -155,17 +187,23 @@ abstract class DoFnPTransformRunnerFactory<
       try {
         rehydratedComponents =
             RehydratedComponents.forComponents(
-                RunnerApi.Components.newBuilder()
-                    .putAllCoders(coders)
-                    .putAllWindowingStrategies(windowingStrategies)
-                    .build());
+                    RunnerApi.Components.newBuilder()
+                        .putAllCoders(coders)
+                        .putAllPcollections(pCollections)
+                        .putAllWindowingStrategies(windowingStrategies)
+                        .build())
+                .withPipeline(Pipeline.create());
         parDoPayload = ParDoPayload.parseFrom(pTransform.getSpec().getPayload());
         doFn = (DoFn) ParDoTranslation.getDoFn(parDoPayload);
+        doFnSignature = DoFnSignatures.signatureForDoFn(doFn);
         mainOutputTag = (TupleTag) ParDoTranslation.getMainOutputTag(parDoPayload);
         String mainInputTag =
             Iterables.getOnlyElement(
                 Sets.difference(
-                    pTransform.getInputsMap().keySet(), parDoPayload.getSideInputsMap().keySet()));
+                    pTransform.getInputsMap().keySet(),
+                    Sets.union(
+                        parDoPayload.getSideInputsMap().keySet(),
+                        parDoPayload.getTimerSpecsMap().keySet())));
         PCollection mainInput = pCollections.get(pTransform.getInputsOrThrow(mainInputTag));
         inputCoder = rehydratedComponents.getCoder(mainInput.getCoderId());
         if (inputCoder instanceof KvCoder
@@ -179,6 +217,17 @@ abstract class DoFnPTransformRunnerFactory<
         } else {
           this.keyCoder = null;
         }
+        if (inputCoder instanceof SchemaCoder
+            // TODO: Stop passing windowed value coders within PCollections.
+            || (inputCoder instanceof WindowedValue.WindowedValueCoder
+                && (((WindowedValueCoder) inputCoder).getValueCoder() instanceof SchemaCoder))) {
+          this.schemaCoder =
+              inputCoder instanceof WindowedValueCoder
+                  ? (SchemaCoder<InputT>) ((WindowedValueCoder) inputCoder).getValueCoder()
+                  : ((SchemaCoder<InputT>) inputCoder);
+        } else {
+          this.schemaCoder = null;
+        }
 
         windowingStrategy =
             (WindowingStrategy)
@@ -190,8 +239,14 @@ abstract class DoFnPTransformRunnerFactory<
           TupleTag<?> outputTag = new TupleTag<>(entry.getKey());
           RunnerApi.PCollection outputPCollection = pCollections.get(entry.getValue());
           Coder<?> outputCoder = rehydratedComponents.getCoder(outputPCollection.getCoderId());
+          if (outputCoder instanceof WindowedValueCoder) {
+            outputCoder = ((WindowedValueCoder) outputCoder).getValueCoder();
+          }
           outputCoders.put(outputTag, outputCoder);
         }
+        Coder<OutputT> outputCoder = (Coder<OutputT>) outputCoders.get(mainOutputTag);
+        mainOutputSchemaCoder =
+            (outputCoder instanceof SchemaCoder) ? (SchemaCoder<OutputT>) outputCoder : null;
 
         // Build the map from tag id to side input specification
         for (Map.Entry<String, RunnerApi.SideInput> entry :
@@ -225,13 +280,13 @@ abstract class DoFnPTransformRunnerFactory<
         throw new IllegalArgumentException("Malformed ParDoPayload", exn);
       }
 
-      ImmutableListMultimap.Builder<TupleTag<?>, FnDataReceiver<WindowedValue<?>>>
-          tagToConsumerBuilder = ImmutableListMultimap.builder();
+      ImmutableListMultimap.Builder<String, FnDataReceiver<WindowedValue<?>>>
+          localNameToConsumerBuilder = ImmutableListMultimap.builder();
       for (Map.Entry<String, String> entry : pTransform.getOutputsMap().entrySet()) {
-        tagToConsumerBuilder.putAll(
-            new TupleTag<>(entry.getKey()), pCollectionIdsToConsumers.get(entry.getValue()));
+        localNameToConsumerBuilder.putAll(
+            entry.getKey(), pCollectionConsumerRegistry.getMultiplexingConsumer(entry.getValue()));
       }
-      tagToConsumer = tagToConsumerBuilder.build();
+      localNameToConsumer = localNameToConsumerBuilder.build();
       tagToSideInputSpecMap = tagToSideInputSpecMapBuilder.build();
       this.splitListener = splitListener;
     }

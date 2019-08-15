@@ -17,11 +17,9 @@
  */
 package org.apache.beam.sdk.io;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.Files.fileTraverser;
 
-import com.google.common.base.Predicates;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -42,12 +40,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import org.apache.beam.sdk.io.fs.CreateOptions;
 import org.apache.beam.sdk.io.fs.MatchResult;
 import org.apache.beam.sdk.io.fs.MatchResult.Metadata;
 import org.apache.beam.sdk.io.fs.MatchResult.Status;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Predicates;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Lists;
 import org.apache.commons.lang3.SystemUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,6 +82,9 @@ import org.slf4j.LoggerFactory;
 class LocalFileSystem extends FileSystem<LocalResourceId> {
 
   private static final Logger LOG = LoggerFactory.getLogger(LocalFileSystem.class);
+
+  /** Matches a glob containing a wildcard, capturing the portion before the first wildcard. */
+  private static final Pattern GLOB_PREFIX = Pattern.compile("(?<PREFIX>[^\\[*?]*)[\\[*?].*");
 
   LocalFileSystem() {}
 
@@ -214,12 +219,16 @@ class LocalFileSystem extends FileSystem<LocalResourceId> {
       }
     }
 
-    File file = Paths.get(spec).toFile();
+    // BEAM-6213: Windows breaks on Paths.get(spec).toFile() with a glob because
+    // it considers it an invalid file system pattern. We should use
+    // new File(spec) to avoid such validation.
+    // See https://bugs.openjdk.java.net/browse/JDK-8197918
+    final File file = new File(spec);
     if (file.exists()) {
       return MatchResult.create(Status.OK, ImmutableList.of(toMetadata(file)));
     }
 
-    File parent = file.getAbsoluteFile().getParentFile();
+    File parent = getSpecNonGlobPrefixParentFile(spec);
     if (!parent.exists()) {
       return MatchResult.create(Status.NOT_FOUND, Collections.emptyList());
     }
@@ -239,12 +248,12 @@ class LocalFileSystem extends FileSystem<LocalResourceId> {
         java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + pathToMatch);
 
     // TODO: Avoid iterating all files: https://issues.apache.org/jira/browse/BEAM-1309
-    Iterable<File> files = com.google.common.io.Files.fileTreeTraverser().preOrderTraversal(parent);
+    Iterable<File> files = fileTraverser().depthFirstPreOrder(parent);
     Iterable<File> matchedFiles =
         StreamSupport.stream(files.spliterator(), false)
             .filter(
                 Predicates.and(
-                        com.google.common.io.Files.isFile(),
+                        org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.Files.isFile(),
                         input -> matcher.matches(input.toPath()))
                     ::apply)
             .collect(Collectors.toList());
@@ -263,11 +272,25 @@ class LocalFileSystem extends FileSystem<LocalResourceId> {
     }
   }
 
+  private File getSpecNonGlobPrefixParentFile(String spec) {
+    String specNonWildcardPrefix = getNonWildcardPrefix(spec);
+    File file = new File(specNonWildcardPrefix);
+    return specNonWildcardPrefix.endsWith(File.separator)
+        ? file
+        : file.getAbsoluteFile().getParentFile();
+  }
+
   private Metadata toMetadata(File file) {
     return Metadata.builder()
         .setResourceId(LocalResourceId.fromPath(file.toPath(), file.isDirectory()))
         .setIsReadSeekEfficient(true)
         .setSizeBytes(file.length())
+        .setLastModifiedMillis(file.lastModified())
         .build();
+  }
+
+  private static String getNonWildcardPrefix(String globExp) {
+    Matcher m = GLOB_PREFIX.matcher(globExp);
+    return !m.matches() ? globExp : m.group("PREFIX");
   }
 }

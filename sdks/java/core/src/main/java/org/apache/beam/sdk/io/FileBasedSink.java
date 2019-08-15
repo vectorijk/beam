@@ -17,22 +17,14 @@
  */
 package org.apache.beam.sdk.io;
 
-import static com.google.common.base.MoreObjects.firstNonNull;
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Verify.verifyNotNull;
 import static org.apache.beam.sdk.io.WriteFiles.UNKNOWN_SHARDNUM;
 import static org.apache.beam.sdk.values.TypeDescriptors.extractFromTypeParameters;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.MoreObjects.firstNonNull;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkArgument;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions.checkState;
+import static org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Verify.verifyNotNull;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.MoreObjects;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -48,7 +40,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.annotations.Experimental.Kind;
@@ -82,9 +73,14 @@ import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors.TypeVariableExtractor;
-import org.joda.time.Instant;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.annotations.VisibleForTesting;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.MoreObjects;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableList;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableSet;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Lists;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Maps;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,6 +137,9 @@ public abstract class FileBasedSink<UserT, DestinationT, OutputT>
     /** @see Compression#BZIP2 */
     BZIP2(Compression.BZIP2),
 
+    /** @see Compression#ZSTD */
+    ZSTD(Compression.ZSTD),
+
     /** @see Compression#DEFLATE */
     DEFLATE(Compression.DEFLATE);
 
@@ -182,6 +181,9 @@ public abstract class FileBasedSink<UserT, DestinationT, OutputT>
 
         case ZIP:
           throw new IllegalArgumentException("ZIP is unsupported");
+
+        case ZSTD:
+          return ZSTD;
 
         case DEFLATE:
           return DEFLATE;
@@ -504,7 +506,7 @@ public abstract class FileBasedSink<UserT, DestinationT, OutputT>
      *
      * <p>Default is a uniquely named subdirectory of the provided tempDirectory, e.g. if
      * tempDirectory is /path/to/foo/, the temporary directory will be
-     * /path/to/foo/temp-beam-foo-$date.
+     * /path/to/foo/.temp-beam-$uuid.
      *
      * @param sink the FileBasedSink that will be used to configure this write operation.
      */
@@ -516,20 +518,12 @@ public abstract class FileBasedSink<UserT, DestinationT, OutputT>
 
     private static class TemporaryDirectoryBuilder
         implements SerializableFunction<ResourceId, ResourceId> {
-      private static final AtomicLong TEMP_COUNT = new AtomicLong(0);
-      private static final DateTimeFormatter TEMPDIR_TIMESTAMP =
-          DateTimeFormat.forPattern("yyyy-MM-dd_HH-mm-ss");
-      // The intent of the code is to have a consistent value of tempDirectory across
-      // all workers, which wouldn't happen if now() was called inline.
-      private final String timestamp = Instant.now().toString(TEMPDIR_TIMESTAMP);
-      // Multiple different sinks may be used in the same output directory; use tempId to create a
-      // separate temp directory for each.
-      private final Long tempId = TEMP_COUNT.getAndIncrement();
+      private final UUID tempUUID = UUID.randomUUID();
 
       @Override
       public ResourceId apply(ResourceId tempDirectory) {
-        // Temp directory has a timestamp and a unique ID
-        String tempDirName = String.format(TEMP_DIRECTORY_PREFIX + "-%s-%s", timestamp, tempId);
+        // Temp directory has a random UUID postfix (BEAM-7689)
+        String tempDirName = String.format(TEMP_DIRECTORY_PREFIX + "-%s", tempUUID);
         return tempDirectory
             .getCurrentDirectory()
             .resolve(tempDirName, StandardResolveOptions.RESOLVE_DIRECTORY);
@@ -758,7 +752,7 @@ public abstract class FileBasedSink<UserT, DestinationT, OutputT>
       }
       // During a failure case, files may have been deleted in an earlier step. Thus
       // we ignore missing files here.
-      FileSystems.copy(srcFiles, dstFiles, StandardMoveOptions.IGNORE_MISSING_FILES);
+      FileSystems.rename(srcFiles, dstFiles, StandardMoveOptions.IGNORE_MISSING_FILES);
       removeTemporaryFiles(srcFiles);
     }
 
@@ -797,7 +791,10 @@ public abstract class FileBasedSink<UserT, DestinationT, OutputT>
                   FileSystems.match(Collections.singletonList(tempDir.toString() + "*")));
           for (Metadata matchResult : singleMatch.metadata()) {
             if (allMatches.add(matchResult.resourceId())) {
-              LOG.info("Will also remove unknown temporary file {}", matchResult.resourceId());
+              LOG.warn(
+                  "Will also remove unknown temporary file {}. This might indicate that other process/job is using "
+                      + "the same temporary folder and result in data consistency issues.",
+                  matchResult.resourceId());
             }
           }
         } catch (Exception e) {
