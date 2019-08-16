@@ -1,4 +1,4 @@
-package org.apache.beam.sdk.extensions.tpc;
+package org.apache.beam.sdk.tpch;
 
 import java.util.NoSuchElementException;
 import org.apache.beam.sdk.PipelineResult;

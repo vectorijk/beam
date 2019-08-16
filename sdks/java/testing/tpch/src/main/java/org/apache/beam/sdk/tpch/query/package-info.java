@@ -17,4 +17,4 @@
  */
 
 /** Provides default commandline for sqlline. */
-package org.apache.beam.sdk.extensions.tpc.query;
+package org.apache.beam.sdk.tpch.query;

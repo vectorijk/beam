@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.beam.sdk.extensions.tpc;
+package org.apache.beam.sdk.tpch;
 
 import com.google.common.collect.ImmutableMap;
 import org.apache.beam.sdk.schemas.Schema;
