@@ -17,8 +17,8 @@
  */
 package org.apache.beam.sdk.tpch;
 
-import com.google.common.collect.ImmutableMap;
 import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
 
 /** Tpc Schema. */
 public class Schemas {

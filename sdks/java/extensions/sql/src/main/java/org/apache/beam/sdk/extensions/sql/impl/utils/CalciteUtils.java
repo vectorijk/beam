@@ -122,6 +122,7 @@ public class CalciteUtils {
   public static final FieldType INTEGER = FieldType.INT32;
   public static final FieldType BIG_INT = FieldType.INT64;
   public static final FieldType FLOAT = FieldType.FLOAT;
+  public static final FieldType REAL = FieldType.FLOAT.withMetadata("REAL", "REAL");
   public static final FieldType DOUBLE = FieldType.DOUBLE;
   public static final FieldType DECIMAL = FieldType.DECIMAL;
   public static final FieldType BOOLEAN = FieldType.BOOLEAN;
@@ -143,7 +144,7 @@ public class CalciteUtils {
           .put(INTEGER, SqlTypeName.INTEGER)
           .put(BIG_INT, SqlTypeName.BIGINT)
           .put(FLOAT, SqlTypeName.FLOAT)
-          .put(FieldType.FLOAT.withMetadata("REAL"), SqlTypeName.REAL)
+          .put(REAL, SqlTypeName.REAL)
           .put(DOUBLE, SqlTypeName.DOUBLE)
           .put(DECIMAL, SqlTypeName.DECIMAL)
           .put(BOOLEAN, SqlTypeName.BOOLEAN)

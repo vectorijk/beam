@@ -17,7 +17,6 @@
  */
 package org.apache.beam.sdk.tpch;
 
-import com.google.common.collect.ImmutableMap;
 import java.util.Map;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.Pipeline;
@@ -25,11 +24,12 @@ import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.extensions.sql.SqlTransform;
 import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTable;
 import org.apache.beam.sdk.extensions.sql.meta.provider.text.TextTableProvider;
-import org.apache.beam.sdk.tpch.query.TpcHQuery;
 import org.apache.beam.sdk.io.FileSystems;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.sdk.schemas.SchemaCoder;
+import org.apache.beam.sdk.tpch.query.TpcHQuery;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.values.PCollection;
@@ -37,6 +37,7 @@ import org.apache.beam.sdk.values.PCollectionTuple;
 import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TypeDescriptors;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.ImmutableMap;
 import org.apache.commons.csv.CSVFormat;
 import org.slf4j.LoggerFactory;
 
@@ -78,7 +79,7 @@ public class BeamTpc {
                   new TextTableProvider.CsvToRow(tableSchema.getValue(), csvFormat),
                   new TextTableProvider.RowToCsv(csvFormat))
               .buildIOReader(pipeline.begin())
-              .setCoder(tableSchema.getValue().getRowCoder())
+              .setCoder(SchemaCoder.of(tableSchema.getValue()))
               .setName(tableSchema.getKey());
 
       tables = tables.and(new TupleTag<>(tableSchema.getKey()), table);
@@ -87,6 +88,7 @@ public class BeamTpc {
     return tables;
   }
 
+  /** Main Entry. */
   public static void main(String[] args) {
     // Option for lanunch Tpc benchmark.
     TpcOptions tpcOptions =
