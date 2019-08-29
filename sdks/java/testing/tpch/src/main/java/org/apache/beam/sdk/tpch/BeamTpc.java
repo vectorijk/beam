@@ -106,14 +106,10 @@ public class BeamTpc {
     System.out.println(tpcOptions.getInputFile());
     System.out.println(outputPath);
 
-    Monitor<Row> resultMonitor = new Monitor<Row>("tpc", "query1");
-
     tables
         .apply(
             "SqlTransform " + "H" + ":" + tpcOptions.getQuery(),
             SqlTransform.query(TpcHQuery.getQuery(tpcOptions.getQuery())))
-        //            SqlTransform.query(TpcDsQuery.QUERY7))
-        .apply(resultMonitor.getTransform())
         .apply(
             "exp_table",
             MapElements.into(TypeDescriptors.strings())
