@@ -49,14 +49,20 @@ vendorJava(
                 "org.apache.calcite:calcite-linq4j:$calcite_version",
                 "org.apache.calcite.avatica:avatica-core:$avatica_version",
                 library.java.protobuf_java,
-                library.java.slf4j_api
+                library.java.slf4j_api,
+                'com.google.code.gson:gson:2.8.6',
+                "net.minidev:json-smart:2.3",
+                "org.json:json:20190722",
+                "org.apache.tapestry:tapestry-json:5.4.5",
+                "org.apache.tapestry:tapestry-ioc:5.4.5",
+//                "org.apache.tapestry:tapestry-ioc-test:5.4-beta-6",
+                "cglib:cglib:3.3.0",
+                "javax.transaction:javax.transaction-api:1.2",
+                "javax.servlet:javax.servlet-api:4.0.1"
         ],
         relocations: packagesToRelocate.collectEntries {
             [ (it): "${prefix}.${it}" ] + [ "jdbc:calcite:": "jdbc:beam-vendor-calcite:"]
         },
-        exclusions: [
-                "org/slf4j/**"
-        ],
         groupId: group,
         artifactId: "beam-vendor-calcite-1_20_0",
         version: version,
