@@ -47,11 +47,25 @@ public interface RemoteBundle extends AutoCloseable {
   Map<KV<String, String>, FnDataReceiver<Timer>> getTimerReceivers();
 
   /**
+   * Ask the remote bundle for progress.
+   *
+   * <p>This method is a no-op if the bundle is complete otherwise it will return after the request
+   * has been issued. Any progress reports will be forwarded to the {@link BundleProgressHandler}.
+   *
+   * <p>All {@link BundleProgressHandler#onProgress} calls are guaranteed to be called before any
+   * {@link BundleProgressHandler#onCompleted}.
+   */
+  void requestProgress();
+
+  /**
    * Ask the remote bundle to split its current processing based upon its knowledge of remaining
    * work. A fraction of 0, is equivalent to asking the SDK to checkpoint.
    *
-   * <p>This method will return after the request has been issued. Any splits will be forwarded to
-   * the {@link BundleSplitHandler}.
+   * <p>This method is a no-op if the bundle is complete otherwise it will return after the request
+   * has been issued. Any splits will be forwarded to the {@link BundleSplitHandler}.
+   *
+   * <p>All {@link BundleSplitHandler#split} calls are guaranteed to be called before any {@link
+   * BundleCheckpointHandler#onCheckpoint}.
    */
   void split(double fractionOfRemainder);
 
@@ -59,7 +73,8 @@ public interface RemoteBundle extends AutoCloseable {
    * Closes this bundle. This causes the input {@link FnDataReceiver} to be closed (future calls to
    * that {@link FnDataReceiver} will throw an exception), and causes the {@link RemoteBundle} to
    * produce any buffered outputs. The call to {@link #close()} will block until all of the outputs
-   * produced by this bundle have been received.
+   * produced by this bundle have been received and all outstanding progress and split requests have
+   * been handled.
    */
   @Override
   void close() throws Exception;

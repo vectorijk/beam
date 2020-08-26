@@ -157,9 +157,11 @@ public class CombineRunnersTest {
             consumers,
             startFunctionRegistry,
             finishFunctionRegistry,
-            null,
-            null,
-            null);
+            null /* addResetFunction */,
+            null /* tearDownRegistry */,
+            null /* addProgressRequestCallback */,
+            null /* splitListener */,
+            null /* bundleFinalizer */);
 
     Iterables.getOnlyElement(startFunctionRegistry.getFunctions()).run();
 
@@ -234,9 +236,11 @@ public class CombineRunnersTest {
             consumers,
             startFunctionRegistry,
             finishFunctionRegistry,
-            null,
-            null,
-            null);
+            null /* addResetFunction */,
+            null /* tearDownRegistry */,
+            null /* addProgressRequestCallback */,
+            null /* splitListener */,
+            null /* bundleFinalizer */);
 
     assertThat(startFunctionRegistry.getFunctions(), empty());
     assertThat(finishFunctionRegistry.getFunctions(), empty());
@@ -299,9 +303,11 @@ public class CombineRunnersTest {
             consumers,
             startFunctionRegistry,
             finishFunctionRegistry,
-            null,
-            null,
-            null);
+            null /* addResetFunction */,
+            null /* tearDownRegistry */,
+            null /* addProgressRequestCallback */,
+            null /* splitListener */,
+            null /* bundleFinalizer */);
 
     assertThat(startFunctionRegistry.getFunctions(), empty());
     assertThat(finishFunctionRegistry.getFunctions(), empty());
@@ -364,9 +370,11 @@ public class CombineRunnersTest {
             consumers,
             startFunctionRegistry,
             finishFunctionRegistry,
-            null,
-            null,
-            null);
+            null /* addResetFunction */,
+            null /* tearDownRegistry */,
+            null /* addProgressRequestCallback */,
+            null /* splitListener */,
+            null /* bundleFinalizer */);
 
     assertThat(startFunctionRegistry.getFunctions(), empty());
     assertThat(finishFunctionRegistry.getFunctions(), empty());
@@ -428,9 +436,11 @@ public class CombineRunnersTest {
             consumers,
             startFunctionRegistry,
             finishFunctionRegistry,
-            null,
-            null,
-            null);
+            null /* addResetFunction */,
+            null /* tearDownRegistry */,
+            null /* addProgressRequestCallback */,
+            null /* splitListener */,
+            null /* bundleFinalizer */);
 
     assertThat(startFunctionRegistry.getFunctions(), empty());
     assertThat(finishFunctionRegistry.getFunctions(), empty());

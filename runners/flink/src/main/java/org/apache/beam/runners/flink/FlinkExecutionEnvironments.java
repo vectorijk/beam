@@ -20,7 +20,6 @@ package org.apache.beam.runners.flink;
 import static org.apache.flink.streaming.api.environment.StreamExecutionEnvironment.getDefaultLocalParallelism;
 
 import java.util.List;
-import javax.annotation.Nullable;
 import org.apache.beam.sdk.util.InstanceBuilder;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.annotations.VisibleForTesting;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.net.HostAndPort;
@@ -41,6 +40,7 @@ import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.environment.CheckpointConfig.ExternalizedCheckpointCleanup;
 import org.apache.flink.streaming.api.environment.RemoteStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -218,11 +218,18 @@ public class FlinkExecutionEnvironments {
       }
       flinkStreamEnv.enableCheckpointing(
           checkpointInterval, CheckpointingMode.valueOf(options.getCheckpointingMode()));
+
+      if (options.getShutdownSourcesAfterIdleMs() == -1) {
+        // If not explicitly configured, we never shutdown sources when checkpointing is enabled.
+        options.setShutdownSourcesAfterIdleMs(Long.MAX_VALUE);
+      }
+
       if (options.getCheckpointTimeoutMillis() != -1) {
         flinkStreamEnv
             .getCheckpointConfig()
             .setCheckpointTimeout(options.getCheckpointTimeoutMillis());
       }
+
       boolean externalizedCheckpoint = options.isExternalizedCheckpointsEnabled();
       boolean retainOnCancellation = options.getRetainExternalizedCheckpointsOnCancellation();
       if (externalizedCheckpoint) {
@@ -242,6 +249,15 @@ public class FlinkExecutionEnvironments {
       }
       boolean failOnCheckpointingErrors = options.getFailOnCheckpointingErrors();
       flinkStreamEnv.getCheckpointConfig().setFailOnCheckpointingErrors(failOnCheckpointingErrors);
+
+      flinkStreamEnv
+          .getCheckpointConfig()
+          .setMaxConcurrentCheckpoints(options.getNumConcurrentCheckpoints());
+    } else {
+      if (options.getShutdownSourcesAfterIdleMs() == -1) {
+        // If not explicitly configured, we never shutdown sources when checkpointing is enabled.
+        options.setShutdownSourcesAfterIdleMs(0L);
+      }
     }
 
     applyLatencyTrackingInterval(flinkStreamEnv.getConfig(), options);
@@ -262,6 +278,8 @@ public class FlinkExecutionEnvironments {
 
     return flinkStreamEnv;
   }
+
+  private void configureCheckpointingOptions() {}
 
   /**
    * Removes the http:// or https:// schema from a url string. This is commonly used with the

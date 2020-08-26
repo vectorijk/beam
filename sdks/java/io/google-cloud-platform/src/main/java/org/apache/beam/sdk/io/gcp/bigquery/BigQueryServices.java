@@ -28,19 +28,19 @@ import com.google.api.services.bigquery.model.JobStatistics;
 import com.google.api.services.bigquery.model.Table;
 import com.google.api.services.bigquery.model.TableReference;
 import com.google.api.services.bigquery.model.TableRow;
-import com.google.cloud.bigquery.storage.v1beta1.Storage.CreateReadSessionRequest;
-import com.google.cloud.bigquery.storage.v1beta1.Storage.ReadRowsRequest;
-import com.google.cloud.bigquery.storage.v1beta1.Storage.ReadRowsResponse;
-import com.google.cloud.bigquery.storage.v1beta1.Storage.ReadSession;
-import com.google.cloud.bigquery.storage.v1beta1.Storage.SplitReadStreamRequest;
-import com.google.cloud.bigquery.storage.v1beta1.Storage.SplitReadStreamResponse;
+import com.google.cloud.bigquery.storage.v1.CreateReadSessionRequest;
+import com.google.cloud.bigquery.storage.v1.ReadRowsRequest;
+import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
+import com.google.cloud.bigquery.storage.v1.ReadSession;
+import com.google.cloud.bigquery.storage.v1.SplitReadStreamRequest;
+import com.google.cloud.bigquery.storage.v1.SplitReadStreamResponse;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
-import javax.annotation.Nullable;
 import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.annotations.Experimental.Kind;
 import org.apache.beam.sdk.values.ValueInSingleWindow;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** An interface for real, mock, or fake implementations of Cloud BigQuery services. */
 public interface BigQueryServices extends Serializable {

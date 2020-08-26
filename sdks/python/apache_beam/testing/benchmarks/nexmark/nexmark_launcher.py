@@ -75,10 +75,20 @@ from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.options.pipeline_options import StandardOptions
 from apache_beam.options.pipeline_options import TestOptions
+from apache_beam.testing.benchmarks.nexmark import nexmark_util
 from apache_beam.testing.benchmarks.nexmark.nexmark_util import Command
 from apache_beam.testing.benchmarks.nexmark.queries import query0
 from apache_beam.testing.benchmarks.nexmark.queries import query1
 from apache_beam.testing.benchmarks.nexmark.queries import query2
+from apache_beam.testing.benchmarks.nexmark.queries import query3
+from apache_beam.testing.benchmarks.nexmark.queries import query4
+from apache_beam.testing.benchmarks.nexmark.queries import query5
+from apache_beam.testing.benchmarks.nexmark.queries import query6
+from apache_beam.testing.benchmarks.nexmark.queries import query7
+from apache_beam.testing.benchmarks.nexmark.queries import query8
+from apache_beam.testing.benchmarks.nexmark.queries import query9
+from apache_beam.testing.benchmarks.nexmark.queries import query11
+from apache_beam.transforms import window
 
 
 class NexmarkLauncher(object):
@@ -110,7 +120,7 @@ class NexmarkLauncher(object):
         type=int,
         action='append',
         required=True,
-        choices=[0, 1, 2],
+        choices=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11],
         help='Query to run')
 
     parser.add_argument(
@@ -193,15 +203,27 @@ class NexmarkLauncher(object):
     else:
       raw_events = self.pipeline | 'ReadPubSub' >> beam.io.ReadFromPubSub(
           topic=topic.full_name)
-
+    raw_events = (
+        raw_events
+        | 'deserialization' >> beam.ParDo(nexmark_util.ParseJsonEvnetFn())
+        | 'timestamping' >>
+        beam.Map(lambda e: window.TimestampedValue(e, e.date_time)))
     return raw_events
 
   def run_query(self, query, query_args, query_errors):
     try:
       self.parse_args()
       self.pipeline = beam.Pipeline(options=self.pipeline_options)
-      raw_events = self.generate_events()
-      query.load(raw_events, query_args)
+      nexmark_util.setup_coder()
+      events = self.generate_events()
+      output = query.load(events, query_args)
+      # print results
+      (  # pylint: disable=expression-not-assigned
+          output | beam.Map(repr)
+          | beam.io.WriteToText(
+              "py-query-result", file_name_suffix='.json', num_shards=1))
+      output | nexmark_util.CountAndLog()  # pylint: disable=expression-not-assigned
+      # end of results output
       result = self.pipeline.run()
       job_duration = (
           self.pipeline_options.view_as(TestOptions).wait_until_finish_duration)
@@ -227,11 +249,28 @@ class NexmarkLauncher(object):
     queries = {
         0: query0,
         1: query1,
-        2: query2,  # TODO(mariagh): Add more queries.
+        2: query2,
+        3: query3,
+        4: query4,
+        5: query5,
+        6: query6,
+        7: query7,
+        8: query8,
+        9: query9,
+        11: query11
     }
 
     # TODO(mariagh): Move to a config file.
-    query_args = {2: {'auction_id': 'a1003'}}
+    query_args = {
+        'auction_skip': 123,
+        'window_size_sec': 10,
+        'window_period_sec': 5,
+        'fanout': 5,
+        'num_max_workers': 5,
+        'max_log_events': 100000,
+        'occasional_delay_sec': 3,
+        'max_auction_waiting_time': 600
+    }
 
     query_errors = []
     for i in self.args.query:
@@ -246,13 +285,13 @@ class NexmarkLauncher(object):
       query_duration = self.pipeline_options.view_as(TestOptions).wait_until_finish_duration  # pylint: disable=line-too-long
       if launch_from_direct_runner:
         command = Command(
-            self.run_query, args=[queries[i], query_args.get(i), query_errors])
+            self.run_query, args=[queries[i], query_args, query_errors])
         command.run(timeout=query_duration // 1000)
       else:
         try:
-          self.run_query(queries[i], query_args.get(i), query_errors=None)
+          self.run_query(queries[i], query_args, query_errors=query_errors)
         except Exception as exc:
-          query_errors.append(exc)
+          query_errors.append(str(exc))
 
     if query_errors:
       logging.error('Query failed with %s', ', '.join(query_errors))

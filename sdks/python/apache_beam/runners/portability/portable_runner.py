@@ -18,7 +18,9 @@
 # pytype: skip-file
 
 from __future__ import absolute_import
+from __future__ import division
 
+import atexit
 import functools
 import itertools
 import logging
@@ -38,16 +40,15 @@ from apache_beam.options.pipeline_options import DebugOptions
 from apache_beam.options.pipeline_options import PortableOptions
 from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.options.pipeline_options import StandardOptions
+from apache_beam.options.value_provider import ValueProvider
 from apache_beam.portability import common_urns
 from apache_beam.portability.api import beam_artifact_api_pb2_grpc
 from apache_beam.portability.api import beam_job_api_pb2
-from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.runners import runner
 from apache_beam.runners.job import utils as job_utils
 from apache_beam.runners.portability import artifact_service
 from apache_beam.runners.portability import job_server
 from apache_beam.runners.portability import portable_metrics
-from apache_beam.runners.portability import portable_stager
 from apache_beam.runners.portability.fn_api_runner.fn_runner import translations
 from apache_beam.runners.worker import sdk_worker_main
 from apache_beam.runners.worker import worker_pool_main
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
   from google.protobuf import struct_pb2  # pylint: disable=ungrouped-imports
   from apache_beam.options.pipeline_options import PipelineOptions
   from apache_beam.pipeline import Pipeline
+  from apache_beam.portability.api import beam_runner_api_pb2
 
 __all__ = ['PortableRunner']
 
@@ -103,11 +105,11 @@ class JobServiceHandle(object):
     Submit and run the pipeline defined by `proto_pipeline`.
     """
     prepare_response = self.prepare(proto_pipeline)
-    retrieval_token = self.stage(
+    self.stage(
         proto_pipeline,
         prepare_response.artifact_staging_endpoint.url,
         prepare_response.staging_session_token)
-    return self.run(prepare_response.preparation_id, retrieval_token)
+    return self.run(prepare_response.preparation_id)
 
   def get_pipeline_options(self):
     # type: () -> struct_pb2.Struct
@@ -130,7 +132,7 @@ class JobServiceHandle(object):
         except grpc.FutureTimeoutError:
           # no retry for timeout errors
           raise
-        except grpc._channel._Rendezvous as e:
+        except grpc.RpcError as e:
           num_retries += 1
           if num_retries > max_retries:
             raise e
@@ -162,10 +164,19 @@ class JobServiceHandle(object):
     all_options = self.options.get_all_options(
         add_extra_args_fn=add_runner_options,
         retain_unknown_options=self._retain_unknown_options)
+
+    def convert_pipeline_option_value(v):
+      # convert int values: BEAM-5509
+      if type(v) == int:
+        return str(v)
+      elif isinstance(v, ValueProvider):
+        return convert_pipeline_option_value(
+            v.get()) if v.is_accessible() else None
+      return v
+
     # TODO: Define URNs for options.
-    # convert int values: https://issues.apache.org/jira/browse/BEAM-5509
     p_options = {
-        'beam:option:' + k + ':v1': (str(v) if type(v) == int else v)
+        'beam:option:' + k + ':v1': convert_pipeline_option_value(v)
         for k,
         v in all_options.items() if v is not None
     }
@@ -187,50 +198,15 @@ class JobServiceHandle(object):
 
     """Stage artifacts"""
     if artifact_staging_endpoint:
-      channel = grpc.insecure_channel(artifact_staging_endpoint)
-      try:
-        return self._stage_via_portable_service(channel, staging_session_token)
-      except grpc.RpcError as exn:
-        if exn.code() == grpc.StatusCode.UNIMPLEMENTED:
-          # This job server doesn't yet support the new protocol.
-          return self._stage_via_legacy_service(
-              pipeline, channel, staging_session_token)
-        else:
-          raise
-    else:
-      return None
+      artifact_service.offer_artifacts(
+          beam_artifact_api_pb2_grpc.ArtifactStagingServiceStub(
+              channel=grpc.insecure_channel(artifact_staging_endpoint)),
+          artifact_service.ArtifactRetrievalService(
+              artifact_service.BeamFilesystemHandler(None).file_reader),
+          staging_session_token)
 
-  def _stage_via_portable_service(
-      self, artifact_staging_channel, staging_session_token):
-    artifact_service.offer_artifacts(
-        beam_artifact_api_pb2_grpc.ArtifactStagingServiceStub(
-            channel=artifact_staging_channel),
-        artifact_service.ArtifactRetrievalService(
-            artifact_service.BeamFilesystemHandler(None).file_reader),
-        staging_session_token)
-
-  def _stage_via_legacy_service(
-      self, pipeline, artifact_staging_channel, staging_session_token):
-    stager = portable_stager.PortableStager(
-        artifact_staging_channel, staging_session_token)
-    resources = []
-    for _, env in pipeline.components.environments.items():
-      for dep in env.dependencies:
-        if dep.type_urn != common_urns.artifact_types.FILE.urn:
-          raise RuntimeError('unsupported artifact type %s' % dep.type_urn)
-        if dep.role_urn != common_urns.artifact_roles.STAGING_TO.urn:
-          raise RuntimeError('unsupported role type %s' % dep.role_urn)
-        type_payload = beam_runner_api_pb2.ArtifactFilePayload.FromString(
-            dep.type_payload)
-        role_payload = \
-            beam_runner_api_pb2.ArtifactStagingToRolePayload.FromString(
-                dep.role_payload)
-        resources.append((type_payload.path, role_payload.staged_name))
-    stager.stage_job_resources(resources, staging_location='')
-    return stager.commit_manifest()
-
-  def run(self, preparation_id, retrieval_token):
-    # type: (str, str) -> Tuple[str, Iterator[beam_job_api_pb2.JobStateEvent], Iterator[beam_job_api_pb2.JobMessagesResponse]]
+  def run(self, preparation_id):
+    # type: (str) -> Tuple[str, Iterator[beam_job_api_pb2.JobStateEvent], Iterator[beam_job_api_pb2.JobMessagesResponse]]
 
     """Run the job"""
     try:
@@ -251,8 +227,7 @@ class JobServiceHandle(object):
     # it may take a long time for a job to complete and streaming
     # jobs currently never return a response.
     run_response = self.job_service.Run(
-        beam_job_api_pb2.RunJobRequest(
-            preparation_id=preparation_id, retrieval_token=retrieval_token))
+        beam_job_api_pb2.RunJobRequest(preparation_id=preparation_id))
 
     if state_stream is None:
       state_stream = self.job_service.GetStateStream(
@@ -303,13 +278,10 @@ class PortableRunner(runner.PipelineRunner):
     return env_class.from_options(portable_options)
 
   def default_job_server(self, options):
-    # type: (PipelineOptions) -> job_server.JobServer
-    # TODO Provide a way to specify a container Docker URL
-    # https://issues.apache.org/jira/browse/BEAM-6328
-    if not self._dockerized_job_server:
-      self._dockerized_job_server = job_server.StopOnExitJobServer(
-          job_server.DockerizedJobServer())
-    return self._dockerized_job_server
+    raise NotImplementedError(
+        'You must specify a --job_endpoint when using --runner=PortableRunner. '
+        'Alternatively, you may specify which portable runner you intend to '
+        'use, such as --runner=FlinkRunner or --runner=SparkRunner.')
 
   def create_job_service_handle(self, job_service, options):
     return JobServiceHandle(job_service, options)
@@ -339,15 +311,6 @@ class PortableRunner(runner.PipelineRunner):
     proto_pipeline = pipeline.to_runner_api(
         default_environment=PortableRunner._create_environment(
             portable_options))
-
-    # Some runners won't detect the GroupByKey transform unless it has no
-    # subtransforms.  Remove all sub-transforms until BEAM-4605 is resolved.
-    for _, transform_proto in list(
-        proto_pipeline.components.transforms.items()):
-      if transform_proto.spec.urn == common_urns.primitives.GROUP_BY_KEY.urn:
-        for sub_transform in transform_proto.subtransforms:
-          del proto_pipeline.components.transforms[sub_transform]
-        del transform_proto.subtransforms[:]
 
     # Preemptively apply combiner lifting, until all runners support it.
     # These optimizations commute and are idempotent.
@@ -406,6 +369,8 @@ class PortableRunner(runner.PipelineRunner):
     if options.view_as(SetupOptions).sdk_location == 'default':
       options.view_as(SetupOptions).sdk_location = 'container'
 
+    experiments = options.view_as(DebugOptions).experiments or []
+
     # This is needed as we start a worker server if one is requested
     # but none is provided.
     if portable_options.environment_type == 'LOOPBACK':
@@ -413,9 +378,10 @@ class PortableRunner(runner.PipelineRunner):
           DebugOptions).lookup_experiment('use_loopback_process_worker', False)
       portable_options.environment_config, server = (
           worker_pool_main.BeamFnExternalWorkerPoolServicer.start(
-              state_cache_size=sdk_worker_main._get_state_cache_size(options),
+              state_cache_size=
+              sdk_worker_main._get_state_cache_size(experiments),
               data_buffer_time_limit_ms=
-              sdk_worker_main._get_data_buffer_time_limit_ms(options),
+              sdk_worker_main._get_data_buffer_time_limit_ms(experiments),
               use_process=use_loopback_process_worker))
       cleanup_callbacks = [functools.partial(server.stop, 1)]
     else:
@@ -433,13 +399,15 @@ class PortableRunner(runner.PipelineRunner):
         state_stream,
         cleanup_callbacks)
     if cleanup_callbacks:
-      # We wait here to ensure that we run the cleanup callbacks.
+      # Register an exit handler to ensure cleanup on exit.
+      atexit.register(functools.partial(result._cleanup, on_exit=True))
       _LOGGER.info(
-          'Waiting until the pipeline has finished because the '
-          'environment "%s" has started a component necessary for the '
-          'execution.',
+          'Environment "%s" has started a component necessary for the '
+          'execution. Be sure to run the pipeline using\n'
+          '  with Pipeline() as p:\n'
+          '    p.apply(..)\n'
+          'This ensures that the pipeline finishes before this program exits.',
           portable_options.environment_type)
-      result.wait_until_finish()
     return result
 
 
@@ -486,6 +454,7 @@ class PipelineResult(runner.PipelineResult):
     self._state_stream = state_stream
     self._cleanup_callbacks = cleanup_callbacks
     self._metrics = None
+    self._runtime_exception = None
 
   def cancel(self):
     try:
@@ -535,7 +504,12 @@ class PipelineResult(runner.PipelineResult):
     else:
       return 'unknown error'
 
-  def wait_until_finish(self):
+  def wait_until_finish(self, duration=None):
+    """
+    :param duration: The maximum time in milliseconds to wait for the result of
+    the execution. If None or zero, will wait until the pipeline finishes.
+    :return: The result of the pipeline, i.e. PipelineResult.
+    """
     def read_messages():
       previous_state = -1
       for message in self._message_stream:
@@ -553,27 +527,56 @@ class PipelineResult(runner.PipelineResult):
             previous_state = current_state
         self._messages.append(message)
 
-    t = threading.Thread(target=read_messages, name='wait_until_finish_read')
-    t.daemon = True
-    t.start()
+    message_thread = threading.Thread(
+        target=read_messages, name='wait_until_finish_read')
+    message_thread.daemon = True
+    message_thread.start()
 
+    if duration:
+      state_thread = threading.Thread(
+          target=functools.partial(self._observe_state, message_thread),
+          name='wait_until_finish_state_observer')
+      state_thread.daemon = True
+      state_thread.start()
+      start_time = time.time()
+      duration_secs = duration / 1000
+      while (time.time() - start_time < duration_secs and
+             state_thread.is_alive()):
+        time.sleep(1)
+    else:
+      self._observe_state(message_thread)
+
+    if self._runtime_exception:
+      raise self._runtime_exception
+
+    return self._state
+
+  def _observe_state(self, message_thread):
     try:
       for state_response in self._state_stream:
         self._state = self._runner_api_state_to_pipeline_state(
             state_response.state)
         if state_response.state in TERMINAL_STATES:
           # Wait for any last messages.
-          t.join(10)
+          message_thread.join(10)
           break
       if self._state != runner.PipelineState.DONE:
-        raise RuntimeError(
+        self._runtime_exception = RuntimeError(
             'Pipeline %s failed in state %s: %s' %
             (self._job_id, self._state, self._last_error_message()))
-      return self._state
+    except Exception as e:
+      self._runtime_exception = e
     finally:
       self._cleanup()
 
-  def _cleanup(self):
+  def _cleanup(self, on_exit=False):
+    if on_exit and self._cleanup_callbacks:
+      _LOGGER.info(
+          'Running cleanup on exit. If your pipeline should continue running, '
+          'be sure to use the following syntax:\n'
+          '  with Pipeline() as p:\n'
+          '    p.apply(..)\n'
+          'This ensures that the pipeline finishes before this program exits.')
     has_exception = None
     for callback in self._cleanup_callbacks:
       try:

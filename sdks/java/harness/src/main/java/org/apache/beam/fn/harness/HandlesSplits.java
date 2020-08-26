@@ -18,7 +18,9 @@
 package org.apache.beam.fn.harness;
 
 import com.google.auto.value.AutoValue;
+import java.util.List;
 import org.apache.beam.model.fnexecution.v1.BeamFnApi;
+import org.apache.beam.model.fnexecution.v1.BeamFnApi.BundleApplication;
 import org.apache.beam.sdk.fn.data.FnDataReceiver;
 
 /**
@@ -30,18 +32,19 @@ public interface HandlesSplits {
   /** Returns null if the split was unsuccessful. */
   SplitResult trySplit(double fractionOfRemainder);
 
-  /** Returns the current progress of the active element. */
+  /** Returns the current progress of the active element as a fraction between 0.0 and 1.0. */
   double getProgress();
 
   @AutoValue
   abstract class SplitResult {
     public static SplitResult of(
-        BeamFnApi.BundleApplication primaryRoot, BeamFnApi.DelayedBundleApplication residualRoot) {
-      return new AutoValue_HandlesSplits_SplitResult(primaryRoot, residualRoot);
+        List<BundleApplication> primaryRoots,
+        List<BeamFnApi.DelayedBundleApplication> residualRoots) {
+      return new AutoValue_HandlesSplits_SplitResult(primaryRoots, residualRoots);
     }
 
-    public abstract BeamFnApi.BundleApplication getPrimaryRoot();
+    public abstract List<BeamFnApi.BundleApplication> getPrimaryRoots();
 
-    public abstract BeamFnApi.DelayedBundleApplication getResidualRoot();
+    public abstract List<BeamFnApi.DelayedBundleApplication> getResidualRoots();
   }
 }

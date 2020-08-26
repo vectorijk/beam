@@ -18,6 +18,7 @@
 package org.apache.beam.fn.harness;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -27,6 +28,7 @@ import org.apache.beam.fn.harness.data.BeamFnTimerClient;
 import org.apache.beam.fn.harness.data.PCollectionConsumerRegistry;
 import org.apache.beam.fn.harness.data.PTransformFunctionRegistry;
 import org.apache.beam.fn.harness.state.BeamFnStateClient;
+import org.apache.beam.model.pipeline.v1.MetricsApi.MonitoringInfo;
 import org.apache.beam.model.pipeline.v1.RunnerApi;
 import org.apache.beam.model.pipeline.v1.RunnerApi.Coder;
 import org.apache.beam.model.pipeline.v1.RunnerApi.PCollection;
@@ -40,7 +42,7 @@ public interface PTransformRunnerFactory<T> {
   /**
    * Creates and returns a handler for a given PTransform. Note that the handler must support
    * processing multiple bundles. The handler will be discarded if an error is thrown during element
-   * processing, or during execution of start/finish.
+   * processing, or during execution of start/finish/reset.
    *
    * @param pipelineOptions Pipeline options
    * @param beamFnDataClient A client for handling inbound and outbound data streams.
@@ -60,8 +62,21 @@ public interface PTransformRunnerFactory<T> {
    *     registered within this multimap.
    * @param startFunctionRegistry A class to register a start bundle handler with.
    * @param finishFunctionRegistry A class to register a finish bundle handler with.
-   * @param addTearDownFunction A consumer to register a tear down handler with.
-   * @param splitListener A listener to be invoked when the PTransform splits itself.
+   * @param addResetFunction A consumer to register any reset methods. This should not invoke any
+   *     user code which should be done instead using the {@code finishFunctionRegistry}. The reset
+   *     method is guaranteed to be invoked after the bundle completes successfully and after {@code
+   *     T} becomes ineligible to receive method calls registered with {@code
+   *     addProgressRequestCallback} or {@code splitListener}.
+   * @param addTearDownFunction A consumer to register a tear down handler with. This method will be
+   *     invoked before {@code T} is eligible to become garbage collected.
+   * @param addProgressRequestCallback A consumer to register a callback whenever progress is being
+   *     requested. This method will be called concurrently to any methods registered with {@code
+   *     pCollectionConsumerRegistry}, {@code startFunctionRegistry}, and {@code
+   *     finishFunctionRegistry}.
+   * @param splitListener A listener to be invoked when the PTransform splits itself. This method
+   *     will be called concurrently to any methods registered with {@code
+   *     pCollectionConsumerRegistry}, {@code startFunctionRegistry}, and {@code
+   *     finishFunctionRegistry}.
    * @param bundleFinalizer Register callbacks that will be invoked when the runner completes the
    *     bundle. The specified instant provides the timeout on how long the finalization callback is
    *     valid for.
@@ -80,7 +95,9 @@ public interface PTransformRunnerFactory<T> {
       PCollectionConsumerRegistry pCollectionConsumerRegistry,
       PTransformFunctionRegistry startFunctionRegistry,
       PTransformFunctionRegistry finishFunctionRegistry,
+      Consumer<ThrowingRunnable> addResetFunction,
       Consumer<ThrowingRunnable> addTearDownFunction,
+      Consumer<ProgressRequestCallback> addProgressRequestCallback,
       BundleSplitListener splitListener,
       BundleFinalizer bundleFinalizer)
       throws IOException;
@@ -95,5 +112,14 @@ public interface PTransformRunnerFactory<T> {
      * instantiating an appropriate handler.
      */
     Map<String, PTransformRunnerFactory> getPTransformRunnerFactories();
+  }
+
+  /**
+   * A marker interface used to register providing additional monitoring information whenever
+   * progress is being requested.
+   */
+  @FunctionalInterface
+  interface ProgressRequestCallback {
+    List<MonitoringInfo> getMonitoringInfos() throws Exception;
   }
 }

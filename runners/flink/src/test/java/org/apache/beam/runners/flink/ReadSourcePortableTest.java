@@ -21,11 +21,11 @@ import java.io.Serializable;
 import java.util.Collections;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import org.apache.beam.model.jobmanagement.v1.JobApi.JobState.Enum;
+import org.apache.beam.model.jobmanagement.v1.JobApi.JobState;
 import org.apache.beam.model.pipeline.v1.RunnerApi;
 import org.apache.beam.runners.core.construction.Environments;
 import org.apache.beam.runners.core.construction.PipelineTranslation;
-import org.apache.beam.runners.fnexecution.jobsubmission.JobInvocation;
+import org.apache.beam.runners.jobsubmission.JobInvocation;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.GenerateSequence;
 import org.apache.beam.sdk.options.PipelineOptions;
@@ -86,7 +86,6 @@ public class ReadSourcePortableTest implements Serializable {
     options.as(FlinkPipelineOptions.class).setFlinkMaster("[local]");
     options.as(FlinkPipelineOptions.class).setStreaming(isStreaming);
     options.as(FlinkPipelineOptions.class).setParallelism(2);
-    options.as(FlinkPipelineOptions.class).setShutdownSourcesOnFinalWatermark(true);
     options
         .as(PortablePipelineOptions.class)
         .setDefaultEnvironmentType(Environments.ENVIRONMENT_EMBEDDED);
@@ -109,7 +108,7 @@ public class ReadSourcePortableTest implements Serializable {
                 new FlinkPipelineRunner(
                     options.as(FlinkPipelineOptions.class), null, Collections.emptyList()));
     jobInvocation.start();
-    while (jobInvocation.getState() != Enum.DONE) {
+    while (jobInvocation.getState() != JobState.Enum.DONE) {
       Thread.sleep(100);
     }
   }

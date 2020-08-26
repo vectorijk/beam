@@ -32,6 +32,7 @@ import org.apache.beam.runners.dataflow.worker.windmill.WindmillServerStub;
 import org.apache.beam.runners.dataflow.worker.windmill.WindmillServerStub.GetDataStream;
 import org.apache.beam.vendor.grpc.v1p26p0.com.google.protobuf.ByteString;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.util.concurrent.SettableFuture;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.Duration;
 
 /**
@@ -45,6 +46,7 @@ import org.joda.time.Duration;
  * #MAX_READS_PER_BATCH}.
  */
 public class MetricTrackingWindmillServerStub {
+
   private final AtomicInteger activeSideInputs = new AtomicInteger();
   private final AtomicInteger activeStateReads = new AtomicInteger();
   private final AtomicInteger activeHeartbeats = new AtomicInteger();
@@ -64,6 +66,7 @@ public class MetricTrackingWindmillServerStub {
   private static final Duration STREAM_TIMEOUT = Duration.standardSeconds(30);
 
   private static final class QueueEntry {
+
     final String computation;
     final Windmill.KeyedGetDataRequest request;
     final SettableFuture<Windmill.KeyedGetDataResponse> response;
@@ -79,16 +82,19 @@ public class MetricTrackingWindmillServerStub {
   }
 
   private static final class KeyAndComputation {
+
     final ByteString key;
+    final long shardingKey;
     final String computation;
 
-    KeyAndComputation(ByteString key, String computation) {
+    KeyAndComputation(ByteString key, long shardingKey, String computation) {
       this.key = key;
+      this.shardingKey = shardingKey;
       this.computation = computation;
     }
 
     @Override
-    public boolean equals(Object other) {
+    public boolean equals(@Nullable Object other) {
       if (this == other) {
         return true;
       }
@@ -96,12 +102,14 @@ public class MetricTrackingWindmillServerStub {
         return false;
       }
       KeyAndComputation that = (KeyAndComputation) other;
-      return this.key.equals(that.key) && this.computation.equals(that.computation);
+      return this.key.equals(that.key)
+          && this.shardingKey == that.shardingKey
+          && this.computation.equals(that.computation);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(key, computation);
+      return Objects.hash(key, shardingKey, computation);
     }
   }
 
@@ -158,7 +166,9 @@ public class MetricTrackingWindmillServerStub {
 
         computationBuilder.addRequests(entry.request);
         pendingResponses.put(
-            new KeyAndComputation(entry.request.getKey(), entry.computation), entry.response);
+            new KeyAndComputation(
+                entry.request.getKey(), entry.request.getShardingKey(), entry.computation),
+            entry.response);
       } while (numReads++ < MAX_READS_PER_BATCH && (entry = readQueue.poll()) != null);
 
       // Build the full GetDataRequest from the KeyedGetDataRequests pulled from the queue.
@@ -176,7 +186,9 @@ public class MetricTrackingWindmillServerStub {
           pendingResponses
               .get(
                   new KeyAndComputation(
-                      keyResponse.getKey(), computationResponse.getComputationId()))
+                      keyResponse.getKey(),
+                      keyResponse.getShardingKey(),
+                      computationResponse.getComputationId()))
               .set(keyResponse);
         }
       }

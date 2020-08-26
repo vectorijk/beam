@@ -17,6 +17,7 @@
  */
 package org.apache.beam.runners.core.construction;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,6 +37,7 @@ import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Lists;
 public class DefaultArtifactResolver implements ArtifactResolver {
   public static final ArtifactResolver INSTANCE = new DefaultArtifactResolver();
 
+  // Not threadsafe, access through register() and regesteredFns().
   private List<ResolutionFn> fns =
       Lists.newArrayList(
           (info) -> {
@@ -46,9 +48,13 @@ public class DefaultArtifactResolver implements ArtifactResolver {
             }
           });
 
+  private synchronized List<ResolutionFn> regesteredFns() {
+    return ImmutableList.copyOf(fns);
+  }
+
   private Function<RunnerApi.ArtifactInformation, Stream<RunnerApi.ArtifactInformation>> resolver =
       (info) -> {
-        for (ResolutionFn fn : Lists.reverse(fns)) {
+        for (ResolutionFn fn : Lists.reverse(regesteredFns())) {
           Optional<List<RunnerApi.ArtifactInformation>> resolved = fn.resolve(info);
           if (resolved.isPresent()) {
             return resolved.get().stream();
@@ -58,8 +64,26 @@ public class DefaultArtifactResolver implements ArtifactResolver {
       };
 
   @Override
-  public void register(ResolutionFn fn) {
+  public synchronized void register(ResolutionFn fn) {
     fns.add(fn);
+  }
+
+  @Override
+  public List<RunnerApi.ArtifactInformation> resolveArtifacts(
+      List<RunnerApi.ArtifactInformation> artifacts) {
+    for (ResolutionFn fn : Lists.reverse(regesteredFns())) {
+      List<RunnerApi.ArtifactInformation> moreResolved = new ArrayList<>();
+      for (RunnerApi.ArtifactInformation artifact : artifacts) {
+        Optional<List<RunnerApi.ArtifactInformation>> resolved = fn.resolve(artifact);
+        if (resolved.isPresent()) {
+          moreResolved.addAll(resolved.get());
+        } else {
+          moreResolved.add(artifact);
+        }
+      }
+      artifacts = moreResolved;
+    }
+    return artifacts;
   }
 
   @Override

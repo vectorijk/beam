@@ -152,8 +152,7 @@ public class WindowDoFnOperatorTest {
     assertThat(Iterables.size(timerInternals.pendingTimersById.keys()), is(1));
 
     assertThat(testHarness.numKeyedStateEntries(), is(6));
-    assertThat(windowDoFnOperator.currentOutputWatermark, is(1L));
-    assertThat(timerInternals.getMinOutputTimestampMs(), is(Long.MAX_VALUE));
+    assertThat(windowDoFnOperator.getCurrentOutputWatermark(), is(1L));
 
     // close window
     testHarness.processWatermark(100L);
@@ -162,8 +161,7 @@ public class WindowDoFnOperatorTest {
     assertThat(Iterables.size(timerInternals.pendingTimersById.keys()), is(0));
 
     assertThat(testHarness.numKeyedStateEntries(), is(3));
-    assertThat(windowDoFnOperator.currentOutputWatermark, is(100L));
-    assertThat(timerInternals.getMinOutputTimestampMs(), is(Long.MAX_VALUE));
+    assertThat(windowDoFnOperator.getCurrentOutputWatermark(), is(100L));
 
     testHarness.processWatermark(200L);
 

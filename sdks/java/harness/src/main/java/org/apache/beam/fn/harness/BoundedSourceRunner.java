@@ -85,7 +85,9 @@ public class BoundedSourceRunner<InputT extends BoundedSource<OutputT>, OutputT>
         PCollectionConsumerRegistry pCollectionConsumerRegistry,
         PTransformFunctionRegistry startFunctionRegistry,
         PTransformFunctionRegistry finishFunctionRegistry,
+        Consumer<ThrowingRunnable> addResetFunction,
         Consumer<ThrowingRunnable> tearDownFunctions,
+        Consumer<ProgressRequestCallback> addProgressRequestCallback,
         BundleSplitListener splitListener,
         BundleFinalizer bundleFinalizer) {
       ImmutableList.Builder<FnDataReceiver<WindowedValue<?>>> consumers = ImmutableList.builder();

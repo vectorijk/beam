@@ -34,8 +34,10 @@ import org.apache.beam.sdk.transforms.DoFn.ProcessElement;
 import org.apache.beam.sdk.transforms.DoFn.StartBundle;
 import org.apache.beam.sdk.transforms.DoFn.StateId;
 import org.apache.beam.sdk.transforms.DoFn.TimerId;
+import org.apache.beam.sdk.transforms.DoFn.TruncateRestriction;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
-import org.apache.beam.sdk.transforms.splittabledofn.Sizes;
+import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker.HasProgress;
+import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker.TruncateResult;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimator;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
@@ -93,10 +95,18 @@ public interface DoFnInvoker<InputT, OutputT> {
   /** Invoke the {@link DoFn.SplitRestriction} method on the bound {@link DoFn}. */
   void invokeSplitRestriction(ArgumentProvider<InputT, OutputT> arguments);
 
+  /** Invoke the {@link TruncateRestriction} method on the bound {@link DoFn}. */
+  <RestrictionT> TruncateResult<RestrictionT> invokeTruncateRestriction(
+      ArgumentProvider<InputT, OutputT> arguments);
+
   /**
-   * Invoke the {@link DoFn.GetSize} method on the bound {@link DoFn}. Falls back to get the size
-   * from the {@link RestrictionTracker} if it supports {@link Sizes.HasSize}, otherwise returns
-   * 1.0.
+   * Invoke the {@link DoFn.GetSize} method on the bound {@link DoFn}. Falls back to:
+   *
+   * <ol>
+   *   <li>get the work remaining from the {@link RestrictionTracker} if it supports {@link
+   *       HasProgress}.
+   *   <li>returning the constant {@link 1.0}.
+   * </ol>
    */
   double invokeGetSize(ArgumentProvider<InputT, OutputT> arguments);
 
@@ -167,6 +177,11 @@ public interface DoFnInvoker<InputT, OutputT> {
     /** Provide a reference to the input element. */
     InputT element(DoFn<InputT, OutputT> doFn);
 
+    /**
+     * Provide a reference to the input element key in {@link org.apache.beam.sdk.values.KV} pair.
+     */
+    Object key();
+
     /** Provide a reference to the input sideInput with the specified tag. */
     Object sideInput(String tagId);
 
@@ -232,6 +247,10 @@ public interface DoFnInvoker<InputT, OutputT> {
      */
     TimerMap timerFamily(String tagId);
 
+    /**
+     * Returns the timer id for the current timer of a {@link
+     * org.apache.beam.sdk.transforms.DoFn.TimerFamily}.
+     */
     String timerId(DoFn<InputT, OutputT> doFn);
   }
 
@@ -251,6 +270,12 @@ public interface DoFnInvoker<InputT, OutputT> {
     public InputT element(DoFn<InputT, OutputT> doFn) {
       throw new UnsupportedOperationException(
           String.format("Element unsupported in %s", getErrorContext()));
+    }
+
+    @Override
+    public Object key() {
+      throw new UnsupportedOperationException(
+          "Cannot access key as parameter outside of @OnTimer method.");
     }
 
     @Override
@@ -447,6 +472,11 @@ public interface DoFnInvoker<InputT, OutputT> {
     }
 
     @Override
+    public Object key() {
+      return delegate.key();
+    }
+
+    @Override
     public Object sideInput(String tagId) {
       return delegate.sideInput(tagId);
     }
@@ -512,8 +542,8 @@ public interface DoFnInvoker<InputT, OutputT> {
     }
 
     @Override
-    public TimerMap timerFamily(String tagId) {
-      return delegate.timerFamily(tagId);
+    public TimerMap timerFamily(String timerFamilyId) {
+      return delegate.timerFamily(timerFamilyId);
     }
 
     @Override

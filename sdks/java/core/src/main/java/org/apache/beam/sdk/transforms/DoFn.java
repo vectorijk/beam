@@ -24,7 +24,6 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import javax.annotation.Nullable;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.annotations.Experimental;
 import org.apache.beam.sdk.annotations.Experimental.Kind;
@@ -42,7 +41,6 @@ import org.apache.beam.sdk.transforms.splittabledofn.HasDefaultTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.HasDefaultWatermarkEstimator;
 import org.apache.beam.sdk.transforms.splittabledofn.ManualWatermarkEstimator;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
-import org.apache.beam.sdk.transforms.splittabledofn.Sizes;
 import org.apache.beam.sdk.transforms.splittabledofn.TimestampObservingWatermarkEstimator;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimator;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
@@ -54,6 +52,7 @@ import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TupleTag;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.WindowingStrategy;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 
@@ -90,7 +89,8 @@ import org.joda.time.Instant;
  * @param <InputT> the type of the (main) input elements
  * @param <OutputT> the type of the (main) output elements
  */
-public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayData {
+public abstract class DoFn<InputT extends @Nullable Object, OutputT extends @Nullable Object>
+    implements Serializable, HasDisplayData {
   /** Information accessible while within the {@link StartBundle} method. */
   @SuppressWarnings("ClassCanBeStatic") // Converting class to static is an API change.
   public abstract class StartBundleContext {
@@ -118,7 +118,7 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
      * <p><i>Note:</i> A splittable {@link DoFn} is not allowed to output from the {@link
      * FinishBundle} method.
      */
-    public abstract void output(@Nullable OutputT output, Instant timestamp, BoundedWindow window);
+    public abstract void output(OutputT output, Instant timestamp, BoundedWindow window);
 
     /**
      * Adds the given element to the output {@code PCollection} with the given tag at the given
@@ -271,10 +271,10 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
   @Experimental(Kind.TIMERS)
   public abstract class OnTimerContext extends WindowedContext {
 
-    /** Returns the timestamp of the current timer. */
+    /** Returns the output timestamp of the current timer. */
     public abstract Instant timestamp();
 
-    /** Returns the output timestamp of the current timer. */
+    /** Returns the firing timestamp of the current timer. */
     public abstract Instant fireTimestamp();
 
     /** Returns the window in which the timer is firing. */
@@ -282,6 +282,12 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
 
     /** Returns the time domain of the current timer. */
     public abstract TimeDomain timeDomain();
+  }
+
+  public abstract class OnWindowExpirationContext extends WindowedContext {
+
+    /** Returns the window in which the window expiration is firing. */
+    public abstract BoundedWindow window();
   }
 
   /**
@@ -481,6 +487,15 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
     String value();
   }
 
+  /**
+   * Parameter annotation for dereferencing input element key in {@link
+   * org.apache.beam.sdk.values.KV} pair.
+   */
+  @Documented
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target(ElementType.PARAMETER)
+  public @interface Key {}
+
   /** Annotation for specifying specific fields that are accessed in a Schema PCollection. */
   @Retention(RetentionPolicy.RUNTIME)
   @Target({ElementType.FIELD, ElementType.PARAMETER})
@@ -607,8 +622,8 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
    *
    * <ul>
    *   <li>If one of its arguments is tagged with the {@link Element} annotation, then it will be
-   *       passed the current element being processed; the argument type must match the input type
-   *       of this DoFn.
+   *       passed the current element being processed. The argument type must match the input type
+   *       of this DoFn exactly, or both types must have equivalent schemas registered.
    *   <li>If one of its arguments is tagged with the {@link Timestamp} annotation, then it will be
    *       passed the timestamp of the current element being processed; the argument must be of type
    *       {@link Instant}.
@@ -649,14 +664,19 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
    * <ul>
    *   <li>The type of restrictions used by all of these methods must be the same.
    *   <li>It <i>must</i> define a {@link GetInitialRestriction} method.
-   *   <li>It <i>should</i> define a {@link GetSize} method or ensure that the {@link
-   *       RestrictionTracker} implements {@link Sizes.HasSize}. Poor auto-scaling of workers and/or
-   *       splitting may result if neither is defined or if the size is an inaccurate representation
-   *       of work. See {@link GetSize} and {@link Sizes.HasSize} for further details.
+   *   <li>It <i>may</i> define a {@link GetSize} method or ensure that the {@link
+   *       RestrictionTracker} implements {@link RestrictionTracker.HasProgress}. Poor auto-scaling
+   *       of workers and/or splitting may result if size or progress is an inaccurate
+   *       representation of work. See {@link GetSize} and {@link RestrictionTracker.HasProgress}
+   *       for further details.
    *   <li>It <i>should</i> define a {@link SplitRestriction} method. This method enables runners to
    *       perform bulk splitting initially allowing for a rapid increase in parallelism. See {@link
    *       RestrictionTracker#trySplit} for details about splitting when the current element and
    *       restriction are actively being processed.
+   *   <li>It <i>may</i> define a {@link TruncateRestriction} method to choose how to truncate a
+   *       restriction such that it represents a finite amount of work when the pipeline is
+   *       draining. See {@link TruncateRestriction} and {@link RestrictionTracker#isBounded} for
+   *       additional details.
    *   <li>It <i>may</i> define a {@link NewTracker} method returning a subtype of {@code
    *       RestrictionTracker<R>} where {@code R} is the restriction type returned by {@link
    *       GetInitialRestriction}. This method is optional only if the restriction type returned by
@@ -684,8 +704,8 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
    *   <li>One of its arguments must be a {@link RestrictionTracker}. The argument must be of the
    *       exact type {@code RestrictionTracker<RestrictionT, PositionT>}.
    *   <li>If one of its arguments is tagged with the {@link Element} annotation, then it will be
-   *       passed the current element being processed; the argument type must match the input type
-   *       of this DoFn.
+   *       passed the current element being processed. The argument type must match the input type
+   *       of this DoFn exactly, or both types must have equivalent schemas registered.
    *   <li>If one of its arguments is tagged with the {@link Restriction} annotation, then it will
    *       be passed the current restriction being processed; the argument must be of type {@code
    *       RestrictionT}.
@@ -953,23 +973,20 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
    *
    * <p>Returns a double representing the size of the current element and restriction.
    *
-   * <p>Splittable {@link DoFn}s should only provide this method if the default implementation
-   * within the {@link RestrictionTracker} is an inaccurate representation of known work.
+   * <p>Splittable {@link DoFn}s should only provide this method if the default {@link
+   * RestrictionTracker.HasProgress} implementation within the {@link RestrictionTracker} is an
+   * inaccurate representation of known work.
    *
    * <p>It is up to each splittable {@DoFn} to convert between their natural representation of
    * outstanding work and this representation. For example:
    *
    * <ul>
-   *   <li>Block based file source (e.g. Avro): From the end of the current block, the remaining
-   *       number of bytes to the end of the restriction.
+   *   <li>Block based file source (e.g. Avro): The number of bytes that will be read from the file.
    *   <li>Pull based queue based source (e.g. Pubsub): The local/global size available in number of
    *       messages or number of {@code message bytes} that have not been processed.
-   *   <li>Key range based source (e.g. Shuffle, Bigtable, ...): Scale the start key to be one and
-   *       end key to be zero and interpolate the position of the next splittable key as the size.
-   *       If information about the probability density function or cumulative distribution function
-   *       is available, size interpolation can be improved. Alternatively, if the number of encoded
-   *       bytes for the keys and values is known for the key range, the number of remaining bytes
-   *       can be used.
+   *   <li>Key range based source (e.g. Shuffle, Bigtable, ...): Typically {@code 1.0} unless
+   *       additional details such as the number of bytes for keys and values is known for the key
+   *       range.
    * </ul>
    */
   @Documented
@@ -1040,6 +1057,59 @@ public abstract class DoFn<InputT, OutputT> implements Serializable, HasDisplayD
   @Target(ElementType.METHOD)
   @Experimental(Kind.SPLITTABLE_DO_FN)
   public @interface SplitRestriction {}
+
+  /**
+   * Annotation for the method that truncates the restriction of a <a
+   * href="https://s.apache.org/splittable-do-fn">splittable</a> {@link DoFn} into a bounded one.
+   * This method is invoked when a pipeline is being <a
+   * href="https://docs.google.com/document/d/1NExwHlj-2q2WUGhSO4jTu8XGhDPmm3cllSN8IMmWci8/edit#">drained</a>.
+   *
+   * <p>This method is used to perform truncation of the restriction while it is not actively being
+   * processed.
+   *
+   * <p>Signature: {@code @Nullable TruncateResult<RestrictionT> truncateRestriction(<arguments>);}
+   *
+   * <p>This method must satisfy the following constraints:
+   *
+   * <ul>
+   *   <li>If one of its arguments is tagged with the {@link Element} annotation, then it will be
+   *       passed the current element being processed; the argument must be of type {@code InputT}.
+   *       Note that automatic conversion of {@link Row}s and {@link FieldAccess} parameters are
+   *       currently unsupported.
+   *   <li>If one of its arguments is tagged with the {@link Restriction} annotation, then it will
+   *       be passed the current restriction being processed; the argument must be of type {@code
+   *       RestrictionT}.
+   *   <li>If one of its arguments is tagged with the {@link Timestamp} annotation, then it will be
+   *       passed the timestamp of the current element being processed; the argument must be of type
+   *       {@link Instant}.
+   *   <li>If one of its arguments is a {@link RestrictionTracker}, then it will be passed a tracker
+   *       that is initialized for the current {@link Restriction}. The argument must be of the
+   *       exact type {@code RestrictionTracker<RestrictionT, PositionT>}.
+   *   <li>If one of its arguments is a subtype of {@link BoundedWindow}, then it will be passed the
+   *       window of the current element. When applied by {@link ParDo} the subtype of {@link
+   *       BoundedWindow} must match the type of windows on the input {@link PCollection}. If the
+   *       window is not accessed a runner may perform additional optimizations.
+   *   <li>If one of its arguments is of type {@link PaneInfo}, then it will be passed information
+   *       about the current triggering pane.
+   *   <li>If one of the parameters is of type {@link PipelineOptions}, then it will be passed the
+   *       options for the current pipeline.
+   * </ul>
+   *
+   * <p>Returns a truncated restriction representing a bounded amount of work that must be processed
+   * before the pipeline can be drained or {@code null} if no work is necessary.
+   *
+   * <p>The default behavior when a pipeline is being drained is that {@link
+   * org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker.IsBounded#BOUNDED}
+   * restrictions process entirely while {@link
+   * org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker.IsBounded#UNBOUNDED}
+   * restrictions process till a checkpoint is possible. Splittable {@link DoFn}s should only
+   * provide this method if they want to change this default behavior.
+   */
+  @Documented
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target(ElementType.METHOD)
+  @Experimental(Kind.SPLITTABLE_DO_FN)
+  public @interface TruncateRestriction {}
 
   /**
    * Annotation for the method that creates a new {@link RestrictionTracker} for the restriction of
