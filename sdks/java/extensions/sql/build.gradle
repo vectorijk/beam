@@ -47,6 +47,9 @@ dependencies {
   fmppTemplates library.java.vendored_calcite_1_20_0
   compile project(":sdks:java:core")
   compile project(":sdks:java:extensions:join-library")
+  provided(project(":sdks:java:extensions:sql:hive-udf")) {
+    exclude group: 'org.apache.parquet', module: 'parquet-hadoop-bundle'
+  }
   compile project(path: ":runners:direct-java", configuration: "shadow")
   compile library.java.commons_codec
   compile library.java.commons_csv
