@@ -84,11 +84,14 @@ vendorJava(
                 "org.easymock:easymock:4.1",
                 "org.json:json:20190722",
                 "org.testng:testng:7.1.0",
+                "logkit:logkit:1.0.1",
         ],
         runtimeDependencies: [
                 library.java.slf4j_api,
                 "org.apache.logging.log4j:log4j-api:2.6.2",
                 "commons-logging:commons-logging:1.2",
+
+                "avalon-framework:avalon-framework:4.1.5",
         ],
         testDependencies: [
                 "junit:junit:4.12",
